@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>النظام الشمسي التفاعلي ثلاثي الأبعاد</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="loader"></div>
+        <div class="loading-text">جاري تحميل النظام الشمسي...</div>
+    </div>
+
+    <div id="info-panel" class="hidden">
+        <div class="close-btn">&times;</div>
+        <h2 id="planet-name"></h2>
+        <div id="planet-info"></div>
+    </div>
+
+    <div id="controls-panel">
+        <div class="control-btn" id="toggle-orbits">إظهار/إخفاء المدارات</div>
+        <div class="control-btn" id="toggle-info">معلومات</div>
+        <div class="control-btn" id="toggle-speed">تسريع/إبطاء</div>
+        <div class="control-btn" id="reset-view">إعادة ضبط المنظور</div>
+    </div>
+
+    <div id="planet-selector">
+        <div class="planet-option" data-planet="sun">الشمس</div>
+        <div class="planet-option" data-planet="mercury">عطارد</div>
+        <div class="planet-option" data-planet="venus">الزهرة</div>
+        <div class="planet-option" data-planet="earth">الأرض</div>
+        <div class="planet-option" data-planet="mars">المريخ</div>
+        <div class="planet-option" data-planet="jupiter">المشتري</div>
+        <div class="planet-option" data-planet="saturn">زحل</div>
+        <div class="planet-option" data-planet="uranus">أورانوس</div>
+        <div class="planet-option" data-planet="neptune">نبتون</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.min.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
