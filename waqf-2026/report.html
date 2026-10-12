@@ -1,0 +1,195 @@
+<title>محفظة وقف التوزيعات 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@600;800&display=swap">
+<style>
+/* Layout: single reading column, ledger-style tables, figures set like a waqf deed summary */
+:root{
+  --bg:#F7F8F5; --surface:#FFFFFF; --fg:#18231F; --muted:#5C6B64; --line:#DCE3DE;
+  --accent:#1E5B4A; --accent-soft:#E3EEE9; --gold:#A47E1B; --gold-soft:#F6EED7;
+  --good:#1B7F4C; --warn:#9A6B00; --bad:#B3261E; --bad-soft:#F8E4E2;
+  --display:"Noto Kufi Arabic","IBM Plex Sans Arabic",Tahoma,sans-serif;
+  --body:"IBM Plex Sans Arabic",Tahoma,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1613; --surface:#16201C; --fg:#E6ECE8; --muted:#9DB0A7; --line:#2A3832;
+  --accent:#6CC3A5; --accent-soft:#1C3029; --gold:#D9B65A; --gold-soft:#2C2614;
+  --good:#5FCB92; --warn:#E0B44C; --bad:#F08A80; --bad-soft:#3A1E1C; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1613; --surface:#16201C; --fg:#E6ECE8; --muted:#9DB0A7; --line:#2A3832;
+  --accent:#6CC3A5; --accent-soft:#1C3029; --gold:#D9B65A; --gold-soft:#2C2614;
+  --good:#5FCB92; --warn:#E0B44C; --bad:#F08A80; --bad-soft:#3A1E1C; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.75;direction:rtl}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:28px 64px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.4;margin:0}
+h1{font-size:clamp(26px,4.6vw,40px);font-weight:800}
+h2{font-size:22px;font-weight:800;color:var(--accent);margin-bottom:14px}
+h3{font-size:16px;font-weight:600}
+p{margin:0 0 12px;max-width:70ch}
+.eyebrow{font-size:13px;color:var(--gold);font-weight:600;letter-spacing:.02em}
+header{border-bottom:2px solid var(--accent);padding-bottom:22px;margin-bottom:28px;display:grid;gap:10px}
+.meta{color:var(--muted);font-size:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:10px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.kpi b{display:block;font-family:var(--display);font-size:24px;color:var(--accent);font-variant-numeric:tabular-nums}
+.kpi span{font-size:13px;color:var(--muted)}
+section{margin-top:40px}
+.verdict{background:var(--accent-soft);border-radius:10px;padding:18px 20px}
+.verdict ul{margin:0;padding-inline-start:20px}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums;min-width:640px}
+th,td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--accent-soft);font-weight:600;color:var(--fg);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+tfoot td{font-weight:700;background:var(--gold-soft)}
+.num{text-align:left;direction:ltr;white-space:nowrap}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 10px;border-radius:999px;white-space:nowrap}
+.in{background:var(--accent-soft);color:var(--good)} .cond{background:var(--gold-soft);color:var(--warn)} .out{background:var(--bad-soft);color:var(--bad)}
+.alloc{display:flex;height:34px;border-radius:8px;overflow:hidden;margin:6px 0 10px}
+.alloc div{height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-inline-end:6px;vertical-align:middle}
+.bars{display:grid;gap:8px;margin-top:8px}
+.bar{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;font-size:13px}
+.bar .track{background:var(--accent-soft);height:14px;border-radius:4px;position:relative;overflow:hidden}
+.bar .fill{position:absolute;inset-block:0;inset-inline-start:0;background:var(--accent);border-radius:4px}
+.bar .cons{position:absolute;inset-block:0;inset-inline-start:0;background:var(--gold);opacity:.55;border-radius:4px}
+.bar .v{text-align:left;direction:ltr;font-variant-numeric:tabular-nums}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;min-width:0}
+.card ul{margin:6px 0 0;padding-inline-start:18px;font-size:14.5px}
+.steps{display:grid;gap:0;border-inline-start:2px solid var(--line);margin-inline-start:6px}
+.step{position:relative;padding:0 22px 16px 0}
+.step::before{content:"";position:absolute;inset-inline-start:-7px;top:9px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--accent)}
+.step .d{font-size:13px;color:var(--gold);font-weight:600}
+.note{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px;margin-top:40px}
+.note a{color:var(--accent);word-break:break-all}
+@media (max-width:560px){.bar{grid-template-columns:105px 1fr 60px}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">دراسة استثمارية لوقف خيري · بيانات حتى 12 أكتوبر 2026</div>
+  <h1>محفظة وقف التوزيعات 2026</h1>
+  <p class="meta">وقف بقيمة 1,500,000 ريال يُستثمر في أسهم سعودية متوافقة شرعياً تصرف غلّتها لجمعية خيرية. البيانات من أرقام وتداول وإفصاحات الشركات، مع مراجعة ما تيسر من حسابات المحللين في منصة إكس.</p>
+  <div class="kpis">
+    <div class="kpi"><b>11</b><span>مركزاً في 7 قطاعات، ولا يتجاوز أي مركز 15%</span></div>
+    <div class="kpi"><b>5.3% – 5.8%</b><span>العائد النقدي المتوقع سنوياً (متحفظ – أساسي)</span></div>
+    <div class="kpi"><b>79 – 87 ألف</b><span>إجمالي التوزيعات المتوقعة سنوياً بالريال</span></div>
+    <div class="kpi"><b>63 – 70 ألف</b><span>المصروف للجمعية سنوياً بعد إعادة استثمار 20%</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>الخلاصة</h2>
+  <div class="verdict">
+    <ul>
+      <li><strong>القلب:</strong> الراجحي وإس تي سي وأرامكو والإنماء، وتشكل 48% من المحفظة. ربحيتها قوية وتوزيعاتها منتظمة.</li>
+      <li><strong>الدخل المرتفع:</strong> جرير والنهدي وسابك للمغذيات وأسمنت السعودية وإكسترا، وتشكل 40% من المحفظة. عائدها بين 5.6% و9%.</li>
+      <li><strong>العقار المدر:</strong> صندوقا جدوى ريت السعودية والراجحي ريت، بنسبة 12%، ويوزعان كل ربع.</li>
+      <li><strong>المستبعد من قائمتك:</strong> سابك وسبكيم وذيب والدواء وسدكو ريت. سابك وسبكيم خسرتا، وذيب أوقف توزيعاته، والدواء يوزع أكثر من أرباحه، وسدكو ريت مديونيته مرتفعة بفائدة متغيرة.</li>
+      <li><strong>مقارنة لا بد منها:</strong> المرابحة تعطي اليوم قرابة 5% بعد رفع ساما للفائدة. ميزة هذه المحفظة نمو الدخل والأصل على المدى الطويل، لا العائد الحالي وحده.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>المحفظة المقترحة</h2>
+  <div class="alloc" id="alloc" role="img" aria-label="التوزيع القطاعي"></div>
+  <div class="legend" id="legend"></div>
+  <div class="tbl" style="margin-top:14px">
+    <table>
+      <thead><tr><th>السهم / الصندوق</th><th>القطاع</th><th>الوزن</th><th>المبلغ</th><th>السعر</th><th>عدد الأسهم</th><th>توزيع السهم السنوي</th><th>العائد</th><th>الدخل السنوي</th></tr></thead>
+      <tbody id="pt"></tbody>
+      <tfoot><tr><td>الإجمالي</td><td></td><td class="num">100%</td><td class="num">1,500,000</td><td></td><td></td><td></td><td class="num">5.8%</td><td class="num">87,295</td></tr></tfoot>
+    </table>
+  </div>
+  <p class="meta" style="margin-top:8px">الأسعار من آخر إغلاق في 11–12 أكتوبر 2026. عدد الأسهم بعد خصم عمولة تقديرية 0.17%. الدخل هنا للسيناريو الأساسي، والسيناريو المتحفظ يتوقع 79,103 ريالات.</p>
+
+  <h3 style="margin-top:22px">الدخل السنوي المتوقع لكل مركز (ريال)</h3>
+  <div class="legend" style="margin-top:4px"><span><i style="background:var(--accent)"></i>أساسي</span><span><i style="background:var(--gold);opacity:.55"></i>متحفظ</span></div>
+  <div class="bars" id="bars"></div>
+</section>
+
+<section>
+  <h2>حكم الأسهم التي اقترحتها</h2>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>السهم</th><th>العائد (آخر 12 شهراً)</th><th>نمو الربح (النصف الأول 2026)</th><th>القرار</th><th>السبب</th></tr></thead>
+      <tbody id="ut"></tbody>
+    </table>
+  </div>
+  <p class="meta" style="margin-top:8px">أضفت من خارج قائمتك: أرامكو، جرير، أسمنت السعودية، جدوى ريت، والراجحي ريت. وبقي البلاد واليمامة والمواساة بدائل احتياطية. المجموع 28 سهماً وصندوقاً مقيَّماً، وتفاصيلها في ملف Excel.</p>
+</section>
+
+<section>
+  <h2>القواعد التي تحمي الوقف</h2>
+  <div class="grid2">
+    <div class="card"><h3>حدود التنويع</h3><ul><li>لا يتجاوز سهم واحد 15% عند الشراء، ويعاد التوازن إذا بلغ 20%.</li><li>لا يتجاوز قطاع واحد 25%.</li><li>لا تتجاوز صناديق الريت 15%.</li></ul></div>
+    <div class="card"><h3>صرف الغلّة</h3><ul><li>تُصرف 80% من التوزيعات للجمعية.</li><li>يُعاد استثمار 20% لحماية الأصل من التضخم.</li><li>يُخصم مبلغ التطهير الشرعي قبل الصرف.</li></ul></div>
+    <div class="card"><h3>متى يُستبعد السهم</h3><ul><li>إذا خفّض توزيعه مرتين متتاليتين.</li><li>إذا خسر سنتين متتاليتين.</li><li>إذا وزّع من غير الأرباح.</li><li>إذا فقد التوافق الشرعي.</li><li>يُستبدل خلال 90 يوماً من تحقق أي شرط.</li></ul></div>
+    <div class="card"><h3>الحوكمة</h3><ul><li>حساب بنكي مستقل باسم الوقف، وفق اشتراط الهيئة العامة للأوقاف.</li><li>سياسة استثمار وتوزيع مكتوبة.</li><li>تقرير ربعي للجمعية.</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <h2>خطة التنفيذ</h2>
+  <div class="steps">
+    <div class="step"><div class="d">13 – 22 أكتوبر</div>يعتمد الناظر سياسة الاستثمار، وتعرض القائمة على الهيئة الشرعية. أهم ما يُعرض عليها: إكسترا وأرامكو ونسب التطهير.</div>
+    <div class="step"><div class="d">14 – 25 أكتوبر</div>فتح حساب بنكي ومحفظة استثمارية باسم الوقف، والبدء بتسجيله لدى الهيئة العامة للأوقاف.</div>
+    <div class="step"><div class="d">26 أكتوبر – 2 نوفمبر</div>الدفعة الأولى: 50% من كل مركز. يُفضل الشراء قبل تاريخ استحقاق توزيع إس تي سي للربع الثالث.</div>
+    <div class="step"><div class="d">27 أكتوبر – 12 نوفمبر</div>مراجعة نتائج الربع الثالث 2026، واستبدال أي سهم يخفض توزيعه أو يعلن خسارة.</div>
+    <div class="step"><div class="d">15 نوفمبر – 15 ديسمبر</div>الدفعة الثانية: الـ50% المتبقية، على أمرين أو ثلاثة لتقليل أثر التوقيت.</div>
+    <div class="step"><div class="d">كل ربع، ثم مراجعة سنوية في أبريل 2027</div>تقرير ربعي بالتوزيعات المستلمة، ومراجعة سنوية لإعادة التوازن بعد النتائج السنوية.</div>
+  </div>
+</section>
+
+<section>
+  <h2>أبرز المخاطر</h2>
+  <div class="grid2">
+    <div class="card"><h3>تخفيض التوزيعات</h3><p>حدث في 2026 لسابك وذيب، وهو مرجح للدواء. يعالَج بالتنويع على 11 مركزاً واستبعاد من يوزع أكثر من أرباحه.</p></div>
+    <div class="card"><h3>السلع والنفط</h3><p>أرامكو وسابك للمغذيات معاً 18% فقط من المحفظة. توزيعات أرامكو تفوق تدفقها النقدي الحر في 2026، فتلزم متابعتها.</p></div>
+    <div class="card"><h3>الفائدة</h3><p>رفعت ساما الفائدة في سبتمبر 2026، وهذا يضغط على صناديق الريت ذات الديون. لذلك اخترنا صناديق منخفضة المديونية واستبعدنا سدكو ريت.</p></div>
+    <div class="card"><h3>الحكم الشرعي</h3><p>قائمة العصيمي لم تُحدّث على أرقام منذ أغسطس 2025، ولا تصنف البنوك. القرار النهائي للهيئة الشرعية للجمعية.</p></div>
+  </div>
+</section>
+
+<div class="note">
+  <p><strong>تنبيه:</strong> هذه دراسة تحليلية مبنية على بيانات منشورة، وليست توصية من جهة مرخصة من هيئة السوق المالية. التوزيعات المستقبلية تقديرات غير مضمونة. تحقق من الأسعار لحظة التنفيذ، واعرض القائمة على الهيئة الشرعية قبل الشراء.</p>
+  <p><strong>أبرز المصادر:</strong>
+    <a href="https://www.argaam.com/ar/company/shariahcompanies">قوائم التوافق الشرعي — أرقام</a> ·
+    <a href="https://www.stc.com/content/dam/groupsites/en/pdf/divident-policy-new.pdf">سياسة توزيع إس تي سي</a> ·
+    <a href="https://www.aramco.com/en/news-media/news/2026/aramco-announces-second-quarter-and-half-year-2026-results">نتائج أرامكو النصف الأول 2026</a> ·
+    <a href="https://www.sama.gov.sa/en-us/MediaCenter/News/Pages/news-1169.aspx">قرار ساما سبتمبر 2026</a> ·
+    <a href="https://cma.gov.sa/Market/imf/Documents/0511-1-23-026.pdf">شروط صندوق الإنماء وريف الوقفي</a> ·
+    <a href="https://www.argaam.com/ar/market-daily-report/3/62421">التقرير اليومي لأرقام</a>.
+    القائمة الكاملة (25 مصدراً) في ملف Excel، في ورقة «المصادر».</p>
+</div>
+</div>
+
+<script>
+const fmt=n=>Math.round(n).toLocaleString('en-US');
+const S={"البنوك":"#1E5B4A","الاتصالات":"#3F8C76","الطاقة":"#A47E1B","التجزئة":"#C98E3B","الرعاية الصحية":"#5E7FA8","المواد الأساسية":"#8C6D9E","صناديق الريت":"#7A8F86"};
+const P=[["مصرف الراجحي","البنوك",.15,61.95,2.43,2.43],["إس تي سي","الاتصالات",.15,42.22,2.20,2.20],["مصرف الإنماء","البنوك",.08,23.63,1.00,.75],["أرامكو السعودية","الطاقة",.10,25.76,1.36,1.36],["جرير للتسويق","التجزئة",.12,16.02,.95,.85],["النهدي الطبية","الرعاية الصحية",.10,89.50,5.60,5.00],["سابك للمغذيات","المواد الأساسية",.08,115.30,7.00,5.50],["إكسترا *","التجزئة",.05,55.70,5.00,4.00],["أسمنت السعودية","المواد الأساسية",.05,26.16,1.80,1.60],["جدوى ريت السعودية","صناديق الريت",.06,8.31,.80,.72],["الراجحي ريت","صناديق الريت",.06,7.79,.52,.48]];
+const tb=document.getElementById('pt'),bars=document.getElementById('bars');let rows=[];
+P.forEach(([n,s,w,p,b,c])=>{const amt=1500000*w,sh=Math.floor(amt/(p*1.0017)),inc=sh*b,ic=sh*c;rows.push([n,inc,ic]);
+ tb.insertAdjacentHTML('beforeend',`<tr><td>${n}</td><td><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${S[s]};margin-inline-end:6px"></i>${s}</td><td class="num">${Math.round(w*100)}%</td><td class="num">${fmt(amt)}</td><td class="num">${p.toFixed(2)}</td><td class="num">${fmt(sh)}</td><td class="num">${b.toFixed(2)}</td><td class="num">${(b/p*100).toFixed(1)}%</td><td class="num">${fmt(inc)}</td></tr>`)});
+tb.insertAdjacentHTML('beforeend',`<tr><td colspan="9" style="font-size:12.5px;color:var(--muted)">* إكسترا مشروطة بموافقة الهيئة الشرعية لوجود نشاط تمويل استهلاكي، وبديلها المقترح أسمنت اليمامة أو بنك البلاد.</td></tr>`);
+const max=Math.max(...rows.map(r=>r[1]));
+rows.sort((a,b)=>b[1]-a[1]).forEach(([n,i,c])=>bars.insertAdjacentHTML('beforeend',`<div class="bar"><span>${n}</span><div class="track"><div class="fill" style="width:${i/max*100}%"></div><div class="cons" style="width:${c/max*100}%"></div></div><span class="v">${fmt(i)}</span></div>`));
+const agg={};P.forEach(r=>agg[r[1]]=(agg[r[1]]||0)+r[2]);
+const al=document.getElementById('alloc'),lg=document.getElementById('legend');
+Object.entries(agg).forEach(([s,w])=>{al.insertAdjacentHTML('beforeend',`<div style="width:${w*100}%;background:${S[s]}" title="${s} ${Math.round(w*100)}%"></div>`);lg.insertAdjacentHTML('beforeend',`<span><i style="background:${S[s]}"></i>${s} ${Math.round(w*100)}%</span>`)});
+const U=[["الراجحي","3.9%","+14%","in","ضمن المحفظة","أقوى ربحية، توزيع نصف سنوي متنامٍ (1.26 ريال عن النصف الأول)"],
+["الإنماء","3.2% (4.2% متوقع)","+6%","in","ضمن المحفظة","توزيع ربعي 0.25 ريال، ونسبة التوزيع 46% فقط من الربح"],
+["إس تي سي","5.2%","−2%","in","ضمن المحفظة","سياسة معلنة 0.55 ريال كل ربع حتى الربع الثالث 2027"],
+["سدكو كابيتال ريت","8.4%","FFO +43%","out","مستبعد حالياً","ديونه 53% من أصوله بفائدة متغيرة، وله صفقة استحواذ بـ707 ملايين"],
+["ذيب","3.8%","−45%","out","مستبعد","لم يوزع عن الربعين الأول والثاني 2026، وديونه مرتفعة"],
+["إكسترا","9.0%","+2.4%","cond","ضمن بوزن 5% (مشروط)","عائد مرتفع، وغير مدرج في قائمة العصيمي بسبب التمويل الاستهلاكي"],
+["النهدي","6.3%","−8.7%","in","ضمن المحفظة","توزيع ثابت، وديون منخفضة، ومتوافق في القوائم الثلاث"],
+["الدواء","7.3%","−73%","out","مستبعد","التوزيع يعادل ضعف الأرباح، والتخفيض مرجح"],
+["سابك","5.7%","خسارة","out","مستبعد","خسارة 25.8 مليار في 2025، وخُفّض التوزيع 27%"],
+["سابك للمغذيات","6.1%","−21%","in","ضمن بوزن 8%","أعلى عائد بين الشركات الكبرى؛ وزن محدود لتذبذب أسعار الأسمدة"],
+["سبكيم","—","خسارة","out","مستبعد","أول خسارة سنوية في تاريخه، ولا توزيع عن 2026"]];
+const ut=document.getElementById('ut');U.forEach(([n,y,g,c,d,w])=>ut.insertAdjacentHTML('beforeend',`<tr><td><strong>${n}</strong></td><td class="num">${y}</td><td class="num">${g}</td><td><span class="pill ${c}">${d}</span></td><td>${w}</td></tr>`));
+</script>
