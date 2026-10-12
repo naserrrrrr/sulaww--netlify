@@ -1,0 +1,461 @@
+<title>أسهم الوقف العشرة</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@600;700;800&display=swap">
+<style>
+/* Layout: screener board — score map on top, ten stock tiles, a builder, and a detail drawer per stock */
+:root{
+  --bg:#F4F6F3; --surface:#FFFFFF; --sunk:#EDF1EE; --fg:#16211D; --muted:#5A6962; --faint:#8A9791; --line:#DDE4DF;
+  --accent:#1E5B4A; --accent-2:#2F7A63; --accent-soft:#E2EEE8; --gold:#A87C10; --gold-soft:#F7EDD2;
+  --good:#1B7F4C; --warn:#9A6B00; --bad:#B3261E; --good-soft:#E1F2E8; --warn-soft:#FBF0D6; --bad-soft:#F9E3E1;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --display:"Noto Kufi Arabic","IBM Plex Sans Arabic",Tahoma,sans-serif;
+  --body:"IBM Plex Sans Arabic",Tahoma,"Segoe UI",sans-serif;
+  --shadow:0 1px 2px rgba(20,40,30,.06),0 4px 16px rgba(20,40,30,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1512; --surface:#151F1B; --sunk:#111A16; --fg:#E5ECE8; --muted:#9CAEA6; --faint:#6F8079; --line:#273530;
+  --accent:#6CC3A5; --accent-2:#4FA88A; --accent-soft:#1B2E27; --gold:#E0BC5C; --gold-soft:#2D2714;
+  --good:#5FCB92; --warn:#E0B44C; --bad:#F08A80; --good-soft:#16301F; --warn-soft:#2E2610; --bad-soft:#3A1D1B;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1512; --surface:#151F1B; --sunk:#111A16; --fg:#E5ECE8; --muted:#9CAEA6; --faint:#6F8079; --line:#273530;
+  --accent:#6CC3A5; --accent-2:#4FA88A; --accent-soft:#1B2E27; --gold:#E0BC5C; --gold-soft:#2D2714;
+  --good:#5FCB92; --warn:#E0B44C; --bad:#F08A80; --good-soft:#16301F; --warn-soft:#2E2610; --bad-soft:#3A1D1B;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25); color-scheme:dark}
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.65;direction:rtl}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:18px;padding-block:24px 70px}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.35;text-wrap:balance}
+h1{font-size:clamp(26px,4vw,38px);font-weight:800}
+h2{font-size:19px;font-weight:700}
+h3{font-size:15px;font-weight:700}
+.num,.tn{font-variant-numeric:tabular-nums}
+.ltr{direction:ltr;unicode-bidi:isolate;display:inline-block}
+.muted{color:var(--muted)} .small{font-size:12.5px}
+a{color:var(--accent)}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:6px}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:14px;padding-bottom:18px;border-bottom:2px solid var(--accent)}
+.eyebrow{color:var(--gold);font-weight:600;font-size:13px}
+.stamp{font-size:12.5px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .v{font-family:var(--display);font-size:26px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12.5px;color:var(--muted)}
+@media (max-width:820px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+section{margin-top:34px}
+.sh{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 16px;margin-bottom:12px}
+.sh p{margin:0;color:var(--muted);font-size:13px}
+
+/* map */
+.mapbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 12px 6px;position:relative}
+#map svg{display:block;width:100%;height:auto}
+.mapnote{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--muted);padding:6px 6px 4px}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font-size:12.5px;padding:7px 10px;border-radius:8px;white-space:nowrap;z-index:5;transform:translate(50%,-110%);opacity:0;transition:opacity .12s}
+.tip.on{opacity:1}
+
+/* controls */
+.seg{display:inline-flex;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;color:var(--muted);padding:5px 12px;border-radius:8px;font-size:13px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:var(--shadow)}
+
+/* tiles */
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:1080px){.grid{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media (max-width:540px){.grid{grid-template-columns:1fr}}
+.tile{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 14px 12px;cursor:pointer;display:grid;gap:8px;transition:border-color .15s,transform .15s,box-shadow .15s;min-width:0;text-align:right;color:inherit}
+.tile:hover{border-color:var(--accent-2);box-shadow:var(--shadow);transform:translateY(-1px)}
+.tile .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tile .nm{font-family:var(--display);font-weight:700;font-size:16px}
+.tile .cd{font-size:12px;color:var(--faint)}
+.rank{font-family:var(--display);font-size:12px;font-weight:700;color:var(--gold);background:var(--gold-soft);border-radius:6px;padding:1px 7px}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;border-radius:999px;padding:1px 9px;white-space:nowrap}
+.chip.g{background:var(--good-soft);color:var(--good)} .chip.w{background:var(--warn-soft);color:var(--warn)} .chip.b{background:var(--bad-soft);color:var(--bad)} .chip.n{background:var(--sunk);color:var(--muted)}
+.yl{display:flex;align-items:baseline;gap:8px}
+.yl b{font-family:var(--display);font-size:30px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1.1}
+.yl span{font-size:12px;color:var(--muted)}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12.5px}
+.facts div{display:flex;justify-content:space-between;gap:6px;border-top:1px dashed var(--line);padding-top:4px}
+.facts dt{color:var(--muted)} .facts dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
+.spark{height:38px}
+.spark svg{width:100%;height:38px;display:block}
+.pick{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.pick input{accent-color:var(--accent);width:16px;height:16px}
+.more{font-size:12.5px;color:var(--accent);font-weight:600}
+.scorebar{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden}
+.scorebar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+/* builder */
+.builder{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:14px}
+.bctl{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center}
+.bctl label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.bctl input[type=text]{font:inherit;font-variant-numeric:tabular-nums;width:150px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);color:var(--fg);direction:ltr;text-align:left}
+.btot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.btot div{background:var(--sunk);border-radius:10px;padding:10px 12px}
+.btot b{display:block;font-family:var(--display);font-size:20px;color:var(--accent);font-variant-numeric:tabular-nums}
+.btot span{font-size:12px;color:var(--muted)}
+@media (max-width:720px){.btot{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stack{display:flex;height:26px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
+.stack div{height:100%;min-width:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-inline-end:5px;vertical-align:-1px}
+.warns{display:grid;gap:6px}
+.warns div{font-size:13px;border-radius:8px;padding:7px 10px}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-weight:600;color:var(--muted);font-size:12.5px;background:var(--sunk)}
+tfoot td{font-weight:700;border-bottom:0}
+td.l,th.l{text-align:left}
+
+/* excluded */
+.ex{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.ex div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px;min-width:0}
+.ex b{color:var(--bad)}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(8,16,12,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;bottom:0;left:0;width:min(640px,100%);background:var(--bg);z-index:21;transform:translateX(-102%);transition:transform .25s ease;overflow-y:auto;box-shadow:0 0 40px rgba(0,0,0,.25);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.drawer.on{transform:none}
+@media (prefers-reduced-motion:reduce){.drawer,.scrim,.tile{transition:none}}
+.dh{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;z-index:2}
+.dh .t{display:grid;gap:2px}
+.x{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:10px;width:36px;height:36px;font-size:18px;cursor:pointer;flex:none}
+.db{padding:16px 18px 40px;display:grid;gap:16px}
+.verdict{background:var(--accent-soft);border-radius:12px;padding:12px 14px;font-weight:600;color:var(--fg)}
+.dk{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.dk div{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 10px}
+.dk b{display:block;font-family:var(--display);font-size:18px;font-variant-numeric:tabular-nums}
+.dk span{font-size:11.5px;color:var(--muted)}
+@media (max-width:520px){.dk{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:10px;min-width:0;position:relative}
+.panel h3{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.panel h3 small{font-family:var(--body);font-weight:400;font-size:12px;color:var(--muted)}
+.chart svg{display:block;width:100%;height:auto}
+.yrs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center}
+.yrs div{background:var(--sunk);border-radius:8px;padding:6px 4px}
+.yrs b{display:block;font-variant-numeric:tabular-nums;font-size:15px}
+.yrs span{font-size:11.5px;color:var(--muted)}
+.yrs .cur{background:var(--gold-soft)} .yrs .cur b{color:var(--gold)}
+.range{position:relative;height:8px;background:var(--sunk);border-radius:4px;margin:18px 4px 6px}
+.range i{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--surface);transform:translate(50%,-50%)}
+.range em{position:absolute;bottom:14px;transform:translateX(50%);font-style:normal;font-size:12px;font-weight:700;white-space:nowrap}
+.rl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.crit{display:grid;gap:7px}
+.crit div{display:grid;grid-template-columns:150px 1fr 38px;gap:10px;align-items:center;font-size:13px}
+.crit .bar{height:8px;background:var(--sunk);border-radius:4px;overflow:hidden}
+.crit .bar i{display:block;height:100%;border-radius:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:520px){.two{grid-template-columns:1fr}.crit div{grid-template-columns:118px 1fr 34px}}
+ul.pts{margin:0;padding-inline-start:18px;display:grid;gap:4px;font-size:13.5px}
+.sh3{display:flex;gap:6px;flex-wrap:wrap}
+.voice{display:grid;gap:8px}
+.voice a{display:block;text-decoration:none;color:inherit;border-inline-start:3px solid var(--gold);padding:2px 10px}
+.voice a:hover b{color:var(--accent)}
+.voice b{font-size:12.5px;color:var(--muted);font-weight:600}
+.next{background:var(--gold-soft);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.srcs{display:grid;gap:4px;font-size:12.5px}
+.srcs a{word-break:break-word}
+.foot{margin-top:40px;border-top:1px solid var(--line);padding-top:14px;font-size:12.5px;color:var(--muted);display:grid;gap:6px}
+.foot p{margin:0;max-width:95ch}
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">لوحة اختيار أسهم الوقف · رأس المال 1,500,000 ريال</div>
+      <h1>أسهم الوقف العشرة</h1>
+      <div class="muted" style="margin-top:4px">أفضل 10 أسهم سعودية متوافقة شرعياً من حيث جودة التوزيعات وأمانها. اضغط على أي سهم لترى تفاصيله.</div>
+    </div>
+    <span class="stamp">البيانات حتى 12 أكتوبر 2026 · أرقام، تداول، تقارير الوسطاء</span>
+  </div>
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <div class="sh"><h2>خريطة العائد والأمان</h2><p>الأفضل للوقف: أعلى اليسار، أي عائد مرتفع ودرجة أمان مرتفعة. اضغط على أي نقطة لفتح السهم.</p></div>
+    <div class="mapbox"><div id="map"></div><div class="tip" id="tip"></div>
+      <div class="mapnote"><span>المحور الأفقي: درجة الأمان من 100، محسوبة من خمسة معايير.</span><span>المحور الرأسي: العائد النقدي السنوي عند السعر الحالي.</span><span>حجم النقطة: الوزن المقترح في الوقف.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sh"><h2>الأسهم المرشحة</h2>
+      <div class="seg" id="sort" role="group" aria-label="ترتيب">
+        <button aria-pressed="true" data-k="score">الأمان</button><button aria-pressed="false" data-k="yield">العائد</button><button aria-pressed="false" data-k="g26">نمو توزيع 2026</button><button aria-pressed="false" data-k="up">الصعود للهدف</button>
+      </div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section id="builderSec">
+    <div class="sh"><h2>اختر محفظة الوقف</h2><p>فعّل خانة «ضمن محفظتي» أو ألغها في أي بطاقة، وستُحسب المبالغ والدخل فوراً.</p></div>
+    <div class="builder">
+      <div class="bctl">
+        <label for="amt">المبلغ (ريال) <input id="amt" type="text" inputmode="numeric" value="1,500,000"></label>
+        <div class="seg" id="mode" role="group" aria-label="طريقة التوزيع"><button aria-pressed="true" data-m="sug">الأوزان المقترحة</button><button aria-pressed="false" data-m="eq">أوزان متساوية</button></div>
+        <label for="payr">نسبة الصرف للجمعية
+          <select id="payr" style="font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);color:var(--fg)"><option value="1">100%</option><option value="0.8" selected>80%</option><option value="0.7">70%</option><option value="0.5">50%</option></select></label>
+      </div>
+      <div class="btot" id="btot"></div>
+      <div><div class="stack" id="stack"></div><div class="legend" id="slegend" style="margin-top:8px"></div></div>
+      <div class="warns" id="warns"></div>
+      <div class="tw"><table id="btab"><thead><tr><th>السهم</th><th>الوزن</th><th class="l">المبلغ</th><th class="l">عدد الأسهم</th><th class="l">الدخل السنوي</th><th class="l">العائد</th></tr></thead><tbody></tbody><tfoot></tfoot></table></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sh"><h2>أسهم مشهورة لم تدخل القائمة</h2><p>استُبعدت بعد الفحص، وهذا سبب كل منها.</p></div>
+    <div class="ex">
+      <div><b>سابك</b> · خسرت 25.8 مليار ريال في 2025، وخفّضت التوزيع 27%.</div>
+      <div><b>سبكيم</b> · سجّلت أول خسارة سنوية في تاريخها، ولم توزع شيئاً عن 2026.</div>
+      <div><b>ذيب</b> · أوقف التوزيع في 2026، وهبط ربحه 45%.</div>
+      <div><b>الدواء</b> · هبط ربحه 73%، وتوزيعه أكثر من ضعف أرباحه.</div>
+      <div><b>سدكو ريت</b> · ديونه 53% من أصوله بفائدة متغيرة.</div>
+      <div><b>جدوى ريت</b> · يوزع 131% من دخله التشغيلي، فالتوزيع لا يغطيه الدخل.</div>
+      <div><b>ينساب</b> · يوزع أضعاف أرباحه.</div>
+      <div><b>أسمنت القصيم</b> · يوزع 146% من أرباحه، مع اقتراض جديد.</div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <p><b>كيف تُحسب درجة الأمان (من 100):</b> خمسة معايير، لكل منها 20 درجة:</p>
+    <ul style="margin:0;padding-inline-start:20px">
+      <li><b>تغطية التوزيع بالأرباح:</b> نسبة التوزيع حتى 60% تأخذ 20، وحتى 80% تأخذ 15، وحتى 100% تأخذ 8.</li>
+      <li><b>انتظام التوزيع منذ 2023:</b> بلا خفض أو انقطاع 20، وخفض أو تخطٍ مرة واحدة 10.</li>
+      <li><b>اتجاه الربح في النصف الأول 2026:</b> أكثر من +5% تأخذ 20، وحتى −10% تأخذ 10، وأقل من ذلك 5.</li>
+      <li><b>حجم الشركة:</b> أكثر من 100 مليار 20، وأكثر من 20 ملياراً 15، وأكثر من 5 مليارات 10، وأقل من ذلك 5.</li>
+      <li><b>التوافق الشرعي:</b> مدرج في 3 قوائم 20، وفي قائمتين 15.</li>
+    </ul>
+    <p><b>العائد</b> = توزيعات آخر 12 شهراً، أو المعدل الربعي المعلن لعام 2026، مقسوماً على السعر في 12 أكتوبر 2026. التوزيعات معدلة لأسهم المنحة والتجزئة.</p>
+    <p><b>تنبيه:</b> هذه أداة تحليلية وليست توصية من جهة مرخصة من هيئة السوق المالية. التوزيعات المستقبلية غير مضمونة. منشورات منصة إكس المعروضة مقتطفات علنية للاستئناس فقط. ويلزم عرض القائمة على الهيئة الشرعية للجمعية قبل الشراء.</p>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+  <div class="dh"><div class="t"><span class="eyebrow" id="dEyebrow"></span><h2 id="dTitle"></h2><span class="small muted" id="dSub"></span></div><button class="x" id="dClose" aria-label="إغلاق">✕</button></div>
+  <div class="db" id="dBody"></div>
+</aside>
+
+<script>
+const DATA=[{"code": "1120", "name": "مصرف الراجحي", "short": "الراجحي", "sector": "البنوك", "w": 13, "dps": 2.43, "sh": [1, 1, 0], "sc": [20, 15, 20, 20, 15], "verdict": "أكبر مصرف إسلامي وأعلى ربحية في السوق؛ توزيعه النصفي ارتفع إلى 1.26 ريال.", "price": 61.95, "lo": 61.8, "hi": 73.4, "perf": -12.34, "mcap": 371.7, "pe": 14.03, "roe": 23.49, "payout": 40.3, "bal": "رأس المال رُفع إلى 60 مليار ريال بالمنحة؛ أصدر صكوك شريحة ثانية اجتماعية 600 مليون دولار (سبتمبر 2026)", "divs": [{"p": "H1-2023", "v": 0.77, "pay": "2023-08-14", "note": "4.6 مليار ريال؛ المعدل مقسوم على 1.5 (منحة 2026)"}, {"p": "H2-2023", "v": 0.77, "pay": "2024-04-03", "note": "4.6 مليار ريال"}, {"p": "H1-2024", "v": 0.83, "pay": "2024-08-26", "note": "5.0 مليار ريال"}, {"p": "H2-2024", "v": 0.97, "pay": "2025-04-24", "note": "5.84 مليار ريال"}, {"p": "H1-2025", "v": 0.5, "pay": "2025-10-02", "note": "3.0 مليار ريال"}, {"p": "H2-2025", "v": 1.17, "pay": "2026-04-30", "note": "7.0 مليار ريال على 4 مليار سهم قبل المنحة؛ أحقية 20-04-2026"}, {"p": "H1-2026", "v": 1.26, "pay": "2026-10-01", "note": "7.56 مليار ريال على 6 مليار سهم بعد المنحة؛ أحقية 21-09-2026"}], "annual": {"2023": 1.53, "2024": 1.81, "2025": 1.67, "2026": 1.26}, "anote": "معدل على أساس 6 مليار سهم بعد منحة سهم لكل سهمين (أبريل 2026)؛ حسب السنة المالية للتوزيع؛ 2026 = النصف الأول فقط", "prof": {"2023": 16600, "2024": 19722, "2025": 24790, "H1-2025": 12060, "H1-2026": 13760}, "analysts": [{"source": "FAB Securities", "date": "2026-07-31", "rating": "Buy", "target_price": 78.0, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Company/Index/3"}, {"source": "AlJazira Capital (via Dalil Saudi)", "date": "2026-07", "rating": null, "target_price": 71.3, "url": "https://dalylsaudi.com/news456805.html"}, {"source": "HSBC (MarketScreener headline)", "date": "2026-09-03", "rating": "Buy", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/AL-RAJHI-BANKING-AND-INVE-6497957/consensus/"}, {"source": "Riyad Capital (MarketScreener headline: upgrade)", "date": "2026-07-22", "rating": "Buy", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/AL-RAJHI-BANKING-AND-INVE-6497957/consensus/"}], "cons": 74.7, "consSrc": "MarketScreener / StockAnalysis, 16 محللاً (Outperform)، 12-10-2026", "social": [{"who": "بوابة أرقام (@Argaam)", "gist": "الراجحي يوزع 1.26 ريال عن النصف الأول 2026، الصرف 1 أكتوبر", "url": "https://x.com/Argaam/status/2099368771102163134", "snippet_only": true}, {"who": "Abdullah AL-Khmais (@AZK_SA)", "gist": "العمومية توافق على 1.75 ريال للسهم عن النصف الثاني 2025", "url": "https://x.com/AZK_SA/status/2046461559208022502", "snippet_only": true}, {"who": "مباشر (Decypha)", "gist": "الراجحي يوزع 7.56 مليار ريال عن النصف الأول 2026", "url": "https://decypha.com/en/news/details/Al-Rajhi-Bank-to-distribute-SAR-7-5bn-cash-dividends-for-H1-26/21574307?L=EN", "snippet_only": true}], "S": ["نمو صافي الربح 14% إلى 13.76 مليار في النصف الأول 2026", "العائد على حقوق المساهمين نحو 23.5%", "التوزيع النصفي ارتفع إلى 1.26 ريال مقابل 0.50 معدلة"], "R": ["مخصصات خسائر الائتمان قفزت 47% في الربع الثاني 2026", "السهم قرب أدنى مستوى في 52 أسبوعاً (−12% خلال عام)", "أقل عائد بين العشرة (3.9%)؛ قيمته في النمو والأمان"], "next": "توزيع النصف الثاني 2026: توصية متوقعة أواخر يناير 2027 وصرف نحو أبريل 2027", "sources": [{"label": "Argaam – توزيعات الراجحي", "url": "https://www.argaam.com/en/reports/company-dividend/57654"}, {"label": "Argaam – صفحة الشركة", "url": "https://www.argaam.com/en/tadawul/tasi/alrajhi"}, {"label": "StockAnalysis 1120", "url": "https://stockanalysis.com/quote/tadawul/1120/"}, {"label": "Mubasher – نتائج النصف الأول 2026", "url": "https://english.mubasher.info/news/4644192/Al-Rajhi-Bank-s-net-profits-hike-14-in-H1-26/"}, {"label": "ARB 4Q2024 Earnings Release", "url": "https://alrajhibank.com.sa/-/media/Project/AlRajhi/ARBRevamp/Investor-Relation/Annual-Reports/ARB-4Q2024-Earnings-Release.pdf"}, {"label": "Enterprise – أرباح 2024", "url": "https://enterpriseam.com/ksa/2025/01/30/snb-al-rajhi-alinma-bsf-saib-bupa-arabia-report-2024-earnings/"}, {"label": "MarketScreener consensus", "url": "https://www.marketscreener.com/quote/stock/AL-RAJHI-BANKING-AND-INVE-6497957/consensus/"}]}, {"code": "1150", "name": "مصرف الإنماء", "short": "الإنماء", "sector": "البنوك", "w": 7, "dps": 1.0, "sh": [1, 1, 0], "sc": [20, 10, 20, 15, 15], "verdict": "توزيع ربعي 0.25 ريال بنسبة 35% فقط من الأرباح، مع هامش أمان واسع.", "price": 23.63, "lo": 19.95, "hi": 26.0, "perf": 6.69, "mcap": 70.89, "pe": 11.83, "roe": 13.89, "payout": 35.0, "bal": "رأس المال 30 مليار ريال بعد المنحة؛ نمو التمويل 11.6% وتكلفة المخاطر 66 نقطة أساس (2Q26)", "divs": [{"p": "Q1-2023", "v": 0.17, "pay": "2023-06-12", "note": "498 مليون ريال؛ المعدل ÷1.5 (منحة 1:4 ثم 1:5)"}, {"p": "Q2-2023", "v": 0.2, "pay": "2023-08-23", "note": "596 مليون ريال"}, {"p": "Q3-2023", "v": 0.2, "pay": "2023-11-22", "note": "596 مليون ريال"}, {"p": "Q4-2023", "v": null, "pay": null, "note": "لا يوجد توزيع في سجل أرقام (سنة منحة سهم لكل 4) — غير مؤكد"}, {"p": "Q1-2024", "v": 0.21, "pay": "2024-06-02", "note": "المعدل ÷1.2 (منحة 2026)"}, {"p": "Q2-2024", "v": 0.21, "pay": "2024-09-01", "note": null}, {"p": "Q3-2024", "v": 0.25, "pay": "2024-11-21", "note": null}, {"p": "Q4-2024", "v": 0.25, "pay": "2025-05-08", "note": "أقرته العمومية 24-04-2025"}, {"p": "Q1-2025", "v": 0.25, "pay": "2025-05-27", "note": null}, {"p": "Q2-2025", "v": 0.25, "pay": "2025-08-21", "note": null}, {"p": "Q3-2025", "v": 0.25, "pay": "2025-11-18", "note": null}, {"p": "Q4-2025", "v": null, "pay": null, "note": "غير مدرج في سجل أرقام؛ تزامن مع منحة سهم لكل 5 — الأرجح لا توزيع"}, {"p": "Q1-2026", "v": 0.25, "pay": "2026-05-20", "note": "بعد المنحة (3 مليار سهم)"}, {"p": "Q2-2026", "v": 0.25, "pay": "2026-08-17", "note": "746 مليون ريال"}], "annual": {"2023": 0.57, "2024": 0.92, "2025": 0.75, "2026": 0.5}, "anote": "معدل على أساس 3 مليار سهم بعد منحة سهم لكل 5 (أبريل 2026)؛ 2023 معدل أيضاً لمنحة سهم لكل 4؛ 2026 = ربعان فقط", "prof": {"2023": 4840, "2024": 5832, "2025": 6397, "H1-2025": 3080, "H1-2026": 3274}, "analysts": [{"source": "FAB Securities", "date": "2026-07-23", "rating": "Buy", "target_price": 29.5, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Company/Index/6"}, {"source": "anb capital", "date": "2026-07-22", "rating": "Neutral", "target_price": 27.9, "url": "https://anbcapital.com.sa/documents/182269/0/2Q+2026+FIRST+TAKE+-+ALINMA.pdf/caf06050-d526-0cf8-975f-e3124056f912?t=1784793635249"}, {"source": "HSBC (MarketScreener headline)", "date": "2026-09-02", "rating": "Reduce", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/ALINMA-BANK-6718577/consensus/"}, {"source": "SNB Capital (MarketScreener headline)", "date": "2026-04-27", "rating": "Neutral", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/ALINMA-BANK-6718577/consensus/"}], "cons": 27.23, "consSrc": "MarketScreener / Investing / StockAnalysis، 14 محللاً، 12-10-2026", "social": [{"who": "عبدالعزيز خريص (@Ezzo_Khrais)", "gist": "الإنماء رجع للتوزيع: 25 هللة عن الربع الأول 2026", "url": "https://x.com/Ezzo_Khrais/status/2047300835021922426", "snippet_only": true}, {"who": "مصرف الإنماء (بيان رسمي)", "gist": "زيادة رأس المال إلى 30 مليار بمنح سهم لكل 5 أسهم", "url": "https://alinma.com/en/About-the-Bank/The-Bank/News/2026/1/Capital-Increase-to-SAR-30-Billion", "snippet_only": true}], "S": ["ربح 2025 بلغ 6.4 مليار ريال بنمو 10%", "منحة سهم لكل 5 رفعت رأس المال 20%", "نمو التمويل 11.6% وهامش ربح مستقر 3.4%"], "R": ["مخصصات الائتمان ارتفعت 42% في الربع الثاني 2026", "التوزيع الربعي انخفض فعلياً إلى 0.25 ريال", "HSBC خفضت التوصية إلى تخفيض في سبتمبر 2026"], "next": "توزيع الربع الثالث 2026 (~0.25 ريال): إعلان متوقع مع النتائج ~22 أكتوبر وصرف منتصف نوفمبر 2026", "sources": [{"label": "Argaam – توزيعات الإنماء", "url": "https://www.argaam.com/en/reports/company-dividend/60023"}, {"label": "Argaam – سجل 2023", "url": "https://www.argaam.com/en/reports/company-dividend/37238"}, {"label": "Argaam – صفحة الشركة", "url": "https://www.argaam.com/en/tadawul/tasi/alinma"}, {"label": "StockAnalysis 1150", "url": "https://stockanalysis.com/quote/tadawul/1150/"}, {"label": "Alinma – نتائج النصف الأول 2026", "url": "https://alinma.com/en/About-the-Bank/The-Bank/News/2026/7/Net-Profits-of-Q2"}, {"label": "Alinma – نتائج 2024", "url": "https://alinma.com/en/About-the-Bank/The-Bank/News/2025/1/2024-Financial-Results"}, {"label": "Decypha – نتائج 2025", "url": "https://www.decypha.com/en/news/details/Alinma-Bank-sees-10--higher-profits-in-2025--capital-hike-proposed/21530981?L=EN"}]}, {"code": "1140", "name": "بنك البلاد", "short": "البلاد", "sector": "البنوك", "w": 5, "dps": 1.05, "sh": [1, 1, 0], "sc": [20, 10, 15, 15, 15], "verdict": "توزيعه تضاعف منذ 2024 ونسبته 49% من الربح؛ وأهداف المحللين أعلى من سعره بـ26%.", "price": 22.43, "lo": 22.36, "hi": 30.16, "perf": -22.81, "mcap": 33.65, "pe": 11.35, "roe": 17.1, "payout": 49.2, "bal": "صافي الربح العائد للمساهمين؛ ROE 2025 17.1% (AJC)؛ القروض 133.4 مليار (+15.3%) والودائع 147.2 مليار (+18.8%) في Q2-2026؛ تكلفة المخاطر 17 نقطة أساس.", "divs": [{"p": "FY-2023", "v": 0.333, "pay": "2024-05-16", "note": "على 1.0 مليار سهم قبل منحتي 1:4 (2024) و1:5 (2025)"}, {"p": "H1-2024", "v": 0.417, "pay": "2024-10-03", "note": "على 1.25 مليار سهم قبل منحة 1:5 (أبريل 2025)"}, {"p": "H2-2024", "v": null, "pay": null, "note": "لا توزيع نقدي؛ منحة سهم لكل 5 أسهم (رفع رأس المال إلى 15 مليار، أبريل 2025)"}, {"p": "H1-2025", "v": 0.45, "pay": "2025-08-20", "note": null}, {"p": "H2-2025", "v": 0.55, "pay": "2026-06-04", "note": "أحقية 05-05-2026 بعد الجمعية"}, {"p": "H1-2026", "v": 0.5, "pay": "2026-08-20", "note": "أحقية 30-07-2026؛ إجمالي 750 مليون ريال"}], "annual": {"2023": 0.333, "2024": 0.417, "2025": 1.0, "2026": 0.5}, "anote": "معدّلة على 1.5 مليار سهم (المعلن: 2023 0.50 و2024 0.50). 2026 = النصف الأول فقط.", "prof": {"2023": 2369, "2024": 2806.5, "2025": 3049.4, "H1-2025": 1466, "H1-2026": 1527}, "analysts": [{"source": "FAB Securities", "date": "2026-07-21", "rating": "Buy", "target_price": 30.0, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Download/Index/1499"}, {"source": "AlJazira Capital", "date": "2026-07-20", "rating": "Overweight", "target_price": 28.8, "url": "https://www.aljaziracapital.com.sa/media/5i3jsqtm/albilad-flashnote-q2-26-july-2026-en.pdf"}], "cons": 28.31, "consSrc": "StockAnalysis / Investing.com (Buy؛ 7 محللين، المدى 27–30)", "social": [{"who": "@Investment_corn (ركن الاستثمار-سعد)", "gist": "توصية 0.55 ريال للنصف الثاني 2025 بإجمالي 825 مليون ريال (مقتطف فقط)", "url": "https://x.com/Investment_corn/status/2019029134740004884"}], "S": ["توزيعات 2025 بلغت 1.00 ريال مقابل 0.42 معدّلة لعام 2024", "ربح H1-2026 نما 4% إلى 1.53 مليار ريال", "ROE مرتفع 17.1% ونسبة توزيع معتدلة نحو 49%"], "R": ["السهم هبط 23% خلال سنة وقرب أدنى 52 أسبوعاً", "توزيع H1-2026 (0.50) أقل من H2-2025 (0.55)", "مخصصات الائتمان ارتفعت 14% في الربع الثاني 2026"], "next": "توزيع النصف الثاني 2026 يُتوقع إعلانه في فبراير 2027 والصرف نحو مايو–يونيو 2027 بعد الجمعية.", "sources": [{"label": "أرقام – توزيعات بنك البلاد", "url": "https://www.argaam.com/en/reports/company-dividend/60067"}, {"label": "أرقام – منحة 1:5 ورفع رأس المال إلى 15 مليار", "url": "https://www.argaam.com/en/article/articledetail/id/1804925"}, {"label": "أرقام – منحة 1:4 وتوزيع 2023", "url": "https://argaam.com/en/reports/company-dividend/40974"}, {"label": "StockAnalysis – السعر والإحصاءات", "url": "https://stockanalysis.com/quote/tadawul/1140/statistics/"}, {"label": "FAB – مذكرة 2Q26", "url": "https://fabsresearch.bankfab.com/ResearchPortal/Download/Index/1499"}, {"label": "AlJazira Capital – مذكرة Q2-26", "url": "https://www.aljaziracapital.com.sa/media/5i3jsqtm/albilad-flashnote-q2-26-july-2026-en.pdf"}, {"label": "مباشر – أرباح H1-2026", "url": "https://english.mubasher.info/news/4643473/Bank-Albilad-s-net-profits-up-4-in-H1-26-total-assets-hit-SAR-186-4bn/"}, {"label": "Sahm – صافي ربح 2025", "url": "https://www.sahmcapital.com/news/content/bank-albilad-reports-sar-30494m-net-profit-in-year-2025-2026-02-04"}]}, {"code": "7010", "name": "إس تي سي (الاتصالات السعودية)", "short": "إس تي سي", "sector": "الاتصالات", "w": 15, "dps": 2.2, "sh": [1, 1, 1], "sc": [15, 20, 10, 20, 20], "verdict": "سياسة توزيع معلنة ومضمونة بنص الشركة: 0.55 ريال كل ربع حتى الربع الثالث 2027.", "price": 42.22, "lo": 40.2, "hi": 45.38, "perf": -4.57, "mcap": 211.1, "pe": 14.44, "roe": 17.39, "payout": 74.0, "bal": "صافي نقد ~0.8 مليار ريال (نقد 26.6 مقابل دين 25.8 مليار)؛ دين/حقوق 0.29", "divs": [{"p": "Q1-2023", "v": 0.4, "pay": "2023-06-07", "note": null}, {"p": "Q2-2023", "v": 0.4, "pay": "2023-08-23", "note": null}, {"p": "Q3-2023", "v": 0.4, "pay": "2023-11-23", "note": null}, {"p": "Q4-2023", "v": 0.4, "pay": "2024-03-14", "note": null}, {"p": "FY2023-special", "v": 1.0, "pay": "2024-05-15", "note": "توزيع إضافي عن 2023"}, {"p": "Q1-2024", "v": 0.4, "pay": "2024-06-10", "note": null}, {"p": "Q2-2024", "v": 0.4, "pay": "2024-08-15", "note": null}, {"p": "Q3-2024", "v": 0.4, "pay": "2024-11-26", "note": null}, {"p": "Q4-2024", "v": 0.55, "pay": "2025-03-24", "note": "بداية سياسة 0.55 ربعياً"}, {"p": "FY2024-special", "v": 2.0, "pay": "2025-06-02", "note": "توزيع إضافي عن 2024 (~10 مليار ريال)"}, {"p": "Q1-2025", "v": 0.55, "pay": "2025-05-20", "note": null}, {"p": "Q2-2025", "v": 0.55, "pay": "2025-08-19", "note": null}, {"p": "Q3-2025", "v": 0.55, "pay": "2025-11-26", "note": null}, {"p": "Q4-2025", "v": 0.55, "pay": "2026-03-12", "note": null}, {"p": "Q1-2026", "v": 0.55, "pay": "2026-05-20", "note": null}, {"p": "Q2-2026", "v": 0.55, "pay": "2026-08-20", "note": null}], "annual": {"2023": 2.6, "2024": 3.75, "2025": 2.2, "2026": 1.1}, "anote": "لا منح منذ 2022 (المعدل = المعلن)؛ حسب السنة المالية؛ تشمل التوزيعات الإضافية 2023 و2024؛ 2026 = ربعان", "prof": {"2023": 13295, "2024": 24689, "2025": 14830, "H1-2025": 7472, "H1-2026": 7319}, "analysts": [{"source": "FAB Securities", "date": "2026-08-04", "rating": "Buy", "target_price": 50.0, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Company/Index/14"}, {"source": "AlJazira Capital", "date": "2026-07-30", "rating": "Overweight", "target_price": 49.6, "url": "https://dalylsaudi.com/news456805.html"}, {"source": "SNB Capital (Argaam analyst list)", "date": "2026-07-31", "rating": "Overweight", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/stc"}, {"source": "Riyad Capital (Maaal, snippet)", "date": "2026-02", "rating": "Buy", "target_price": 50.0, "url": "https://maaal.com/news/details/%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-%D8%A7%D9%84%D9%85%D8%A7%D9%84%D9%8A%D8%A9-%D8%AA%D9%88%D8%B5%D9%8A-%D8%A8%D8%B4%D8%B1-e/"}], "cons": 48.14, "consSrc": "StockAnalysis / Investing، 18 محللاً (Buy)، أكتوبر 2026", "social": [{"who": "لمحة استثمارية (@FutrueGlimpse)", "gist": "الجزيرة كابيتال: السعر المستهدف لـ STC عند 49.60 ريال", "url": "https://x.com/FutrueGlimpse/status/2084204647875539106", "snippet_only": true}, {"who": "أرقام (الجزيرة كابيتال)", "gist": "صافي ربح STC متوافق مع توقعاتنا ونبقي على توصيتنا", "url": "https://www.argaam.com/ar/article/articledetail/id/1924712", "snippet_only": true}], "S": ["توزيع ثابت 0.55 ريال ربعياً حتى الربع الثالث 2027", "إيرادات النصف الأول 2026 قياسية 40.1 مليار (+3.8%)", "مركز صافي نقد ~0.8 مليار ريال"], "R": ["ربح النصف الأول 2026 تراجع 2% إلى 7.3 مليار", "تراجع السهم ~4.6% خلال عام", "نسبة توزيع مرتفعة ~74% تحد من رفع التوزيع"], "next": "توزيع الربع الثالث 2026 بواقع 0.55 ريال: إعلان مع النتائج ~28 أكتوبر وصرف أواخر نوفمبر 2026", "sources": [{"label": "Argaam – توزيعات STC", "url": "https://www.argaam.com/en/reports/company-dividend/60414"}, {"label": "Argaam – سجل 2023", "url": "https://www.argaam.com/en/reports/company-dividend/40906"}, {"label": "Argaam – Q1 2024", "url": "https://www.argaam.com/ar/reports/company-dividend/41198"}, {"label": "Argaam – صفحة الشركة", "url": "https://www.argaam.com/en/tadawul/tasi/stc"}, {"label": "StockAnalysis 7010", "url": "https://stockanalysis.com/quote/tadawul/7010/statistics/"}, {"label": "stc IR Q2 2026", "url": "https://www.stc.com/content/dam/groupsites/en/pdf/InvestorRelationsQ2-2026En.pdf"}, {"label": "stc التقرير السنوي 2024", "url": "https://www.stc.com.sa/content/dam/stc/stc-annual-report-2024/financial-statements.html"}]}, {"code": "2222", "name": "أرامكو السعودية", "short": "أرامكو", "sector": "الطاقة", "w": 12, "dps": 1.36, "sh": [1, 1, 0], "sc": [8, 10, 20, 20, 15], "verdict": "توزيع أساسي تصاعدي (+3.5% في 2026) من أكبر شركة في العالم، وربحها قفز 33%.", "price": 25.76, "lo": 23.29, "hi": 27.96, "perf": 3.7, "mcap": 6230, "pe": 15.22, "roe": 23.75, "payout": 92.6, "bal": "نسبة المديونية (Gearing) 3.8% نهاية 2025؛ برنامج إعادة شراء حتى 3 مليار دولار", "divs": [{"p": "Q1-2023", "v": 0.3, "pay": "2023-05-31", "note": "أساسي فقط"}, {"p": "Q2-2023", "v": 0.46, "pay": "2023-09-27", "note": "يشمل مرتبط بالأداء"}, {"p": "Q3-2023", "v": 0.46, "pay": "2023-11-30", "note": "يشمل مرتبط بالأداء"}, {"p": "Q4-2023", "v": 0.4815, "pay": "2024-03-28", "note": "أساسي 0.3145 + أداء 0.1670"}, {"p": "Q1-2024", "v": 0.48, "pay": "2024-05-23", "note": "يشمل أداء 40.4 مليار ريال"}, {"p": "Q2-2024", "v": 0.48, "pay": "2024-08-29", "note": "يشمل أداء"}, {"p": "Q3-2024", "v": 0.48, "pay": "2024-11-26", "note": "يشمل أداء"}, {"p": "Q4-2024", "v": 0.33, "pay": "2025-03-26", "note": "يشمل أداء 0.82 مليار ريال فقط"}, {"p": "Q1-2025", "v": 0.33, "pay": "2025-05-29", "note": "يشمل أداء 0.82 مليار"}, {"p": "Q2-2025", "v": 0.33, "pay": "2025-08-28", "note": "يشمل أداء 0.82 مليار"}, {"p": "Q3-2025", "v": 0.33, "pay": "2025-11-26", "note": "يشمل أداء 0.82 مليار"}, {"p": "Q4-2025", "v": 0.34, "pay": "2026-03-31", "note": "أساسي 82.08 مليار ريال (+3.5%)"}, {"p": "Q1-2026", "v": 0.34, "pay": "2026-06-09", "note": "أساسي فقط (~0.339)"}, {"p": "Q2-2026", "v": 0.3393, "pay": "2026-08-27", "note": "أساسي 82.06 مليار ريال"}], "annual": {"2023": 1.7, "2024": 1.77, "2025": 1.33, "2026": 0.68}, "anote": "لا منح بعد 2023 (منحة 1:10 في مايو 2023 قبل توزيع الربع الأول)؛ حسب السنة المالية؛ 2026 = ربعان أساسي فقط", "prof": {"2023": 454800, "2024": 398400, "2025": 348000, "H1-2025": 181320, "H1-2026": 241640}, "analysts": [{"source": "Goldman Sachs (Al Arabiya)", "date": "2026-05-12", "rating": "Buy", "target_price": 32.0, "url": "https://www.alarabiya.net/aswaq/financial-markets/2026/05/12/%D8%BA%D9%88%D9%84%D8%AF%D9%85%D8%A7%D9%86-%D8%B3%D8%A7%D9%83%D8%B3-%D9%8A%D8%B1%D9%81%D8%B9-%D8%A7%D9%84%D9%85%D8%B3%D8%AA%D9%87%D8%AF%D9%81-%D8%A7%D9%84%D8%B3%D8%B9%D8%B1%D9%8A-%D9%84%D8%B3%D9%87%D9%85-%D8%A7%D8%B1%D8%A7%D9%85%D9%83%D9%88-%D8%A7%D9%84%D9%89-32-%D8%B1%D9%8A%D8%A7%D9%84%D8%A7-%D9%85%D9%86-29-%D8%B1%D9%8A%D8%A7%D9%84%D8%A7"}, {"source": "AlJazira Capital", "date": "2026-07-28", "rating": "Overweight", "target_price": 29.6, "url": "https://dalylsaudi.com/news456805.html"}, {"source": "Saudi Fransi Capital (BSF)", "date": "2026-03-25", "rating": "Buy", "target_price": 29.0, "url": "https://argaamplus.s3.amazonaws.com/9088b673-abf8-4d01-939c-ef7df9cde84f.pdf"}, {"source": "HSBC (MarketScreener headline)", "date": "2026-08-05", "rating": "Hold", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/ARAMCO-103505448/consensus/"}], "cons": 30.25, "consSrc": "MarketScreener، 18 محللاً (Outperform)؛ Investing يذكر 30.23", "social": [{"who": "بوابة أرقام (@Argaam)", "gist": "أرامكو توزع 0.3393 ريال عن الربع الثاني 2026، الأحقية 19 أغسطس", "url": "https://x.com/Argaam/status/2084508378001293515", "snippet_only": true}, {"who": "الإخبارية الاقتصادية (@alekhbariyaECO)", "gist": "أرامكو توزع 34 هللة للسهم عن الربع الثاني 2026", "url": "https://x.com/alekhbariyaECO/status/2084521802743562577", "snippet_only": true}, {"who": "محمد الميموني (@mohammad_fx)", "gist": "أرباح أساسية 82.06 مليار ريال استمراراً لسياسة التوزيع المتنامي", "url": "https://x.com/mohammad_fx/status/2084517068284584169", "snippet_only": true}], "S": ["ربح النصف الأول 2026 قفز 33% إلى 241.6 مليار", "التوزيع الأساسي نما 3.5% إلى 82 مليار ربعياً", "مديونية منخفضة جداً: Gearing 3.8%"], "R": ["لا توزيعات مرتبطة بالأداء في 2026", "اضطرابات هرمز خفضت الإنتاج إلى ~9.3 مليون برميل", "الأرباح شديدة الحساسية لأسعار النفط (برنت ~90 دولاراً)"], "next": "توزيع الربع الثالث 2026 الأساسي (~0.34 ريال): إعلان مع النتائج ~3 نوفمبر وصرف أواخر نوفمبر 2026", "sources": [{"label": "Argaam – توزيعات أرامكو", "url": "https://www.argaam.com/en/reports/company-dividend/60609"}, {"label": "Argaam – سجل 2023", "url": "https://argaam.com/en/reports/company-dividend/39975"}, {"label": "StockAnalysis 2222", "url": "https://stockanalysis.com/quote/tadawul/2222/statistics/"}, {"label": "Aramco – نتائج 2025", "url": "https://www.aramco.com/en/news-media/news/2026/fourth-quarter-and-full-year-press-release"}, {"label": "Decypha – نتائج النصف الأول 2026", "url": "https://www.decypha.com/en/news/details/Aramco-records-higher-profits-at-SAR-241-6bn-in-H1-26-despite-geopolitical-tensions/21566192?L=EN"}, {"label": "BSF Capital Update Note (مارس 2026)", "url": "https://argaamplus.s3.amazonaws.com/9088b673-abf8-4d01-939c-ef7df9cde84f.pdf"}, {"label": "MarketScreener consensus", "url": "https://www.marketscreener.com/quote/stock/ARAMCO-103505448/consensus/"}]}, {"code": "4190", "name": "جرير للتسويق", "short": "جرير", "sector": "التجزئة", "w": 14, "dps": 0.95, "sh": [1, 1, 1], "sc": [8, 20, 20, 10, 20], "verdict": "ربح يرتفع 18% وتوزيع ربعي منتظم منذ عقود؛ متوافق في القوائم الثلاث.", "price": 16.02, "lo": 12.26, "hi": 18.38, "perf": 16.51, "mcap": 19.22, "pe": 17.16, "roe": 67.25, "payout": 101.8, "bal": "صافي دين ~0.57 مليار ريال، دين/حقوق 0.43؛ توزيع ~100% من الربح", "divs": [{"p": "Q1-2023", "v": 0.205, "pay": "2023-05-24", "note": "قبل تجزئة السهم (القيمة الاسمية من 10 إلى 1 ريال، أقرتها الجمعية 31-05-2023)؛ أرقام تعرضها 0.21 معدلة"}, {"p": "Q2-2023", "v": 0.15, "pay": "2023-08-16", "note": null}, {"p": "Q3-2023", "v": 0.25, "pay": "2023-11-15", "note": null}, {"p": "Q4-2023", "v": 0.23, "pay": "2024-03-20", "note": null}, {"p": "Q1-2024", "v": 0.19, "pay": "2024-05-29", "note": null}, {"p": "Q2-2024", "v": 0.15, "pay": "2024-08-21", "note": null}, {"p": "Q3-2024", "v": 0.26, "pay": "2024-11-20", "note": null}, {"p": "Q4-2024", "v": 0.23, "pay": "2025-04-16", "note": null}, {"p": "Q1-2025", "v": 0.19, "pay": "2025-05-21", "note": null}, {"p": "Q2-2025", "v": 0.16, "pay": "2025-08-20", "note": null}, {"p": "Q3-2025", "v": 0.28, "pay": "2025-11-19", "note": null}, {"p": "Q4-2025", "v": 0.26, "pay": "2026-04-15", "note": null}, {"p": "Q1-2026", "v": 0.21, "pay": "2026-06-10", "note": "أرقام: أحقية 01-06-2026؛ منشور على X ذكر صرف 20-05-2026 (متعارض، اعتُمد أرقام)"}, {"p": "Q2-2026", "v": 0.2, "pay": "2026-08-26", "note": null}], "annual": {"2023": 0.835, "2024": 0.83, "2025": 0.89, "2026": 0.41}, "anote": "حسب السنة المالية المستحقة عنها؛ 2023 معدّل للتجزئة (2.05÷10)؛ 2026 حتى الربع الثاني", "prof": {"2023": 973.0, "2024": 974.0, "2025": 1049.0, "H1-2025": 414.0, "H1-2026": 489.0}, "analysts": [{"source": "Al Rajhi Capital", "date": "2026-09-10", "rating": "Neutral", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/jarir"}, {"source": "FAB Securities", "date": "2026-07-16", "rating": "Hold", "target_price": 17.5, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Company/Index/12"}, {"source": "GIB Capital", "date": "2026-07-16", "rating": null, "target_price": 17.5, "url": "https://gibcapital.com/media/hdvhvh44/jarir_16july26_en.pdf"}, {"source": "AlJazira Capital", "date": "2026-06-22", "rating": "Neutral", "target_price": 16.1, "url": "https://www.aljaziracapital.com.sa/media/kkugbga4/jarir-investment-update-june-2026-en.pdf"}], "cons": 17.41, "consSrc": "MarketScreener (14 محللاً، توصية Hold، النطاق 12.50–21.70) 2026-10-12", "social": [{"who": "@AZK_SA (عبدالله الخميس)", "gist": "أداء مبهر لجرير في الربع الثاني مدعوم بمخزون ما قبل الحرب", "url": "https://x.com/AZK_SA/status/2077297761196622038", "snippet_only": true}, {"who": "@Stock_Affairs (شؤون الأسهم)", "gist": "توزيعات 2025 بلغت 89 هللة بعائد 6.27% عند سعر 14.2", "url": "https://x.com/Stock_Affairs/status/2038902370906636339", "snippet_only": true}, {"who": "@Best_LeadersKSA", "gist": "إعلان توزيع 0.21 ريال عن الربع الأول 2026", "url": "https://x.com/Best_LeadersKSA/status/2054062056182104294", "snippet_only": true}], "S": ["توزيع ربعي منتظم: 0.89 ريال عن 2025 (عائد ~5.9%)", "عائد على حقوق المساهمين ~67%", "ربح النصف الأول 2026 ارتفع 18% إلى 489 مليون"], "R": ["نسبة توزيع ~102% من ربح 2025 تحد من رفعها", "مكرر ربحية ~17 مرة أعلى من نظرائه بالتجزئة", "إجماع المحللين «احتفاظ» وهدف 17.41 فقط (+9%)"], "next": "توزيع الربع الثالث 2026 متوقع مع النتائج أواخر أكتوبر/أوائل نوفمبر 2026 (العام الماضي 0.28 أُعلن 5 نوفمبر)", "sources": [{"label": "أرقام – توزيعات جرير", "url": "https://www.argaam.com/en/reports/company-dividend/60923"}, {"label": "أرقام – Q1 2023 (قبل التجزئة)", "url": "https://argaam.com/en/reports/company-dividend/34135"}, {"label": "أرقام – Q4 2023", "url": "https://argaam.com/en/reports/company-dividend/39947"}, {"label": "أرقام – صفحة جرير", "url": "https://www.argaam.com/en/tadawul/tasi/jarir"}, {"label": "StockAnalysis – إحصاءات", "url": "https://stockanalysis.com/quote/tadawul/4190/statistics/"}, {"label": "StockAnalysis – القوائم", "url": "https://stockanalysis.com/quote/tadawul/4190/financials/"}, {"label": "MarketScreener – الإجماع", "url": "https://www.marketscreener.com/quote/stock/JARIR-MARKETING-COMPANY-6498283/consensus/"}]}, {"code": "4164", "name": "النهدي الطبية", "short": "النهدي", "sector": "الرعاية الصحية", "w": 12, "dps": 5.6, "sh": [1, 1, 1], "sc": [8, 20, 10, 10, 20], "verdict": "توزيع ثابت عند 5.50–5.60 ريال منذ 2023، والسعر الحالي أقل من الأهداف بـ33%.", "price": 89.5, "lo": 89.3, "hi": 122.7, "perf": -26.64, "mcap": 11.64, "pe": 14.73, "roe": 30.31, "payout": 87.6, "bal": "صافي دين ~1.25 مليار ريال (يشمل التزامات إيجار)، دين/حقوق 0.70", "divs": [{"p": "H2-2022", "v": 3.0, "pay": "2023-04-10", "note": "مدفوع في 2023"}, {"p": "H1-2023", "v": 2.5, "pay": "2023-08-24", "note": null}, {"p": "H2-2023", "v": 3.0, "pay": "2024-04-02", "note": null}, {"p": "H1-2024", "v": 2.5, "pay": "2024-08-25", "note": null}, {"p": "H2-2024", "v": 3.0, "pay": "2025-03-25", "note": null}, {"p": "H1-2025", "v": 2.6, "pay": "2025-08-26", "note": null}, {"p": "H2-2025", "v": 3.0, "pay": "2026-04-09", "note": null}, {"p": "H1-2026", "v": 2.6, "pay": "2026-08-26", "note": "أحقية 13-08-2026، إجمالي 338 مليون ريال"}], "annual": {"2023": 5.5, "2024": 5.5, "2025": 5.6, "2026": 2.6}, "anote": "حسب السنة المالية؛ لا تجزئة أو منحة؛ 2026 حتى النصف الأول", "prof": {"2023": 892.6, "2024": 820.7, "2025": 830.7, "H1-2025": 494.0, "H1-2026": 450.9}, "analysts": [{"source": "Riyad Capital", "date": "2026-08-06", "rating": "Neutral", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/nahdi"}, {"source": "ANB Capital", "date": "2026-07-29", "rating": "Overweight", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/nahdi"}, {"source": "ANB Capital", "date": "2026-05-06", "rating": "Overweight", "target_price": 125.7, "url": "https://anbcapital.com.sa/documents/182269/0/Nahdi+Medical+Co.+-+1Q26+Results+Review.pdf/1d0dba2e-b7c7-912c-f689-17976c6c9281?t=1778142393036"}, {"source": "Riyad Capital", "date": "2026-03-26", "rating": "Buy", "target_price": 115.0, "url": "https://maaal.com/news/details/%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6-%D8%A7%D9%84%D9%85%D8%A7%D9%84%D9%8A%D8%A9-%D8%AA%D9%88%D8%B5%D9%8A-%D8%A8%D8%B4%D8%B1-l/"}, {"source": "United Securities", "date": "2026-05-20", "rating": "Hold", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/nahdi"}], "cons": 119.41, "consSrc": "MarketScreener (9 محللين، توصية Buy، النطاق 100–142) 2026-10-12", "social": [{"who": "@malmuqti", "gist": "إعلان توزيع 3 ريالات عن النصف الثاني 2025", "url": "https://x.com/malmuqti/status/2030876915825836141", "snippet_only": true}], "S": ["توزيع مستقر 5.50–5.60 ريال سنوياً منذ 2023 (عائد ~6.3%)", "عائد على حقوق المساهمين ~30%", "إيرادات النصف الأول 2026 نمت 5.9% إلى 5.47 مليار"], "R": ["ربح النصف الأول 2026 تراجع 8.6% بضغط المصاريف التوسعية", "السهم قرب أدنى 52 أسبوعاً وهبط 27% خلال عام", "خفض أهداف من HSBC وسيتي ومورغان ستانلي والرياض المالية في 2026"], "next": "توزيع النصف الثاني 2026 متوقع إعلانه مارس 2027 (العام الماضي 3.00 ريال)", "sources": [{"label": "أرقام – توزيعات النهدي", "url": "https://www.argaam.com/en/reports/company-dividend/56561"}, {"label": "أرقام – توزيع H1 2026", "url": "https://www.argaam.com/ar/reports/company-dividend/60361"}, {"label": "أرقام – صفحة النهدي", "url": "https://www.argaam.com/en/tadawul/tasi/nahdi"}, {"label": "تداول – نتائج H1 2026", "url": "https://www.saudiexchange.sa/Resources/fsPdf/17555_2964_2026-07-28_20-28-26_en.pdf"}, {"label": "StockAnalysis – إحصاءات", "url": "https://stockanalysis.com/quote/tadawul/4164/statistics/"}, {"label": "StockAnalysis – القوائم", "url": "https://stockanalysis.com/quote/tadawul/4164/financials/"}, {"label": "MarketScreener – الإجماع", "url": "https://www.marketscreener.com/quote/stock/NAHDI-MEDICAL-COMPANY-135408012/consensus/"}]}, {"code": "2020", "name": "سابك للمغذيات الزراعية", "short": "سابك للمغذيات", "sector": "المواد الأساسية", "w": 9, "dps": 7.0, "sh": [1, 1, 1], "sc": [15, 20, 5, 15, 20], "verdict": "رفعت التوزيع إلى 7 ريالات (+17%)، والسهم يحقق أعلى عائد بين الشركات الكبرى (6.1%).", "price": 115.3, "lo": 108.3, "hi": 159.3, "perf": -3.92, "mcap": 54.89, "pe": 14.43, "roe": 18.3, "payout": 77.1, "bal": "صافي الربح العائد للمساهمين؛ H1-2025 ≈2.04 مليار (مقرّب)، H1-2026 ≈1.60 مليار (−21%، ربح ربعي Q2 379م −64%) بسبب تعطل سلاسل الإمداد؛ دمج ابن البيطار أقرّته الجمعية غير العادية في مارس 2026؛ ROE لآخر 12 شهراً (StockAnalysis).", "divs": [{"p": "H1-2023", "v": 3.0, "pay": "2023-07-31", "note": null}, {"p": "H2-2023", "v": 3.0, "pay": "2024-02-21", "note": null}, {"p": "H1-2024", "v": 3.0, "pay": "2024-07-22", "note": null}, {"p": "H2-2024", "v": 3.0, "pay": "2025-02-17", "note": null}, {"p": "H1-2025", "v": 3.5, "pay": "2025-08-19", "note": null}, {"p": "H2-2025", "v": 3.5, "pay": "2026-03-30", "note": null}, {"p": "H1-2026", "v": 3.5, "pay": "2026-08-10", "note": "الأحقية 30-07-2026؛ إجمالي 1,666.12 مليون ريال"}], "annual": {"2023": 6.0, "2024": 6.0, "2025": 7.0, "2026": 3.5}, "anote": "توزيع نصف سنوي؛ لا تعديلات رأسمالية منذ 2023 (476.04 مليون سهم). 2026 = النصف الأول فقط.", "prof": {"2023": 3659, "2024": 3327, "2025": 4322, "H1-2025": 2040, "H1-2026": 1606}, "analysts": [{"source": "FAB Securities", "date": "2026-07-29", "rating": "Accumulate", "target_price": 138.0, "url": "https://fabsresearch.bankfab.com/ResearchPortal/Download/Index/1522"}, {"source": "BofA", "date": "2026-09-16", "rating": "Buy", "target_price": 158.0, "url": "https://finimize.com/content/bofa-sees-urea-prices-holding-up-for-sabic-agri-nutrients"}, {"source": "Al Rajhi Capital", "date": "2026-09-04", "rating": "Neutral", "target_price": null, "url": "https://www.marketscreener.com/quote/stock/SABIC-AGRI-NUTRIENTS-COMP-6497974/consensus/"}, {"source": "Riyad Capital", "date": "2026-08-06", "rating": "Neutral", "target_price": null, "url": "https://www.argaam.com/en/tadawul/tasi/sabic-agri-nutrients"}], "cons": 137.68, "consSrc": "MarketScreener (12 محللاً، Outperform؛ أعلى 161 / أدنى 86.54)", "social": [{"who": "@Stock_Affairs (شؤون الأسهم)", "gist": "3.5 ريال للنصف الأول 2026 والسياسة توزيع نصف سنوي (مقتطف فقط)", "url": "https://x.com/Stock_Affairs/status/2081343801205940513"}, {"who": "@Investmentmall7 (سوق الاستثمار)", "gist": "تفاصيل توزيع 35% من رأس المال بإجمالي 1,666 مليون ريال (مقتطف فقط)", "url": "https://x.com/Investmentmall7/status/2081538222589452787"}, {"who": "@Argaam", "gist": "خبر قرار المجلس توزيع أرباح النصف الأول 2026 (مقتطف فقط)", "url": "https://x.com/Argaam/status/2081253728175177923"}], "S": ["توزيعات 7 ريال لعام 2025 بارتفاع 17% عن 2024", "عائد توزيع نحو 6.1% عند سعر 115.30 ريال", "ربح 2025 قفز 30% إلى 4.32 مليار ريال"], "R": ["ربح الربع الثاني 2026 هبط 64% إلى 379 مليون ريال", "تعطل سلاسل الإمداد خفّض الكميات المباعة والهامش إلى 29.5%", "نسبة التوزيع نحو 77% من ربح 2025 تقلّص هامش الأمان"], "next": "توزيع النصف الثاني 2026 يُتوقع إعلانه بين ديسمبر 2026 ومارس 2027 (سابقاً 22 ديسمبر 2024 و1 مارس 2026).", "sources": [{"label": "أرقام – توزيعات سابك للمغذيات", "url": "https://www.argaam.com/en/reports/company-dividend/60170"}, {"label": "أرقام – صفحة الشركة", "url": "https://www.argaam.com/en/tadawul/tasi/sabic-agri-nutrients"}, {"label": "StockAnalysis – الإحصاءات", "url": "https://stockanalysis.com/quote/tadawul/2020/statistics/"}, {"label": "StockAnalysis – القوائم", "url": "https://stockanalysis.com/quote/tadawul/2020/financials/"}, {"label": "FAB – مذكرة 2Q26", "url": "https://fabsresearch.bankfab.com/ResearchPortal/Download/Index/1522"}, {"label": "MarketScreener – الإجماع", "url": "https://www.marketscreener.com/quote/stock/SABIC-AGRI-NUTRIENTS-COMP-6497974/consensus/"}, {"label": "أرقام – دمج ابن البيطار", "url": "https://www.argaam.com/en/article/articledetail/id/1883887"}, {"label": "الاقتصادية – أرباح فصلية تتراجع 64%", "url": "https://www.aleqt.com/%D8%A7%D9%84%D8%B4%D8%B1%D9%83%D8%A7%D8%AA/%D8%A3%D8%B1%D8%A8%D8%A7%D8%AD-%D8%B3%D8%A7%D8%A8%D9%83-%D9%84%D9%84%D9%85%D8%BA%D8%B0%D9%8A%D8%A7%D8%AA-%D8%A7%D9%84%D9%81%D8%B5%D9%84%D9%8A%D8%A9-%D8%AA%D8%AA%D8%B1%D8%A7%D8%AC%D8%B9-64-%D8%A8%D8%B6%D8%BA%D8%B7-%D8%AA%D8%AD%D8%AF%D9%8A%D8%A7%D8%AA-%D8%B3%D9%84%D8%A7%D8%B3%D9%84-%D8%A7%D9%84%D8%A5%D9%85%D8%AF%D8%A7%D8%AF-12474"}]}, {"code": "3030", "name": "أسمنت السعودية", "short": "أسمنت السعودية", "sector": "المواد الأساسية", "w": 7, "dps": 1.8, "sh": [1, 1, 1], "sc": [15, 10, 10, 5, 20], "verdict": "عائد 6.9% بميزانية شبه خالية من الديون، والسعر أقل من متوسط الأهداف بـ42%.", "price": 26.16, "lo": 25.98, "hi": 41.0, "perf": -33.37, "mcap": 4.0, "pe": 11.32, "roe": 17.2, "payout": 75.7, "bal": "صافي دين ~0.31 مليار ريال، دين/حقوق 0.18 (ميزانية متحفظة)", "divs": [{"p": "H2-2022", "v": 1.75, "pay": "2023-05-07", "note": "مدفوع في 2023"}, {"p": "H1-2023", "v": 1.5, "pay": "2023-06-20", "note": null}, {"p": "H2-2023", "v": 1.0, "pay": "2024-05-08", "note": null}, {"p": "H1-2024", "v": 1.25, "pay": "2024-06-26", "note": null}, {"p": "H2-2024", "v": 1.5, "pay": "2025-05-12", "note": null}, {"p": "H1-2025", "v": 1.0, "pay": "2025-07-08", "note": null}, {"p": "H2-2025", "v": 0.8, "pay": "2026-05-11", "note": null}, {"p": "H1-2026", "v": 1.0, "pay": "2026-06-25", "note": null}], "annual": {"2023": 2.5, "2024": 2.75, "2025": 1.8, "2026": 1.0}, "anote": "حسب السنة المالية؛ لا تجزئة؛ 2026 حتى النصف الأول", "prof": {"2023": 381.0, "2024": 421.9, "2025": 363.7, "H1-2025": 204.0, "H1-2026": 202.2}, "analysts": [{"source": "EFG Hermes", "date": "2026-08-10", "rating": "Buy", "target_price": 41.7, "url": "https://www.argaam.com/ar/article/articledetail/id/1938007"}, {"source": "AlphaMena", "date": "2026-08-21", "rating": "Buy", "target_price": 38.7, "url": "https://www.argaam.com/ar/article/articledetail/id/1938007"}, {"source": "U Capital (أوبار كابيتال)", "date": "2026-08-11", "rating": "Buy", "target_price": 34.9, "url": "https://www.argaam.com/ar/article/articledetail/id/1938007"}, {"source": "Riyad Capital", "date": "2026-08-09", "rating": "Neutral", "target_price": 30.0, "url": "https://www.argaam.com/ar/article/articledetail/id/1929718"}], "cons": 37.28, "consSrc": "MarketScreener (5 محللين، Outperform، النطاق 33–41.70) 2026-10-12؛ متوسط أرقام لأربعة بيوت 36.33 (21-09-2026)", "social": [], "S": ["توزيع نصف سنوي دون انقطاع: 1.80 ريال عن 2025 (عائد ~6.9%)", "دين/حقوق 0.18 فقط", "متوسط أهداف المحللين 36–37 ريالاً (+39%)"], "R": ["التوزيع انخفض من 2.75 ريال (2024) إلى 1.80 (2025)", "ربح 2025 تراجع 14% مع ضعف أسعار الأسمنت", "شركة صغيرة الحجم (4 مليارات) وأقل سيولة"], "next": "توزيع النصف الثاني 2026 متوقع إعلانه فبراير 2027 وصرفه نحو مايو 2027 (العام الماضي 0.80)", "sources": [{"label": "أرقام – توزيعات أسمنت السعودية", "url": "https://www.argaam.com/en/reports/company-dividend/58878"}, {"label": "أرقام – صفحة الشركة", "url": "https://www.argaam.com/en/tadawul/tasi/saudi-cement"}, {"label": "أرقام – آراء بيوت الخبرة Q2 2026", "url": "https://www.argaam.com/ar/article/articledetail/id/1938007"}, {"label": "StockAnalysis – إحصاءات", "url": "https://stockanalysis.com/quote/tadawul/3030/statistics/"}, {"label": "StockAnalysis – القوائم", "url": "https://stockanalysis.com/quote/tadawul/3030/financials/"}, {"label": "MarketScreener – الإجماع", "url": "https://www.marketscreener.com/quote/stock/SAUDI-CEMENT-COMPANY-6498204/consensus/"}]}, {"code": "4003", "name": "المتحدة للإلكترونيات (إكسترا)", "short": "إكسترا", "sector": "التجزئة", "w": 6, "dps": 5.0, "sh": [1, 1, 0], "sc": [15, 20, 15, 5, 15], "verdict": "أعلى عائد بين العشرة (9%) بمكرر ربحية 8.8 مرة؛ وإدراجه مشروط بموافقة الهيئة الشرعية.", "price": 55.7, "lo": 53.4, "hi": 93.0, "perf": -39.09, "mcap": 4.46, "pe": 8.81, "roe": 28.13, "payout": 80.5, "bal": "صافي دين ~2.25 مليار ريال (يشمل محفظة تمويل تسهيل)، دين/حقوق 1.22", "divs": [{"p": "H2-2022", "v": 2.0, "pay": "2023-06-04", "note": "مدفوع في 2023"}, {"p": "H1-2023", "v": 1.5, "pay": "2023-08-20", "note": null}, {"p": "H2-2023", "v": 2.0, "pay": "2024-03-21", "note": null}, {"p": "H1-2024", "v": 2.0, "pay": "2024-08-15", "note": null}, {"p": "Q4-2024 خاص", "v": 5.0, "pay": "2024-12-31", "note": "توزيع استثنائي (400 مليون ريال)"}, {"p": "H2-2024", "v": 3.0, "pay": "2025-04-07", "note": null}, {"p": "H1-2025", "v": 2.0, "pay": "2025-08-14", "note": null}, {"p": "H2-2025", "v": 3.0, "pay": "2026-03-12", "note": null}, {"p": "H1-2026", "v": 2.0, "pay": "2026-08-20", "note": null}], "annual": {"2023": 3.5, "2024": 10.0, "2025": 5.0, "2026": 2.0}, "anote": "2024 يشمل توزيعاً استثنائياً 5 ريالات (العادي 5.00)؛ لا تجزئة؛ 2026 حتى النصف الأول", "prof": {"2023": 390.5, "2024": 527.9, "2025": 497.0, "H1-2025": 192.6, "H1-2026": 197.2}, "analysts": [{"source": "AlJazira Capital", "date": "2026-09-01", "rating": "Overweight", "target_price": 85.0, "url": "https://x.com/Investment_corn/status/2094725341432385862", "note": "الهدف من ملخص منشور على X (مقتطف فقط)"}, {"source": "AlJazira Capital", "date": "2026-06-22", "rating": "Overweight", "target_price": 98.6, "url": "https://www.aljaziracapital.com.sa/media/kwibftk2/extra-investment-update-june-2026-en.pdf"}], "cons": 90.58, "consSrc": "Yahoo Finance (النطاق 75–129) 2026-10-12", "social": [{"who": "@THEWOLFOFTASI", "gist": "ربح الربع الثاني 102.6 مليون (-3.7%) بضغط تسهيل", "url": "https://x.com/THEWOLFOFTASI/status/2074744825673404778", "snippet_only": true}, {"who": "@Investment_corn (ركن الاستثمار)", "gist": "الجزيرة: زيادة مراكز وهدف 85 وتوزيع متوقع 4.5 ريال لـ2026", "url": "https://x.com/Investment_corn/status/2094725341432385862", "snippet_only": true}], "S": ["عائد توزيع ~9% (5 ريالات عن 2025)", "مكرر ربحية ~8.8 مرة فقط", "ربح النصف الأول 2026 نما 2% إلى 197 مليون"], "R": ["تعديلات ساما على التمويل الاستهلاكي تضغط على تسهيل", "السهم هبط 39% خلال عام قرب أدنى 52 أسبوعاً", "دين/حقوق 1.22 بسبب محفظة التمويل"], "next": "توزيع النصف الثاني 2026 متوقع مارس 2027 (العام الماضي 3.00؛ الجزيرة تتوقع 4.5 ريال لكامل 2026)", "sources": [{"label": "أرقام – توزيعات إكسترا", "url": "https://www.argaam.com/en/reports/company-dividend/60571"}, {"label": "أرقام – صفحة إكسترا", "url": "https://www.argaam.com/en/tadawul/tasi/extra"}, {"label": "الجزيرة كابيتال – يونيو 2026", "url": "https://www.aljaziracapital.com.sa/media/kwibftk2/extra-investment-update-june-2026-en.pdf"}, {"label": "StockAnalysis – إحصاءات", "url": "https://stockanalysis.com/quote/tadawul/4003/statistics/"}, {"label": "StockAnalysis – القوائم", "url": "https://stockanalysis.com/quote/tadawul/4003/financials/"}, {"label": "Yahoo Finance", "url": "https://finance.yahoo.com/quote/4003.SR/"}]}];
+const CRIT=["تغطية التوزيع بالأرباح","انتظام التوزيع منذ 2023","اتجاه الربح 2026","حجم الشركة","التوافق الشرعي"];
+const SECC={"البنوك":"var(--s1)","الاتصالات":"var(--s2)","الطاقة":"var(--s3)","التجزئة":"var(--s4)","الرعاية الصحية":"var(--s5)","المواد الأساسية":"var(--s6)"};
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const f0=n=>Math.round(n).toLocaleString("en-US"), f2=n=>(+n).toFixed(2), pc=(n,d=1)=>(n>0?"+":"")+n.toFixed(d)+"%";
+const PERIODS=p=>{const m=p.match(/(20\d\d)/);return m?+m[1]:null};
+const isSpecial=p=>/special|خاص/i.test(p);
+// derived metrics
+DATA.forEach(s=>{
+  s.score=s.sc.reduce((a,b)=>a+b,0);
+  s.yield=s.dps/s.price*100;
+  s.up=s.cons?(s.cons/s.price-1)*100:null;
+  const tag=p=>p.replace(/20\d\d/,"").replace(/[^A-Za-z0-9]/g,"");
+  const d26=s.divs.filter(d=>PERIODS(d.p)===2026&&d.v!=null&&!isSpecial(d.p));
+  s.paid26=d26.reduce((a,d)=>a+d.v,0);
+  const tags=new Set(d26.map(d=>tag(d.p)));
+  s.same25=s.divs.filter(d=>PERIODS(d.p)===2025&&d.v!=null&&!isSpecial(d.p)&&tags.has(tag(d.p))).reduce((a,d)=>a+d.v,0);
+  s.g26=s.same25?(s.paid26/s.same25-1)*100:null;
+  s.max26=Math.max(...d26.map(d=>d.v));
+});
+const tierChip=s=>s.score>=80?'<span class="chip g">أمان مرتفع</span>':s.score>=70?'<span class="chip w">أمان جيد</span>':'<span class="chip n">أمان متوسط</span>';
+const gChip=g=>g==null?'':g>0.5?`<span class="chip g">▲ ${pc(g,0)} عن 2025</span>`:g<-0.5?`<span class="chip b">▼ ${pc(g,0)} عن 2025</span>`:'<span class="chip n">ثابت عن 2025</span>';
+const shTxt=s=>{const n=s.sh.filter(Boolean).length;return n===3?'<span class="chip g">متوافق في 3 قوائم</span>':'<span class="chip w">متوافق في قائمتين</span>'};
+
+// KPIs
+(function(){
+  const tw=DATA.reduce((a,s)=>a+s.w,0), wy=DATA.reduce((a,s)=>a+s.w*s.yield,0)/tw;
+  const grow=DATA.filter(s=>s.g26!=null&&s.g26>0.5).length, flat=DATA.filter(s=>s.g26!=null&&Math.abs(s.g26)<=0.5).length;
+  const best=[...DATA].sort((a,b)=>b.yield-a.yield)[0];
+  const ups=DATA.filter(s=>s.up!=null); const avgUp=ups.reduce((a,s)=>a+s.up,0)/ups.length;
+  const K=[[wy.toFixed(1)+"%","العائد المرجح للمحفظة المقترحة، أي نحو "+f0(1.5e6*wy/100)+" ريال سنوياً"],
+    [grow+" رفعت · "+flat+" ثبّتت","توزيعات 2026 مقارنة بالفترة نفسها من 2025، ولم يخفّض أي سهم"],
+    [best.yield.toFixed(1)+"%","أعلى عائد في القائمة: "+best.short],
+    ["+"+avgUp.toFixed(0)+"%","متوسط المسافة بين السعر الحالي والسعر المستهدف لدى المحللين"]];
+  document.getElementById("kpis").innerHTML=K.map(k=>`<div class="kpi"><div class="v">${k[0]}</div><div class="l">${k[1]}</div></div>`).join("");
+})();
+
+// MAP (scatter)
+function drawMap(){
+  const el=document.getElementById("map"), W=Math.max(320,el.clientWidth), H=Math.round(Math.min(420,Math.max(280,W*0.42)));
+  const m={l:46,r:18,t:16,b:34}, x0=55,x1=95,y0=3,y1=10;
+  // RTL: higher score to the left
+  const X=v=>m.l+(x1-v)/(x1-x0)*(W-m.l-m.r), Y=v=>H-m.b-(v-y0)/(y1-y0)*(H-m.t-m.b);
+  let g=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="العائد مقابل درجة الأمان">`;
+  g+=`<rect x="${X(95)}" y="${Y(10)}" width="${X(77.5)-X(95)}" height="${Y(5.25)-Y(10)}" fill="var(--accent-soft)" rx="8"/>`;
+  g+=`<text x="${X(94)}" y="${Y(9.6)}" fill="var(--accent)" font-size="12" font-weight="600" text-anchor="start" direction="rtl">المنطقة المثالية</text>`;
+  for(let v=4;v<=10;v+=2) g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-dasharray="2 4"/><text x="${m.l-8}" y="${Y(v)+4}" font-size="11" fill="var(--muted)" text-anchor="end">${v}%</text>`;
+  for(let v=60;v<=90;v+=10) g+=`<text x="${X(v)}" y="${H-m.b+18}" font-size="11" fill="var(--muted)" text-anchor="middle">${v}</text>`;
+  g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--line)"/>`;
+  const off={"2222":[-1,1],"1140":[1,1],"2020":[1,-1],"7010":[1,-1],"4190":[1,-1],"1150":[1,1]};
+  DATA.forEach(s=>{
+    const cx=X(s.score), cy=Y(s.yield), r=5+s.w*0.55, o=off[s.code]||[1,-1];
+    g+=`<g class="pt" data-c="${s.code}" style="cursor:pointer" tabindex="0" role="button" aria-label="${esc(s.short)}: عائد ${s.yield.toFixed(1)}%، أمان ${s.score}">
+      <circle cx="${cx}" cy="${cy}" r="${r+8}" fill="transparent"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="${SECC[s.sector]}" fill-opacity=".85" stroke="var(--surface)" stroke-width="2"/>
+      <text x="${cx+o[0]*(r+5)}" y="${cy+o[1]*(r+2)+(o[1]>0?9:0)}" font-size="12" font-weight="600" fill="var(--fg)" text-anchor="${o[0]>0?'start':'end'}">${esc(s.short)}</text></g>`;
+  });
+  g+="</svg>"; el.innerHTML=g;
+  const tip=document.getElementById("tip"), box=el.parentElement;
+  el.querySelectorAll(".pt").forEach(p=>{const s=DATA.find(d=>d.code===p.dataset.c);
+    const show=e=>{const rb=box.getBoundingClientRect(), c=p.querySelector("circle:nth-child(2)").getBoundingClientRect();
+      tip.innerHTML=`<b>${esc(s.short)}</b> · عائد ${s.yield.toFixed(1)}% · أمان ${s.score}/100 · وزن ${s.w}%`;
+      let lx=c.left+c.width/2-rb.left; lx=Math.min(Math.max(lx,150),rb.width-150);
+      tip.style.left=(lx-tip.offsetWidth/2)+"px"; tip.style.top=(c.top-rb.top)+"px"; tip.style.transform="translateY(-115%)"; tip.classList.add("on")};
+    p.addEventListener("mouseenter",show); p.addEventListener("focus",show);
+    p.addEventListener("mouseleave",()=>tip.classList.remove("on")); p.addEventListener("blur",()=>tip.classList.remove("on"));
+    p.addEventListener("click",()=>openD(s.code)); p.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openD(s.code)}});
+  });
+}
+
+// SPARK of annual DPS
+function spark(s){
+  const yrs=["2023","2024","2025","2026"], v=yrs.map(y=>s.annual[y]??0), mx=Math.max(...v)||1, W=220,H=38,bw=W/4-10;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">`+v.map((x,i)=>{const h=Math.max(2,(x/mx)*(H-14)), xx=W-(i+1)*(W/4)+5;
+    return `<rect x="${xx}" y="${H-12-h}" width="${bw}" height="${h}" rx="3" fill="${i===3?'var(--gold)':'var(--accent-2)'}" fill-opacity="${i===3?1:.55}"/><text x="${xx+bw/2}" y="${H-1}" font-size="9.5" fill="var(--muted)" text-anchor="middle">${yrs[i]}${i===3?'*':''}</text>`}).join("")+"</svg>";
+}
+
+// GRID
+let sortK="score"; const picked=new Set(DATA.map(s=>s.code));
+function drawGrid(){
+  const arr=[...DATA].sort((a,b)=>(b[sortK]??-1e9)-(a[sortK]??-1e9));
+  const rankBy=[...DATA].sort((a,b)=>b.score-a.score).map(s=>s.code);
+  document.getElementById("grid").innerHTML=arr.map(s=>`
+   <article class="tile" data-c="${s.code}" tabindex="0" role="button" aria-label="تفاصيل ${esc(s.short)}">
+     <div class="row"><div><div class="nm">${esc(s.short)}</div><div class="cd">${s.code} · ${esc(s.sector)}</div></div><span class="rank">#${rankBy.indexOf(s.code)+1}</span></div>
+     <div class="yl"><b>${s.yield.toFixed(1)}%</b><span>عائد سنوي<br>${f2(s.dps)} ريال للسهم</span></div>
+     <div class="row" style="flex-wrap:wrap;justify-content:flex-start;gap:6px">${gChip(s.g26)}${tierChip(s)}</div>
+     <div class="spark">${spark(s)}</div>
+     <dl class="facts" style="margin:0">
+       <div><dt>معلن 2026</dt><dd>${f2(s.paid26)} ر.س</dd></div>
+       <div><dt>السعر</dt><dd>${f2(s.price)}</dd></div>
+       <div><dt>الأمان</dt><dd>${s.score}/100</dd></div>
+       <div><dt>للهدف</dt><dd>${s.up!=null?pc(s.up,0):"—"}</dd></div>
+     </dl>
+     <div class="row"><label class="pick" onclick="event.stopPropagation()"><input type="checkbox" data-pick="${s.code}" ${picked.has(s.code)?"checked":""}> ضمن محفظتي</label><span class="more">التفاصيل ←</span></div>
+   </article>`).join("");
+  document.querySelectorAll(".tile").forEach(t=>{t.addEventListener("click",()=>openD(t.dataset.c));t.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target===t){e.preventDefault();openD(t.dataset.c)}})});
+  document.querySelectorAll("[data-pick]").forEach(cb=>cb.addEventListener("change",()=>{cb.checked?picked.add(cb.dataset.pick):picked.delete(cb.dataset.pick);drawBuilder()}));
+}
+document.querySelectorAll("#sort button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll("#sort button").forEach(x=>x.setAttribute("aria-pressed",x===b));sortK=b.dataset.k;drawGrid()}));
+
+// BUILDER
+let mode="sug";
+document.querySelectorAll("#mode button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll("#mode button").forEach(x=>x.setAttribute("aria-pressed",x===b));mode=b.dataset.m;drawBuilder()}));
+const amtEl=document.getElementById("amt");
+amtEl.addEventListener("input",()=>{const n=+amtEl.value.replace(/[^0-9]/g,"");amtEl.value=n?n.toLocaleString("en-US"):"";drawBuilder()});
+document.getElementById("payr").addEventListener("change",drawBuilder);
+function drawBuilder(){
+  const amt=+amtEl.value.replace(/[^0-9]/g,"")||0, pr=+document.getElementById("payr").value;
+  const sel=DATA.filter(s=>picked.has(s.code)); const tw=sel.reduce((a,s)=>a+s.w,0);
+  const rows=sel.map(s=>{const w=mode==="eq"?1/sel.length:s.w/tw, a=amt*w, sh=Math.floor(a/(s.price*1.0017)), cost=sh*s.price*1.0017, inc=sh*s.dps; return {s,w,a,sh,cost,inc}});
+  const inc=rows.reduce((a,r)=>a+r.inc,0), cost=rows.reduce((a,r)=>a+r.cost,0);
+  document.getElementById("btot").innerHTML=[[f0(inc),"الدخل السنوي المتوقع (ريال)"],[(amt?inc/amt*100:0).toFixed(2)+"%","العائد النقدي على المبلغ"],[f0(inc*pr),"يُصرف للجمعية سنوياً"],[f0(inc*pr/12),"متوسط الصرف الشهري"]].map(x=>`<div><b>${x[0]}</b><span>${x[1]}</span></div>`).join("");
+  const sec={}; rows.forEach(r=>sec[r.s.sector]=(sec[r.s.sector]||0)+r.w);
+  document.getElementById("stack").innerHTML=Object.entries(sec).map(([k,w])=>`<div style="width:${w*100}%;background:${SECC[k]}" title="${k} ${(w*100).toFixed(0)}%"></div>`).join("");
+  document.getElementById("slegend").innerHTML=Object.entries(sec).map(([k,w])=>`<span><i style="background:${SECC[k]}"></i>${k} ${(w*100).toFixed(0)}%</span>`).join("");
+  const W=[];
+  if(sel.length<8) W.push(["w",`اخترت ${sel.length} أسهم فقط. يُفضّل 8 أسهم على الأقل لتوزيع المخاطر.`]);
+  rows.filter(r=>r.w>0.155).forEach(r=>W.push(["w",`وزن ${r.s.short} ${(r.w*100).toFixed(0)}%، وهو أعلى من حد 15% للسهم الواحد.`]));
+  Object.entries(sec).filter(([k,w])=>w>0.305).forEach(([k,w])=>W.push(["w",`قطاع ${k} يبلغ ${(w*100).toFixed(0)}%، وهو أعلى من 30%.`]));
+  if(picked.has("4003")) W.push(["n","إكسترا ضمن اختيارك: يلزم أخذ رأي الهيئة الشرعية بسبب نشاط التمويل الاستهلاكي."]);
+  if(!W.length||W.every(w=>w[0]==="n")) W.unshift(["g","المحفظة ضمن حدود التنويع: 8 أسهم أو أكثر، ولا يتجاوز سهم 15% ولا قطاع 30%."]);
+  const cls={w:"background:var(--warn-soft);color:var(--warn)",g:"background:var(--good-soft);color:var(--good)",n:"background:var(--sunk);color:var(--muted)"};
+  document.getElementById("warns").innerHTML=W.map(w=>`<div style="${cls[w[0]]}">${w[1]}</div>`).join("");
+  document.querySelector("#btab tbody").innerHTML=rows.sort((a,b)=>b.w-a.w).map(r=>`<tr><td><a href="#" data-open="${r.s.code}">${esc(r.s.short)}</a></td><td>${(r.w*100).toFixed(1)}%</td><td class="l">${f0(r.cost)}</td><td class="l">${f0(r.sh)}</td><td class="l">${f0(r.inc)}</td><td class="l">${r.s.yield.toFixed(1)}%</td></tr>`).join("")||`<tr><td colspan="6" class="muted">لم تختر أي سهم بعد. فعّل خانة «ضمن محفظتي» في البطاقات أعلاه.</td></tr>`;
+  document.querySelector("#btab tfoot").innerHTML=rows.length?`<tr><td>الإجمالي (${rows.length})</td><td>100%</td><td class="l">${f0(cost)}</td><td></td><td class="l">${f0(inc)}</td><td class="l">${(cost?inc/cost*100:0).toFixed(2)}%</td></tr><tr><td colspan="6" class="small muted" style="font-weight:400">النقد المتبقي بعد التقريب والعمولة: ${f0(amt-cost)} ريال · العمولة التقديرية 0.17%</td></tr>`:"";
+  document.querySelectorAll("[data-open]").forEach(a=>a.addEventListener("click",e=>{e.preventDefault();openD(a.dataset.open)}));
+}
+
+// DRAWER charts
+function divChart(s){
+  const d=s.divs.filter(x=>PERIODS(x.p)>=2023), n=d.length, W=560,H=190,m={t:22,b:30,l:8,r:8};
+  const mx=Math.max(...d.map(x=>x.v||0))*1.12||1, bw=(W-m.l-m.r)/n;
+  const Y=v=>H-m.b-(v/mx)*(H-m.t-m.b);
+  let g=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="تاريخ التوزيعات">`;
+  g+=`<defs><pattern id="hatch" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="var(--accent-soft)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--accent-2)" stroke-width="2"/></pattern></defs>`;
+  g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}" stroke="var(--line)"/>`;
+  let lastY=null;
+  d.forEach((x,i)=>{const yr=PERIODS(x.p), cx=W-m.r-(i+0.5)*bw, w=Math.min(26,bw*0.62);
+    if(yr!==lastY){ if(lastY!==null) g+=`<line x1="${W-m.r-i*bw}" x2="${W-m.r-i*bw}" y1="${m.t-6}" y2="${H-m.b+22}" stroke="var(--line)" stroke-dasharray="2 3"/>`;
+      const cnt=d.filter(z=>PERIODS(z.p)===yr).length; g+=`<text x="${W-m.r-(i+cnt/2)*bw}" y="${H-8}" font-size="12" font-weight="${yr===2026?700:500}" fill="${yr===2026?'var(--gold)':'var(--muted)'}" text-anchor="middle">${yr}</text>`; lastY=yr;}
+    const tipT=`${x.p}: ${x.v==null?"لا توزيع":f2(x.v)+" ريال"}${x.pay?" · صرف "+x.pay:""}`;
+    if(x.v==null){g+=`<g><title>${esc(tipT)}</title><text x="${cx}" y="${H-m.b-6}" font-size="11" fill="var(--bad)" text-anchor="middle">لا توزيع</text></g>`;return}
+    const sp=isSpecial(x.p), c26=yr===2026, y=Y(x.v);
+    g+=`<g class="dv" data-t="${esc(tipT+(x.note?" — "+x.note:""))}"><rect x="${cx-bw/2}" y="${m.t}" width="${bw}" height="${H-m.b-m.t}" fill="transparent"/><path d="M${cx-w/2},${H-m.b} V${y+4} Q${cx-w/2},${y} ${cx-w/2+4},${y} H${cx+w/2-4} Q${cx+w/2},${y} ${cx+w/2},${y+4} V${H-m.b} Z" fill="${sp?'url(#hatch)':c26?'var(--gold)':'var(--accent-2)'}" fill-opacity="${c26||sp?1:.75}"/>`;
+    if(c26||sp) g+=`<text x="${cx}" y="${y-6}" font-size="11.5" font-weight="700" fill="var(--fg)" text-anchor="middle">${f2(x.v)}</text>`;
+    g+=`</g>`;
+  });
+  return g+"</svg>";
+}
+function profChart(s){
+  const k=["2023","2024","2025"], v=k.map(x=>s.prof[x]), mx=Math.max(...v.filter(x=>x!=null))||1, big=mx>=10000;
+  const fm=x=>x==null?"—":big?(x/1000).toFixed(1)+" مليار":f0(x)+" مليون";
+  return `<div style="display:grid;gap:6px">`+k.map((y,i)=>`<div style="display:grid;grid-template-columns:42px 1fr 92px;gap:8px;align-items:center;font-size:12.5px"><span class="muted">${y}</span><div style="height:10px;background:var(--sunk);border-radius:4px;overflow:hidden"><div style="height:100%;width:${v[i]?v[i]/mx*100:0}%;background:var(--accent-2);border-radius:4px"></div></div><span class="tn" style="text-align:left;direction:ltr">${fm(v[i])}</span></div>`).join("")+`</div>`;
+}
+function openD(code){
+  const s=DATA.find(d=>d.code===code);
+  document.getElementById("dEyebrow").textContent=`${s.code} · ${s.sector} · الترتيب #${[...DATA].sort((a,b)=>b.score-a.score).findIndex(d=>d.code===code)+1} من 10`;
+  document.getElementById("dTitle").textContent=s.name;
+  document.getElementById("dSub").textContent=`السعر ${f2(s.price)} ريال · القيمة السوقية ${s.mcap?f0(s.mcap)+" مليار":"—"} · مكرر الربحية ${s.pe??"—"}`;
+  const h1a=s.prof["H1-2025"], h1b=s.prof["H1-2026"], hg=h1a&&h1b?(h1b/h1a-1)*100:null;
+  const pos=s.hi>s.lo?Math.min(100,Math.max(0,(s.price-s.lo)/(s.hi-s.lo)*100)):50;
+  const lists=["الراجحي المالية","البلاد المالية","د. العصيمي"];
+  const shH=s.sh.map((v,i)=>`<span class="chip ${v?'g':'n'}">${v?'✓':'—'} ${lists[i]}</span>`).join("");
+  const analysts=s.analysts.map(a=>`<tr><td>${a.url?`<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.source)}</a>`:esc(a.source)}</td><td>${esc(a.date??"—")}</td><td>${esc(a.rating??"—")}</td><td class="l">${a.target_price?f2(a.target_price):"—"}</td></tr>`).join("");
+  const voices=(s.social||[]).map(v=>`<a href="${esc(v.url)}" target="_blank" rel="noopener"><b>${esc(v.who)}${v.snippet_only?' · مقتطف':''}</b><div>${esc(v.gist)}</div></a>`).join("")||'<div class="muted small">لم نجد تعليقاً علنياً موثوقاً يضيف معلومة جديدة.</div>';
+  const seen=new Set(); const srcs=[...s.sources,...s.analysts.filter(a=>a.url).map(a=>({label:a.source,url:a.url}))].filter(x=>x.url&&!seen.has(x.url)&&seen.add(x.url));
+  const critC=v=>v>=18?'var(--good)':v>=12?'var(--accent-2)':v>=8?'var(--warn)':'var(--bad)';
+  document.getElementById("dBody").innerHTML=`
+    <div class="verdict">${esc(s.verdict)}</div>
+    <div class="dk">
+      <div><b style="color:var(--accent)">${s.yield.toFixed(1)}%</b><span>العائد السنوي (${f2(s.dps)} ر.س)</span></div>
+      <div><b style="color:var(--gold)">${f2(s.paid26)}</b><span>معلن 2026 حتى الآن ${s.g26!=null?"("+pc(s.g26,0)+")":""}</span></div>
+      <div><b>${s.payout!=null?s.payout.toFixed(0)+"%":"—"}</b><span>نسبة التوزيع من ربح 2025</span></div>
+      <div><b style="color:${s.up>0?'var(--good)':'var(--bad)'}">${s.up!=null?pc(s.up,0):"—"}</b><span>المسافة للسعر المستهدف (${s.cons?f2(s.cons):"—"})</span></div>
+    </div>
+    <div class="panel chart"><h3>التوزيعات منذ 2023 <small>للسهم الواحد، معدلة للمنح والتجزئة · الذهبي = 2026 · المخطط = استثنائي</small></h3>${divChart(s)}
+      <div class="yrs">${["2023","2024","2025","2026"].map(y=>`<div class="${y==="2026"?"cur":""}"><b>${s.annual[y]!=null?f2(s.annual[y]):"—"}</b><span>${y}${y==="2026"?" حتى الآن":""}</span></div>`).join("")}</div>
+      <div class="small muted">${esc(s.anote||"")}</div></div>
+    <div class="two">
+      <div class="panel"><h3>درجة الأمان <small>${s.score}/100</small></h3><div class="crit">${s.sc.map((v,i)=>`<div><span>${CRIT[i]}</span><span class="bar"><i style="width:${v*5}%;background:${critC(v)}"></i></span><span class="tn">${v}/20</span></div>`).join("")}</div></div>
+      <div class="panel"><h3>الربحية <small>صافي الربح</small></h3>${profChart(s)}
+        <div class="small">النصف الأول 2026 مقابل النصف الأول 2025: <b style="color:${hg>0?'var(--good)':'var(--bad)'}">${hg!=null?pc(hg):"—"}</b> · العائد على حقوق المساهمين ${s.roe!=null?s.roe.toFixed(1)+"%":"—"}</div>
+        <div class="small muted">${esc(s.bal)}</div></div>
+    </div>
+    <div class="panel"><h3>السعر خلال 52 أسبوعاً <small>التغير خلال عام: <span class="ltr" style="color:${s.perf>=0?'var(--good)':'var(--bad)'}">${s.perf!=null?pc(s.perf):"—"}</span></small></h3>
+      <div class="range"><i style="right:${pos}%"></i><em style="right:${pos}%">${f2(s.price)}</em></div>
+      <div class="rl"><span>الأدنى ${f2(s.lo)}</span><span>الأعلى ${f2(s.hi)}</span></div>
+      <div class="small muted">${pos<25?"السعر قرب أدنى مستوياته في سنة، فالعائد عند الشراء الآن أعلى.":pos>75?"السعر قرب أعلى مستوياته في سنة.":"السعر في منتصف نطاقه السنوي."}</div></div>
+    <div class="two">
+      <div class="panel"><h3 style="color:var(--good)">لماذا يناسب الوقف</h3><ul class="pts">${s.S.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+      <div class="panel"><h3 style="color:var(--bad)">ما يجب مراقبته</h3><ul class="pts">${s.R.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>
+    </div>
+    <div class="panel"><h3>آراء المحللين <small>متوسط السعر المستهدف <b class="tn">${s.cons?f2(s.cons):"—"}</b></small></h3>${s.consSrc?`<div class="small muted">${esc(s.consSrc)}</div>`:""}
+      <div class="tw"><table><thead><tr><th>الجهة</th><th>التاريخ</th><th>التوصية</th><th class="l">السعر المستهدف</th></tr></thead><tbody>${analysts}</tbody></table></div></div>
+    <div class="panel"><h3>ماذا يقول المتابعون <small>منصة إكس والمواقع المختصة</small></h3><div class="voice">${voices}</div></div>
+    <div class="panel"><h3>التوافق الشرعي</h3><div class="sh3">${shH}</div><div class="small muted">«—» تعني أن السهم غير مدرج في القائمة. قائمة العصيمي (أغسطس 2025) لا تصنّف البنوك أصلاً.${s.code==="4003"?" إكسترا غائب عنها بسبب نشاط التمويل الاستهلاكي.":""}</div></div>
+    <div class="next"><b>التوزيع القادم المتوقع:</b> ${esc(s.next)}</div>
+    <div class="panel"><h3>المراجع <small>${srcs.length} مصدراً</small></h3><div class="srcs">${srcs.map(x=>`<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.label)}</a>`).join("")}</div></div>`;
+  // hover tips on dividend bars
+  const dc=document.querySelector("#dBody .chart"); const tp=document.createElement("div"); tp.className="tip"; dc.appendChild(tp);
+  dc.querySelectorAll(".dv").forEach(b=>{b.addEventListener("mouseenter",()=>{const rb=dc.getBoundingClientRect(), r=b.querySelector("path").getBoundingClientRect();tp.textContent=b.dataset.t;let lx=r.left+r.width/2-rb.left;tp.style.left="0px";tp.classList.add("on");const w=tp.offsetWidth;lx=Math.min(Math.max(lx-w/2,4),rb.width-w-4);tp.style.left=lx+"px";tp.style.top=(r.top-rb.top)+"px";tp.style.transform="translateY(-115%)";tp.style.whiteSpace="normal";tp.style.maxWidth="300px"});b.addEventListener("mouseleave",()=>tp.classList.remove("on"))});
+  const dr=document.getElementById("drawer"); dr.hidden=false; requestAnimationFrame(()=>{dr.classList.add("on");document.getElementById("scrim").classList.add("on")}); dr.scrollTop=0;
+  lastFocus=document.activeElement; document.getElementById("dClose").focus();
+}
+let lastFocus=null;
+function closeD(){const dr=document.getElementById("drawer");dr.classList.remove("on");document.getElementById("scrim").classList.remove("on");setTimeout(()=>{dr.hidden=true},260);lastFocus&&lastFocus.focus&&lastFocus.focus()}
+document.getElementById("dClose").addEventListener("click",closeD);
+document.getElementById("scrim").addEventListener("click",closeD);
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeD()});
+
+drawMap(); drawGrid(); drawBuilder();
+let rt; window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(drawMap,120)});
+</script>
