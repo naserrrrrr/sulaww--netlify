@@ -1,0 +1,24 @@
+{
+  "name": "galaxy-mission",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:single": "tsc --noEmit && vite build --mode single && node scripts/copy-single.mjs",
+    "preview": "vite preview",
+    "render:rocket": "node scripts/render-lottie.mjs"
+  },
+  "dependencies": {
+    "lottie-web": "5.12.2",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "playwright": "^1.48.2",
+    "typescript": "5.7.2",
+    "vite": "6.0.7",
+    "vite-plugin-singlefile": "2.3.1"
+  }
+}
