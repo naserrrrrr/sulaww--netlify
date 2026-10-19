@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Galaxy Mission Assets</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+@font-face{font-family:"MA";src:url("../public/assets/brand/fonts/montserrat-arabic-regular.woff2") format("woff2");font-weight:400}
+@font-face{font-family:"MA";src:url("../public/assets/brand/fonts/montserrat-arabic-bold.woff2") format("woff2");font-weight:700}
+@font-face{font-family:"MA";src:url("../public/assets/brand/fonts/montserrat-arabic-black.woff2") format("woff2");font-weight:900}
+:root{--bg:#F4F2FF;--fg:#101340;--card:#fff;--muted:#5b5f8a;--line:#e1ddff;--primary:#5143DE;--deep:#101340;--water:#D5F7F7}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b0d2e;--fg:#D5F7F7;--card:#151a52;--muted:#9fa6d9;--line:#262c6e}}
+:root[data-theme="dark"]{--bg:#0b0d2e;--fg:#D5F7F7;--card:#151a52;--muted:#9fa6d9;--line:#262c6e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 "MA",system-ui,sans-serif}
+header{background:var(--deep);color:#D5F7F7;padding-block:28px 22px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));position:relative;overflow:hidden}
+header .in{max-width:1240px;margin:auto;display:flex;gap:20px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+header h1{margin:0;font-size:clamp(24px,4vw,38px);font-weight:900;letter-spacing:0}
+header p{margin:4px 0 0;color:#8CD9FF}
+header img.logo{height:56px;padding:14px}
+main{max-width:1240px;margin:auto;padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.plan{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:6px 20px 16px;margin-top:18px}
+.plan h1{font-size:24px;font-weight:900} .plan h2{font-size:19px;margin:22px 0 8px}
+.plan .tw{overflow-x:auto} .plan table{border-collapse:collapse;width:100%;font-size:14px;min-width:560px}
+.plan th,.plan td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:start;vertical-align:top}
+.plan th{color:var(--primary);font-weight:700} .plan code{font-size:12px;background:var(--bg);padding:1px 5px;border-radius:6px}
+.chips{top:env(safe-area-inset-top,0px)}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.stats div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:10px 16px}
+.stats b{font-size:22px;font-weight:900;color:var(--primary);display:block}
+.chips{display:flex;gap:8px;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:3}
+.chip{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:999px;padding:8px 14px;min-height:40px;cursor:pointer}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.chip b{opacity:.7;font-weight:400}
+h2{font-weight:900;font-size:22px;margin:28px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.asset{margin:0;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.panes{display:grid;grid-template-columns:1fr 1fr}
+.pane{aspect-ratio:1;display:flex;align-items:center;justify-content:center;padding:12px}
+.pane.light{background:#fff;background-image:linear-gradient(45deg,#f1f1f6 25%,transparent 25%,transparent 75%,#f1f1f6 75%),linear-gradient(45deg,#f1f1f6 25%,transparent 25%,transparent 75%,#f1f1f6 75%);background-size:16px 16px;background-position:0 0,8px 8px}
+.pane.dark{background:#101340}
+.pane img{max-width:100%;max-height:100%;object-fit:contain}
+.pane .lottie{width:100%;height:100%}
+.pane.font{font-size:17px;text-align:center;font-weight:700}
+.pane.light.font{color:#101340} .pane.dark.font{color:#D5F7F7}
+section[data-cat="background"] .grid{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+section[data-cat="background"] .panes{grid-template-columns:1fr} section[data-cat="background"] .pane.light{display:none}
+section[data-cat="background"] .pane{aspect-ratio:auto;padding:0}
+figcaption{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
+figcaption code{font-weight:700;font-size:14px;align-self:flex-start}
+.meta{color:var(--fg)} .src,.files{color:var(--muted);font-size:12px;align-self:flex-start}
+.palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.sw{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px;display:grid;grid-template-columns:52px 1fr;gap:0 10px;align-items:center}
+.sw span{grid-row:span 4;width:52px;height:52px;border-radius:14px;border:1px solid rgba(0,0,0,.08)}
+.sw small,.sw em{color:var(--muted);font-style:normal;font-size:12px}
+.ex{background:var(--card);border:1px solid var(--line);border-inline-start:5px solid #FA500E;border-radius:14px;padding:12px 18px}
+.ex li{margin:4px 0}
+footer{color:var(--muted);text-align:center;padding:30px 16px}
+</style>
+</head>
+<body>
+<header><div class="in"><div><h1>ورقة مراجعة أصول «مهمة المجرّة»</h1><p>كل الأصول مستخرجة من الهوية الرسمية لريان وبيان — كل أصل على خلفية فاتحة وأخرى داكنة</p></div>
+<img class="logo" src="../public/assets/brand/logo-horizontal-white.svg" alt="ريان وبيان"></div></header>
+<main>
+<div class="stats"><div><b>71</b>أصلاً جاهزاً</div><div><b>9</b>حركات Lottie</div>
+<div><b>5</b>عناصر مستبعدة عمداً</div><div><b>0</b>بدائل مؤقتة</div></div>
+
+<h2>لوحة الألوان (Tokens)</h2><div class="palette"><div class="sw"><span style="background:#5143DE"></span><code dir="ltr">primary</code><b dir="ltr">#5143DE</b><small>Majorelle Blue</small><em>الأزرار والعناصر الرئيسية</em></div><div class="sw"><span style="background:#101340"></span><code dir="ltr">deep</code><b dir="ltr">#101340</b><small>Deadly Depths</small><em>خلفية الفضاء والألواح الداكنة</em></div><div class="sw"><span style="background:#FA500E"></span><code dir="ltr">orange</code><b dir="ltr">#FA500E</b><small>Orioles Orange</small><em>الخطر والزعماء ولهب الدفع</em></div><div class="sw"><span style="background:#FFEC00"></span><code dir="ltr">yellow</code><b dir="ltr">#FFEC00</b><small>Middle Yellow</small><em>العملات والنجوم</em></div><div class="sw"><span style="background:#00DF6A"></span><code dir="ltr">green</code><b dir="ltr">#00DF6A</b><small>Tealish Green</small><em>النجاح والدرع والقلوب</em></div><div class="sw"><span style="background:#EB459F"></span><code dir="ltr">rose</code><b dir="ltr">#EB459F</b><small>Rose Bonbon</small><em>القوى الخاصة</em></div><div class="sw"><span style="background:#8CD9FF"></span><code dir="ltr">sky</code><b dir="ltr">#8CD9FF</b><small>Kul Sharif Blue</small><em>إبراز الواجهة والجليد</em></div><div class="sw"><span style="background:#F876FF"></span><code dir="ltr">flamingo</code><b dir="ltr">#F876FF</b><small>Electric Flamingo</small><em>التوهج والكومبو</em></div><div class="sw"><span style="background:#FFD7FF"></span><code dir="ltr">sugar</code><b dir="ltr">#FFD7FF</b><small>Sugarpills</small><em>خلفيات ناعمة</em></div><div class="sw"><span style="background:#D5F7F7"></span><code dir="ltr">water</code><b dir="ltr">#D5F7F7</b><small>Water</small><em>الألواح الفاتحة والنص على الداكن</em></div></div>
+<h2>مستبعد من اللعب</h2><ul class="ex"><li><code dir="ltr">Guideline p31 cluster 5</code> — Open book with surah names (Al-Asr, Al-Fatiha, Al-Baqara, Ya-Sin, Al-Kawthar)</li><li><code dir="ltr">Guideline p29 cluster 6</code> — Character reading a book (content unverifiable)</li><li><code dir="ltr">App Animation/مشهد القمر</code> — Rayan reading a book on the moon (content unverifiable)</li><li><code dir="ltr">App Animation/ترديد الآيات</code> — Quran recitation scene</li><li><code dir="ltr">App Animation/تسميع القرآن</code> — Quran memorisation scene</li></ul>
+<div class="chips"><button class="chip on" data-f="all">الكل <b>71</b></button><button class="chip" data-f="character">الشخصيات <b>8</b></button><button class="chip" data-f="avatar">الأفاتار <b>4</b></button><button class="chip" data-f="robot">الروبوتات <b>4</b></button><button class="chip" data-f="planet">الكواكب <b>8</b></button><button class="chip" data-f="icon">الأيقونات <b>8</b></button><button class="chip" data-f="sticker">الملصقات <b>5</b></button><button class="chip" data-f="spot">رسوم صغيرة <b>4</b></button><button class="chip" data-f="shape">أشكال <b>5</b></button><button class="chip" data-f="background">خلفيات الفضاء <b>4</b></button><button class="chip" data-f="logo">الشعار <b>6</b></button><button class="chip" data-f="lottie">حركة Lottie <b>9</b></button><button class="chip" data-f="font">الخط <b>6</b></button></div>
+<section data-cat="character"><h2>الشخصيات</h2><div class="grid"><figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/rayan-pose-front.png" alt="rayan-pose-front"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/rayan-pose-front.png" alt="rayan-pose-front"></div></div>
+  <figcaption><code dir="ltr">rayan-pose-front</code><span class="meta">Rayan (boy), front</span>
+  <span class="src" dir="ltr">Guideline.pdf p26 · 756×1024</span><span class="files" dir="ltr">rayan-pose-front.png · rayan-pose-front.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/rayan-pose-point.png" alt="rayan-pose-point"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/rayan-pose-point.png" alt="rayan-pose-point"></div></div>
+  <figcaption><code dir="ltr">rayan-pose-point</code><span class="meta">Rayan pointing, headset</span>
+  <span class="src" dir="ltr">Guideline.pdf p26 · 501×1024</span><span class="files" dir="ltr">rayan-pose-point.png · rayan-pose-point.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/rayan-pose-side.png" alt="rayan-pose-side"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/rayan-pose-side.png" alt="rayan-pose-side"></div></div>
+  <figcaption><code dir="ltr">rayan-pose-side</code><span class="meta">Rayan side view</span>
+  <span class="src" dir="ltr">Guideline.pdf p26 · 334×1024</span><span class="files" dir="ltr">rayan-pose-side.png · rayan-pose-side.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/rayan-pose-wave.png" alt="rayan-pose-wave"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/rayan-pose-wave.png" alt="rayan-pose-wave"></div></div>
+  <figcaption><code dir="ltr">rayan-pose-wave</code><span class="meta">Rayan waving</span>
+  <span class="src" dir="ltr">Guideline.pdf p26 · 633×1024</span><span class="files" dir="ltr">rayan-pose-wave.png · rayan-pose-wave.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/bayan-pose-front.png" alt="bayan-pose-front"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/bayan-pose-front.png" alt="bayan-pose-front"></div></div>
+  <figcaption><code dir="ltr">bayan-pose-front</code><span class="meta">Bayan (girl), front</span>
+  <span class="src" dir="ltr">Guideline.pdf p27 · 1005×1024</span><span class="files" dir="ltr">bayan-pose-front.png · bayan-pose-front.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/bayan-pose-open.png" alt="bayan-pose-open"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/bayan-pose-open.png" alt="bayan-pose-open"></div></div>
+  <figcaption><code dir="ltr">bayan-pose-open</code><span class="meta">Bayan arms open</span>
+  <span class="src" dir="ltr">Guideline.pdf p27 · 847×1024</span><span class="files" dir="ltr">bayan-pose-open.png · bayan-pose-open.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/bayan-pose-side.png" alt="bayan-pose-side"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/bayan-pose-side.png" alt="bayan-pose-side"></div></div>
+  <figcaption><code dir="ltr">bayan-pose-side</code><span class="meta">Bayan side view</span>
+  <span class="src" dir="ltr">Guideline.pdf p27 · 378×1024</span><span class="files" dir="ltr">bayan-pose-side.png · bayan-pose-side.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="character">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/bayan-pose-walk.png" alt="bayan-pose-walk"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/bayan-pose-walk.png" alt="bayan-pose-walk"></div></div>
+  <figcaption><code dir="ltr">bayan-pose-walk</code><span class="meta">Bayan walking</span>
+  <span class="src" dir="ltr">Guideline.pdf p27 · 708×1024</span><span class="files" dir="ltr">bayan-pose-walk.png · bayan-pose-walk.svg</span></figcaption>
+</figure></div></section><section data-cat="avatar"><h2>الأفاتار</h2><div class="grid"><figure class="asset" data-cat="avatar">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/avatar-rayan.png" alt="avatar-rayan"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/avatar-rayan.png" alt="avatar-rayan"></div></div>
+  <figcaption><code dir="ltr">avatar-rayan</code><span class="meta">Rayan helmet avatar</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 512×502</span><span class="files" dir="ltr">avatar-rayan.png · avatar-rayan.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="avatar">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/avatar-bayan.png" alt="avatar-bayan"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/avatar-bayan.png" alt="avatar-bayan"></div></div>
+  <figcaption><code dir="ltr">avatar-bayan</code><span class="meta">Bayan helmet avatar (flower)</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 512×503</span><span class="files" dir="ltr">avatar-bayan.png · avatar-bayan.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="avatar">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/avatar-robot-pink.png" alt="avatar-robot-pink"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/avatar-robot-pink.png" alt="avatar-robot-pink"></div></div>
+  <figcaption><code dir="ltr">avatar-robot-pink</code><span class="meta">Robot head avatar</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 512×409</span><span class="files" dir="ltr">avatar-robot-pink.png · avatar-robot-pink.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="avatar">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/avatar-robot-orange.png" alt="avatar-robot-orange"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/avatar-robot-orange.png" alt="avatar-robot-orange"></div></div>
+  <figcaption><code dir="ltr">avatar-robot-orange</code><span class="meta">Robot head avatar, antennas</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 512×440</span><span class="files" dir="ltr">avatar-robot-orange.png · avatar-robot-orange.svg</span></figcaption>
+</figure></div></section><section data-cat="robot"><h2>الروبوتات</h2><div class="grid"><figure class="asset" data-cat="robot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/robot-sky.png" alt="robot-sky"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/robot-sky.png" alt="robot-sky"></div></div>
+  <figcaption><code dir="ltr">robot-sky</code><span class="meta">Robot, background circle removed</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 322×512</span><span class="files" dir="ltr">robot-sky.png · robot-sky.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="robot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/robot-yellow.png" alt="robot-yellow"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/robot-yellow.png" alt="robot-yellow"></div></div>
+  <figcaption><code dir="ltr">robot-yellow</code><span class="meta">Robot, background circle removed</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 260×512</span><span class="files" dir="ltr">robot-yellow.png · robot-yellow.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="robot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/robot-purple.png" alt="robot-purple"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/robot-purple.png" alt="robot-purple"></div></div>
+  <figcaption><code dir="ltr">robot-purple</code><span class="meta">Robot, background circle removed</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 321×512</span><span class="files" dir="ltr">robot-purple.png · robot-purple.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="robot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/robot-orange.png" alt="robot-orange"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/robot-orange.png" alt="robot-orange"></div></div>
+  <figcaption><code dir="ltr">robot-orange</code><span class="meta">Robot, background circle removed</span>
+  <span class="src" dir="ltr">Guideline.pdf p32 · 322×512</span><span class="files" dir="ltr">robot-orange.png · robot-orange.svg</span></figcaption>
+</figure></div></section><section data-cat="planet"><h2>الكواكب</h2><div class="grid"><figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-saturn.png" alt="planet-saturn"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-saturn.png" alt="planet-saturn"></div></div>
+  <figcaption><code dir="ltr">planet-saturn</code><span class="meta">Saturn</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×344</span><span class="files" dir="ltr">planet-saturn.png · planet-saturn.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-earth.png" alt="planet-earth"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-earth.png" alt="planet-earth"></div></div>
+  <figcaption><code dir="ltr">planet-earth</code><span class="meta">Earth</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×462</span><span class="files" dir="ltr">planet-earth.png · planet-earth.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-jupiter.png" alt="planet-jupiter"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-jupiter.png" alt="planet-jupiter"></div></div>
+  <figcaption><code dir="ltr">planet-jupiter</code><span class="meta">Jupiter</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×467</span><span class="files" dir="ltr">planet-jupiter.png · planet-jupiter.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-uranus.png" alt="planet-uranus"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-uranus.png" alt="planet-uranus"></div></div>
+  <figcaption><code dir="ltr">planet-uranus</code><span class="meta">Uranus</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×298</span><span class="files" dir="ltr">planet-uranus.png · planet-uranus.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-neptune.png" alt="planet-neptune"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-neptune.png" alt="planet-neptune"></div></div>
+  <figcaption><code dir="ltr">planet-neptune</code><span class="meta">Neptune</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×462</span><span class="files" dir="ltr">planet-neptune.png · planet-neptune.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-venus.png" alt="planet-venus"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-venus.png" alt="planet-venus"></div></div>
+  <figcaption><code dir="ltr">planet-venus</code><span class="meta">Venus</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×467</span><span class="files" dir="ltr">planet-venus.png · planet-venus.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-moon.png" alt="planet-moon"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-moon.png" alt="planet-moon"></div></div>
+  <figcaption><code dir="ltr">planet-moon</code><span class="meta">Moon</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×387</span><span class="files" dir="ltr">planet-moon.png · planet-moon.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="planet">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/planet-mars.png" alt="planet-mars"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/planet-mars.png" alt="planet-mars"></div></div>
+  <figcaption><code dir="ltr">planet-mars</code><span class="meta">Mars</span>
+  <span class="src" dir="ltr">Guideline.pdf p33 · 512×467</span><span class="files" dir="ltr">planet-mars.png · planet-mars.svg</span></figcaption>
+</figure></div></section><section data-cat="icon"><h2>الأيقونات</h2><div class="grid"><figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-coin.png" alt="icon-coin"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-coin.png" alt="icon-coin"></div></div>
+  <figcaption><code dir="ltr">icon-coin</code><span class="meta">Coins</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 230×256</span><span class="files" dir="ltr">icon-coin.png · icon-coin.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-notification.png" alt="icon-notification"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-notification.png" alt="icon-notification"></div></div>
+  <figcaption><code dir="ltr">icon-notification</code><span class="meta">Notification</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 234×256</span><span class="files" dir="ltr">icon-notification.png · icon-notification.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-arrow.png" alt="icon-arrow"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-arrow.png" alt="icon-arrow"></div></div>
+  <figcaption><code dir="ltr">icon-arrow</code><span class="meta">Arrow</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 256×189</span><span class="files" dir="ltr">icon-arrow.png · icon-arrow.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-diamond.png" alt="icon-diamond"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-diamond.png" alt="icon-diamond"></div></div>
+  <figcaption><code dir="ltr">icon-diamond</code><span class="meta">Diamond</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 256×225</span><span class="files" dir="ltr">icon-diamond.png · icon-diamond.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-message.png" alt="icon-message"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-message.png" alt="icon-message"></div></div>
+  <figcaption><code dir="ltr">icon-message</code><span class="meta">Messages</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 256×208</span><span class="files" dir="ltr">icon-message.png · icon-message.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-gift.png" alt="icon-gift"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-gift.png" alt="icon-gift"></div></div>
+  <figcaption><code dir="ltr">icon-gift</code><span class="meta">Gift</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 242×256</span><span class="files" dir="ltr">icon-gift.png · icon-gift.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-rocket.png" alt="icon-rocket"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-rocket.png" alt="icon-rocket"></div></div>
+  <figcaption><code dir="ltr">icon-rocket</code><span class="meta">Rocket</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 512×274</span><span class="files" dir="ltr">icon-rocket.png · icon-rocket.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="icon">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/icon-error.png" alt="icon-error"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/icon-error.png" alt="icon-error"></div></div>
+  <figcaption><code dir="ltr">icon-error</code><span class="meta">Error</span>
+  <span class="src" dir="ltr">Guideline.pdf p34 · 256×256</span><span class="files" dir="ltr">icon-error.png · icon-error.svg</span></figcaption>
+</figure></div></section><section data-cat="sticker"><h2>الملصقات</h2><div class="grid"><figure class="asset" data-cat="sticker">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/sticker-laptop.png" alt="sticker-laptop"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/sticker-laptop.png" alt="sticker-laptop"></div></div>
+  <figcaption><code dir="ltr">sticker-laptop</code><span class="meta">Character with laptop</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 512×471</span><span class="files" dir="ltr">sticker-laptop.png · sticker-laptop.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="sticker">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/sticker-bayan-gifts.png" alt="sticker-bayan-gifts"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/sticker-bayan-gifts.png" alt="sticker-bayan-gifts"></div></div>
+  <figcaption><code dir="ltr">sticker-bayan-gifts</code><span class="meta">Bayan celebrating with gifts</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 512×455</span><span class="files" dir="ltr">sticker-bayan-gifts.png · sticker-bayan-gifts.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="sticker">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/sticker-robot-couch.png" alt="sticker-robot-couch"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/sticker-robot-couch.png" alt="sticker-robot-couch"></div></div>
+  <figcaption><code dir="ltr">sticker-robot-couch</code><span class="meta">Robot on couch</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 512×507</span><span class="files" dir="ltr">sticker-robot-couch.png · sticker-robot-couch.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="sticker">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/sticker-robot-laptop.png" alt="sticker-robot-laptop"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/sticker-robot-laptop.png" alt="sticker-robot-laptop"></div></div>
+  <figcaption><code dir="ltr">sticker-robot-laptop</code><span class="meta">Robot on laptop</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 442×512</span><span class="files" dir="ltr">sticker-robot-laptop.png · sticker-robot-laptop.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="sticker">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/sticker-rocket.png" alt="sticker-rocket"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/sticker-rocket.png" alt="sticker-rocket"></div></div>
+  <figcaption><code dir="ltr">sticker-rocket</code><span class="meta">Rocket with flame</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 512×304</span><span class="files" dir="ltr">sticker-rocket.png · sticker-rocket.svg</span></figcaption>
+</figure></div></section><section data-cat="spot"><h2>رسوم صغيرة</h2><div class="grid"><figure class="asset" data-cat="spot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/spot-plant.png" alt="spot-plant"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/spot-plant.png" alt="spot-plant"></div></div>
+  <figcaption><code dir="ltr">spot-plant</code><span class="meta">Plant</span>
+  <span class="src" dir="ltr">Guideline.pdf p31 · 488×512</span><span class="files" dir="ltr">spot-plant.png · spot-plant.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="spot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/spot-monitor.png" alt="spot-monitor"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/spot-monitor.png" alt="spot-monitor"></div></div>
+  <figcaption><code dir="ltr">spot-monitor</code><span class="meta">Monitor</span>
+  <span class="src" dir="ltr">Guideline.pdf p31 · 512×438</span><span class="files" dir="ltr">spot-monitor.png · spot-monitor.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="spot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/spot-moon.png" alt="spot-moon"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/spot-moon.png" alt="spot-moon"></div></div>
+  <figcaption><code dir="ltr">spot-moon</code><span class="meta">Moon</span>
+  <span class="src" dir="ltr">Guideline.pdf p31 · 512×388</span><span class="files" dir="ltr">spot-moon.png · spot-moon.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="spot">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/spot-saturn.png" alt="spot-saturn"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/spot-saturn.png" alt="spot-saturn"></div></div>
+  <figcaption><code dir="ltr">spot-saturn</code><span class="meta">Saturn with star</span>
+  <span class="src" dir="ltr">Guideline.pdf p31 · 512×345</span><span class="files" dir="ltr">spot-saturn.png · spot-saturn.svg</span></figcaption>
+</figure></div></section><section data-cat="shape"><h2>أشكال</h2><div class="grid"><figure class="asset" data-cat="shape">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/burst-green.png" alt="burst-green"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/burst-green.png" alt="burst-green"></div></div>
+  <figcaption><code dir="ltr">burst-green</code><span class="meta">Sparkle burst</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 121×128</span><span class="files" dir="ltr">burst-green.png · burst-green.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="shape">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/burst-purple.png" alt="burst-purple"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/burst-purple.png" alt="burst-purple"></div></div>
+  <figcaption><code dir="ltr">burst-purple</code><span class="meta">Sparkle burst</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 121×128</span><span class="files" dir="ltr">burst-purple.png · burst-purple.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="shape">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/burst-yellow.png" alt="burst-yellow"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/burst-yellow.png" alt="burst-yellow"></div></div>
+  <figcaption><code dir="ltr">burst-yellow</code><span class="meta">Sparkle burst</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 122×128</span><span class="files" dir="ltr">burst-yellow.png · burst-yellow.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="shape">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/burst-orange.png" alt="burst-orange"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/burst-orange.png" alt="burst-orange"></div></div>
+  <figcaption><code dir="ltr">burst-orange</code><span class="meta">Sparkle burst</span>
+  <span class="src" dir="ltr">Guideline.pdf p29 · 122×128</span><span class="files" dir="ltr">burst-orange.png · burst-orange.svg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="shape">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/star-6pt.png" alt="star-6pt"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/star-6pt.png" alt="star-6pt"></div></div>
+  <figcaption><code dir="ltr">star-6pt</code><span class="meta">Background star shape, white for tinting</span>
+  <span class="src" dir="ltr">Guideline.pdf p28</span><span class="files" dir="ltr">star-6pt.png · star-6pt.svg</span></figcaption>
+</figure></div></section><section data-cat="background"><h2>خلفيات الفضاء</h2><div class="grid"><figure class="asset" data-cat="background">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/space-bg-1.jpg" alt="space-bg-1"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/space-bg-1.jpg" alt="space-bg-1"></div></div>
+  <figcaption><code dir="ltr">space-bg-1</code><span class="meta">Official space illustration panel</span>
+  <span class="src" dir="ltr">Guideline.pdf p28 · 1601×743</span><span class="files" dir="ltr">space-bg-1.jpg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="background">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/space-bg-2.jpg" alt="space-bg-2"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/space-bg-2.jpg" alt="space-bg-2"></div></div>
+  <figcaption><code dir="ltr">space-bg-2</code><span class="meta">Official space illustration panel</span>
+  <span class="src" dir="ltr">Guideline.pdf p28 · 1601×743</span><span class="files" dir="ltr">space-bg-2.jpg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="background">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/space-bg-3.jpg" alt="space-bg-3"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/space-bg-3.jpg" alt="space-bg-3"></div></div>
+  <figcaption><code dir="ltr">space-bg-3</code><span class="meta">Official space illustration panel</span>
+  <span class="src" dir="ltr">Guideline.pdf p28 · 1601×743</span><span class="files" dir="ltr">space-bg-3.jpg</span></figcaption>
+</figure>
+<figure class="asset" data-cat="background">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/space-bg-4.jpg" alt="space-bg-4"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/space-bg-4.jpg" alt="space-bg-4"></div></div>
+  <figcaption><code dir="ltr">space-bg-4</code><span class="meta">Official space illustration panel</span>
+  <span class="src" dir="ltr">Guideline.pdf p28 · 1601×743</span><span class="files" dir="ltr">space-bg-4.jpg</span></figcaption>
+</figure></div></section><section data-cat="logo"><h2>الشعار</h2><div class="grid"><figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-horizontal-white.png" alt="logo-horizontal-white"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-horizontal-white.png" alt="logo-horizontal-white"></div></div>
+  <figcaption><code dir="ltr">logo-horizontal-white</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Horizontal Logo/SVG/Logo -0Artboard 9 copy.svg</span><span class="files" dir="ltr">logo-horizontal-white.svg · logo-horizontal-white.png</span></figcaption>
+</figure>
+<figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-horizontal-navy.png" alt="logo-horizontal-navy"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-horizontal-navy.png" alt="logo-horizontal-navy"></div></div>
+  <figcaption><code dir="ltr">logo-horizontal-navy</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Horizontal Logo/SVG/Logo -0Artboard 9.svg</span><span class="files" dir="ltr">logo-horizontal-navy.svg · logo-horizontal-navy.png</span></figcaption>
+</figure>
+<figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-stacked-navy.png" alt="logo-stacked-navy"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-stacked-navy.png" alt="logo-stacked-navy"></div></div>
+  <figcaption><code dir="ltr">logo-stacked-navy</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Stacked Logo/SVG/Logo -0Artboard 9 copy.svg</span><span class="files" dir="ltr">logo-stacked-navy.svg · logo-stacked-navy.png</span></figcaption>
+</figure>
+<figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-stacked-white.png" alt="logo-stacked-white"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-stacked-white.png" alt="logo-stacked-white"></div></div>
+  <figcaption><code dir="ltr">logo-stacked-white</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Stacked Logo/SVG/Logo -0Artboard 9.svg</span><span class="files" dir="ltr">logo-stacked-white.svg · logo-stacked-white.png</span></figcaption>
+</figure>
+<figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-mark-navy.png" alt="logo-mark-navy"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-mark-navy.png" alt="logo-mark-navy"></div></div>
+  <figcaption><code dir="ltr">logo-mark-navy</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Mark/SVG/Logo -0Artboard 18.svg</span><span class="files" dir="ltr">logo-mark-navy.svg · logo-mark-navy.png</span></figcaption>
+</figure>
+<figure class="asset" data-cat="logo">
+  <div class="panes"><div class="pane light"><img decoding="async" src="../public/assets/brand/logo-mark-white.png" alt="logo-mark-white"></div><div class="pane dark"><img decoding="async" src="../public/assets/brand/logo-mark-white.png" alt="logo-mark-white"></div></div>
+  <figcaption><code dir="ltr">logo-mark-white</code><span class="meta">Official logo, unmodified (canvas trimmed only)</span>
+  <span class="src" dir="ltr">Logo/Mark/SVG/Logo -0Artboard 19.svg</span><span class="files" dir="ltr">logo-mark-white.svg · logo-mark-white.png</span></figcaption>
+</figure></div></section><section data-cat="lottie"><h2>حركة Lottie</h2><div class="grid"><figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-rocket.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-rocket.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-rocket</code><span class="meta">Rocket with Rayan &amp; Bayan, flame loop</span>
+  <span class="src" dir="ltr">App Animation/مشهد الصاروخ/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-rocket.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-rayan-fly-1.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-rayan-fly-1.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-rayan-fly-1</code><span class="meta">Rayan flying, pointing</span>
+  <span class="src" dir="ltr">App Animation/ريان/01/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-rayan-fly-1.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-rayan-fly-2.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-rayan-fly-2.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-rayan-fly-2</code><span class="meta">Rayan flying, arms open</span>
+  <span class="src" dir="ltr">App Animation/ريان/02/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-rayan-fly-2.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-bayan-fly-1.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-bayan-fly-1.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-bayan-fly-1</code><span class="meta">Bayan flying</span>
+  <span class="src" dir="ltr">App Animation/بيان/1/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-bayan-fly-1.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-bayan-fly-2.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-bayan-fly-2.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-bayan-fly-2</code><span class="meta">Bayan flying, waving</span>
+  <span class="src" dir="ltr">App Animation/بيان/2/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-bayan-fly-2.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-star-1.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-star-1.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-star-1</code><span class="meta">Smiling star</span>
+  <span class="src" dir="ltr">App Animation/النجوم/01/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-star-1.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-star-2.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-star-2.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-star-2</code><span class="meta">Smiling star</span>
+  <span class="src" dir="ltr">App Animation/النجوم/02/data.json · 1920×1920</span><span class="files" dir="ltr">lottie-star-2.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-celebrate.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-celebrate.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-celebrate</code><span class="meta">Bayan celebrating with gifts</span>
+  <span class="src" dir="ltr">App Animation/ممتاز/data.json · 1904×1636</span><span class="files" dir="ltr">lottie-celebrate.json</span></figcaption>
+</figure>
+<figure class="asset" data-cat="lottie">
+  <div class="panes"><div class="pane light"><div class="lottie" data-src="../public/assets/brand/lottie-logo-intro.json"></div></div><div class="pane dark"><div class="lottie" data-src="../public/assets/brand/lottie-logo-intro.json"></div></div></div>
+  <figcaption><code dir="ltr">lottie-logo-intro</code><span class="meta">Official logo intro scene</span>
+  <span class="src" dir="ltr">App Animation/Logo splash/لوجو .json · 1320×660</span><span class="files" dir="ltr">lottie-logo-intro.json</span></figcaption>
+</figure></div></section><section data-cat="font"><h2>الخط</h2><div class="grid"><figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-regular";src:url("../public/assets/brand/fonts/montserrat-arabic-regular.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-regular'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-regular'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-regular</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-Regular.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-regular.woff2</span></figcaption>
+</figure>
+<figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-medium";src:url("../public/assets/brand/fonts/montserrat-arabic-medium.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-medium'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-medium'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-medium</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-Medium.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-medium.woff2</span></figcaption>
+</figure>
+<figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-semibold";src:url("../public/assets/brand/fonts/montserrat-arabic-semibold.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-semibold'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-semibold'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-semibold</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-SemiBold.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-semibold.woff2</span></figcaption>
+</figure>
+<figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-bold";src:url("../public/assets/brand/fonts/montserrat-arabic-bold.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-bold'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-bold'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-bold</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-Bold.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-bold.woff2</span></figcaption>
+</figure>
+<figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-extrabold";src:url("../public/assets/brand/fonts/montserrat-arabic-extrabold.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-extrabold'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-extrabold'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-extrabold</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-ExtraBold.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-extrabold.woff2</span></figcaption>
+</figure>
+<figure class="asset" data-cat="font">
+  <div class="panes"><style>@font-face{font-family:"brand-font-black";src:url("../public/assets/brand/fonts/montserrat-arabic-black.woff2") format("woff2")}</style><div class="pane light font" style="font-family:'brand-font-black'">مهمة المجرّة 0123456789</div><div class="pane dark font" style="font-family:'brand-font-black'">مهمة المجرّة 0123456789</div></div>
+  <figcaption><code dir="ltr">font-black</code><span class="meta">Official brand typeface (Arabic + Latin)</span>
+  <span class="src" dir="ltr">Fonts/Montserrat-Arabic-Black.ttf</span><span class="files" dir="ltr">fonts/montserrat-arabic-black.woff2</span></figcaption>
+</figure></div></section>
+</main>
+<footer>يُولَّد تلقائياً عبر <code dir="ltr">scripts/build-asset-sheet.py</code> من <code dir="ltr">manifest.json</code></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+<script>
+document.querySelectorAll('.chip').forEach(function(c){c.addEventListener('click',function(){
+  document.querySelectorAll('.chip').forEach(function(x){x.classList.toggle('on',x===c)});
+  var f=c.dataset.f;document.querySelectorAll('main section').forEach(function(s){s.hidden=!(f==='all'||s.dataset.cat===f)});
+})});
+if(window.lottie){document.querySelectorAll('.lottie').forEach(function(el){
+  lottie.loadAnimation({container:el,renderer:'svg',loop:true,autoplay:true,path:el.dataset.src});
+})}
+</script>
+</body>
+</html>
