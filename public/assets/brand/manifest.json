@@ -1,0 +1,959 @@
+{
+ "generatedFrom": "brand/ (Rayan w Bayan official delivery)",
+ "assets": [
+  {
+   "name": "rayan-pose-front",
+   "category": "character",
+   "files": [
+    "rayan-pose-front.png",
+    "rayan-pose-front.svg"
+   ],
+   "source": "Guideline.pdf p26",
+   "note": "Rayan (boy), front",
+   "size": [
+    756,
+    1024
+   ]
+  },
+  {
+   "name": "rayan-pose-point",
+   "category": "character",
+   "files": [
+    "rayan-pose-point.png",
+    "rayan-pose-point.svg"
+   ],
+   "source": "Guideline.pdf p26",
+   "note": "Rayan pointing, headset",
+   "size": [
+    501,
+    1024
+   ]
+  },
+  {
+   "name": "rayan-pose-side",
+   "category": "character",
+   "files": [
+    "rayan-pose-side.png",
+    "rayan-pose-side.svg"
+   ],
+   "source": "Guideline.pdf p26",
+   "note": "Rayan side view",
+   "size": [
+    334,
+    1024
+   ]
+  },
+  {
+   "name": "rayan-pose-wave",
+   "category": "character",
+   "files": [
+    "rayan-pose-wave.png",
+    "rayan-pose-wave.svg"
+   ],
+   "source": "Guideline.pdf p26",
+   "note": "Rayan waving",
+   "size": [
+    633,
+    1024
+   ]
+  },
+  {
+   "name": "bayan-pose-front",
+   "category": "character",
+   "files": [
+    "bayan-pose-front.png",
+    "bayan-pose-front.svg"
+   ],
+   "source": "Guideline.pdf p27",
+   "note": "Bayan (girl), front",
+   "size": [
+    1005,
+    1024
+   ]
+  },
+  {
+   "name": "bayan-pose-open",
+   "category": "character",
+   "files": [
+    "bayan-pose-open.png",
+    "bayan-pose-open.svg"
+   ],
+   "source": "Guideline.pdf p27",
+   "note": "Bayan arms open",
+   "size": [
+    847,
+    1024
+   ]
+  },
+  {
+   "name": "bayan-pose-side",
+   "category": "character",
+   "files": [
+    "bayan-pose-side.png",
+    "bayan-pose-side.svg"
+   ],
+   "source": "Guideline.pdf p27",
+   "note": "Bayan side view",
+   "size": [
+    378,
+    1024
+   ]
+  },
+  {
+   "name": "bayan-pose-walk",
+   "category": "character",
+   "files": [
+    "bayan-pose-walk.png",
+    "bayan-pose-walk.svg"
+   ],
+   "source": "Guideline.pdf p27",
+   "note": "Bayan walking",
+   "size": [
+    708,
+    1024
+   ]
+  },
+  {
+   "name": "avatar-rayan",
+   "category": "avatar",
+   "files": [
+    "avatar-rayan.png",
+    "avatar-rayan.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Rayan helmet avatar",
+   "size": [
+    512,
+    502
+   ]
+  },
+  {
+   "name": "avatar-bayan",
+   "category": "avatar",
+   "files": [
+    "avatar-bayan.png",
+    "avatar-bayan.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Bayan helmet avatar (flower)",
+   "size": [
+    512,
+    503
+   ]
+  },
+  {
+   "name": "avatar-robot-pink",
+   "category": "avatar",
+   "files": [
+    "avatar-robot-pink.png",
+    "avatar-robot-pink.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot head avatar",
+   "size": [
+    512,
+    409
+   ]
+  },
+  {
+   "name": "avatar-robot-orange",
+   "category": "avatar",
+   "files": [
+    "avatar-robot-orange.png",
+    "avatar-robot-orange.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot head avatar, antennas",
+   "size": [
+    512,
+    440
+   ]
+  },
+  {
+   "name": "robot-sky",
+   "category": "robot",
+   "files": [
+    "robot-sky.png",
+    "robot-sky.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot, background circle removed",
+   "size": [
+    322,
+    512
+   ]
+  },
+  {
+   "name": "robot-yellow",
+   "category": "robot",
+   "files": [
+    "robot-yellow.png",
+    "robot-yellow.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot, background circle removed",
+   "size": [
+    260,
+    512
+   ]
+  },
+  {
+   "name": "robot-purple",
+   "category": "robot",
+   "files": [
+    "robot-purple.png",
+    "robot-purple.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot, background circle removed",
+   "size": [
+    321,
+    512
+   ]
+  },
+  {
+   "name": "robot-orange",
+   "category": "robot",
+   "files": [
+    "robot-orange.png",
+    "robot-orange.svg"
+   ],
+   "source": "Guideline.pdf p32",
+   "note": "Robot, background circle removed",
+   "size": [
+    322,
+    512
+   ]
+  },
+  {
+   "name": "planet-saturn",
+   "category": "planet",
+   "files": [
+    "planet-saturn.png",
+    "planet-saturn.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Saturn",
+   "size": [
+    512,
+    344
+   ]
+  },
+  {
+   "name": "planet-earth",
+   "category": "planet",
+   "files": [
+    "planet-earth.png",
+    "planet-earth.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Earth",
+   "size": [
+    512,
+    462
+   ]
+  },
+  {
+   "name": "planet-jupiter",
+   "category": "planet",
+   "files": [
+    "planet-jupiter.png",
+    "planet-jupiter.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Jupiter",
+   "size": [
+    512,
+    467
+   ]
+  },
+  {
+   "name": "planet-uranus",
+   "category": "planet",
+   "files": [
+    "planet-uranus.png",
+    "planet-uranus.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Uranus",
+   "size": [
+    512,
+    298
+   ]
+  },
+  {
+   "name": "planet-neptune",
+   "category": "planet",
+   "files": [
+    "planet-neptune.png",
+    "planet-neptune.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Neptune",
+   "size": [
+    512,
+    462
+   ]
+  },
+  {
+   "name": "planet-venus",
+   "category": "planet",
+   "files": [
+    "planet-venus.png",
+    "planet-venus.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Venus",
+   "size": [
+    512,
+    467
+   ]
+  },
+  {
+   "name": "planet-moon",
+   "category": "planet",
+   "files": [
+    "planet-moon.png",
+    "planet-moon.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Moon",
+   "size": [
+    512,
+    387
+   ]
+  },
+  {
+   "name": "planet-mars",
+   "category": "planet",
+   "files": [
+    "planet-mars.png",
+    "planet-mars.svg"
+   ],
+   "source": "Guideline.pdf p33",
+   "note": "Mars",
+   "size": [
+    512,
+    467
+   ]
+  },
+  {
+   "name": "icon-coin",
+   "category": "icon",
+   "files": [
+    "icon-coin.png",
+    "icon-coin.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Coins",
+   "size": [
+    230,
+    256
+   ]
+  },
+  {
+   "name": "icon-notification",
+   "category": "icon",
+   "files": [
+    "icon-notification.png",
+    "icon-notification.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Notification",
+   "size": [
+    234,
+    256
+   ]
+  },
+  {
+   "name": "icon-arrow",
+   "category": "icon",
+   "files": [
+    "icon-arrow.png",
+    "icon-arrow.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Arrow",
+   "size": [
+    256,
+    189
+   ]
+  },
+  {
+   "name": "icon-diamond",
+   "category": "icon",
+   "files": [
+    "icon-diamond.png",
+    "icon-diamond.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Diamond",
+   "size": [
+    256,
+    225
+   ]
+  },
+  {
+   "name": "icon-message",
+   "category": "icon",
+   "files": [
+    "icon-message.png",
+    "icon-message.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Messages",
+   "size": [
+    256,
+    208
+   ]
+  },
+  {
+   "name": "icon-gift",
+   "category": "icon",
+   "files": [
+    "icon-gift.png",
+    "icon-gift.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Gift",
+   "size": [
+    242,
+    256
+   ]
+  },
+  {
+   "name": "icon-rocket",
+   "category": "icon",
+   "files": [
+    "icon-rocket.png",
+    "icon-rocket.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Rocket",
+   "size": [
+    512,
+    274
+   ]
+  },
+  {
+   "name": "icon-error",
+   "category": "icon",
+   "files": [
+    "icon-error.png",
+    "icon-error.svg"
+   ],
+   "source": "Guideline.pdf p34",
+   "note": "Error",
+   "size": [
+    256,
+    256
+   ]
+  },
+  {
+   "name": "sticker-laptop",
+   "category": "sticker",
+   "files": [
+    "sticker-laptop.png",
+    "sticker-laptop.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Character with laptop",
+   "size": [
+    512,
+    471
+   ]
+  },
+  {
+   "name": "sticker-bayan-gifts",
+   "category": "sticker",
+   "files": [
+    "sticker-bayan-gifts.png",
+    "sticker-bayan-gifts.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Bayan celebrating with gifts",
+   "size": [
+    512,
+    455
+   ]
+  },
+  {
+   "name": "sticker-robot-couch",
+   "category": "sticker",
+   "files": [
+    "sticker-robot-couch.png",
+    "sticker-robot-couch.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Robot on couch",
+   "size": [
+    512,
+    507
+   ]
+  },
+  {
+   "name": "sticker-robot-laptop",
+   "category": "sticker",
+   "files": [
+    "sticker-robot-laptop.png",
+    "sticker-robot-laptop.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Robot on laptop",
+   "size": [
+    442,
+    512
+   ]
+  },
+  {
+   "name": "sticker-rocket",
+   "category": "sticker",
+   "files": [
+    "sticker-rocket.png",
+    "sticker-rocket.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Rocket with flame",
+   "size": [
+    512,
+    304
+   ]
+  },
+  {
+   "name": "burst-green",
+   "category": "shape",
+   "files": [
+    "burst-green.png",
+    "burst-green.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Sparkle burst",
+   "size": [
+    121,
+    128
+   ]
+  },
+  {
+   "name": "burst-purple",
+   "category": "shape",
+   "files": [
+    "burst-purple.png",
+    "burst-purple.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Sparkle burst",
+   "size": [
+    121,
+    128
+   ]
+  },
+  {
+   "name": "burst-yellow",
+   "category": "shape",
+   "files": [
+    "burst-yellow.png",
+    "burst-yellow.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Sparkle burst",
+   "size": [
+    122,
+    128
+   ]
+  },
+  {
+   "name": "burst-orange",
+   "category": "shape",
+   "files": [
+    "burst-orange.png",
+    "burst-orange.svg"
+   ],
+   "source": "Guideline.pdf p29",
+   "note": "Sparkle burst",
+   "size": [
+    122,
+    128
+   ]
+  },
+  {
+   "name": "spot-plant",
+   "category": "spot",
+   "files": [
+    "spot-plant.png",
+    "spot-plant.svg"
+   ],
+   "source": "Guideline.pdf p31",
+   "note": "Plant",
+   "size": [
+    488,
+    512
+   ]
+  },
+  {
+   "name": "spot-monitor",
+   "category": "spot",
+   "files": [
+    "spot-monitor.png",
+    "spot-monitor.svg"
+   ],
+   "source": "Guideline.pdf p31",
+   "note": "Monitor",
+   "size": [
+    512,
+    438
+   ]
+  },
+  {
+   "name": "spot-moon",
+   "category": "spot",
+   "files": [
+    "spot-moon.png",
+    "spot-moon.svg"
+   ],
+   "source": "Guideline.pdf p31",
+   "note": "Moon",
+   "size": [
+    512,
+    388
+   ]
+  },
+  {
+   "name": "spot-saturn",
+   "category": "spot",
+   "files": [
+    "spot-saturn.png",
+    "spot-saturn.svg"
+   ],
+   "source": "Guideline.pdf p31",
+   "note": "Saturn with star",
+   "size": [
+    512,
+    345
+   ]
+  },
+  {
+   "name": "space-bg-1",
+   "category": "background",
+   "files": [
+    "space-bg-1.jpg"
+   ],
+   "source": "Guideline.pdf p28",
+   "note": "Official space illustration panel",
+   "size": [
+    1601,
+    743
+   ]
+  },
+  {
+   "name": "space-bg-2",
+   "category": "background",
+   "files": [
+    "space-bg-2.jpg"
+   ],
+   "source": "Guideline.pdf p28",
+   "note": "Official space illustration panel",
+   "size": [
+    1601,
+    743
+   ]
+  },
+  {
+   "name": "space-bg-3",
+   "category": "background",
+   "files": [
+    "space-bg-3.jpg"
+   ],
+   "source": "Guideline.pdf p28",
+   "note": "Official space illustration panel",
+   "size": [
+    1601,
+    743
+   ]
+  },
+  {
+   "name": "space-bg-4",
+   "category": "background",
+   "files": [
+    "space-bg-4.jpg"
+   ],
+   "source": "Guideline.pdf p28",
+   "note": "Official space illustration panel",
+   "size": [
+    1601,
+    743
+   ]
+  },
+  {
+   "name": "star-6pt",
+   "category": "shape",
+   "files": [
+    "star-6pt.png",
+    "star-6pt.svg"
+   ],
+   "source": "Guideline.pdf p28",
+   "note": "Background star shape, white for tinting"
+  },
+  {
+   "name": "logo-horizontal-white",
+   "category": "logo",
+   "files": [
+    "logo-horizontal-white.svg",
+    "logo-horizontal-white.png"
+   ],
+   "source": "Logo/Horizontal Logo/SVG/Logo -0Artboard 9 copy.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "logo-horizontal-navy",
+   "category": "logo",
+   "files": [
+    "logo-horizontal-navy.svg",
+    "logo-horizontal-navy.png"
+   ],
+   "source": "Logo/Horizontal Logo/SVG/Logo -0Artboard 9.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "logo-stacked-navy",
+   "category": "logo",
+   "files": [
+    "logo-stacked-navy.svg",
+    "logo-stacked-navy.png"
+   ],
+   "source": "Logo/Stacked Logo/SVG/Logo -0Artboard 9 copy.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "logo-stacked-white",
+   "category": "logo",
+   "files": [
+    "logo-stacked-white.svg",
+    "logo-stacked-white.png"
+   ],
+   "source": "Logo/Stacked Logo/SVG/Logo -0Artboard 9.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "logo-mark-navy",
+   "category": "logo",
+   "files": [
+    "logo-mark-navy.svg",
+    "logo-mark-navy.png"
+   ],
+   "source": "Logo/Mark/SVG/Logo -0Artboard 18.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "logo-mark-white",
+   "category": "logo",
+   "files": [
+    "logo-mark-white.svg",
+    "logo-mark-white.png"
+   ],
+   "source": "Logo/Mark/SVG/Logo -0Artboard 19.svg",
+   "note": "Official logo, unmodified (canvas trimmed only)"
+  },
+  {
+   "name": "lottie-rocket",
+   "category": "lottie",
+   "files": [
+    "lottie-rocket.json"
+   ],
+   "source": "App Animation/مشهد الصاروخ/data.json",
+   "note": "Rocket with Rayan & Bayan, flame loop",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 4.57
+  },
+  {
+   "name": "lottie-rayan-fly-1",
+   "category": "lottie",
+   "files": [
+    "lottie-rayan-fly-1.json"
+   ],
+   "source": "App Animation/ريان/01/data.json",
+   "note": "Rayan flying, pointing",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 5.03
+  },
+  {
+   "name": "lottie-rayan-fly-2",
+   "category": "lottie",
+   "files": [
+    "lottie-rayan-fly-2.json"
+   ],
+   "source": "App Animation/ريان/02/data.json",
+   "note": "Rayan flying, arms open",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 5.92
+  },
+  {
+   "name": "lottie-bayan-fly-1",
+   "category": "lottie",
+   "files": [
+    "lottie-bayan-fly-1.json"
+   ],
+   "source": "App Animation/بيان/1/data.json",
+   "note": "Bayan flying",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 4.93
+  },
+  {
+   "name": "lottie-bayan-fly-2",
+   "category": "lottie",
+   "files": [
+    "lottie-bayan-fly-2.json"
+   ],
+   "source": "App Animation/بيان/2/data.json",
+   "note": "Bayan flying, waving",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 6.0
+  },
+  {
+   "name": "lottie-star-1",
+   "category": "lottie",
+   "files": [
+    "lottie-star-1.json"
+   ],
+   "source": "App Animation/النجوم/01/data.json",
+   "note": "Smiling star",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 5.03
+  },
+  {
+   "name": "lottie-star-2",
+   "category": "lottie",
+   "files": [
+    "lottie-star-2.json"
+   ],
+   "source": "App Animation/النجوم/02/data.json",
+   "note": "Smiling star",
+   "size": [
+    1920,
+    1920
+   ],
+   "seconds": 5.03
+  },
+  {
+   "name": "lottie-celebrate",
+   "category": "lottie",
+   "files": [
+    "lottie-celebrate.json"
+   ],
+   "source": "App Animation/ممتاز/data.json",
+   "note": "Bayan celebrating with gifts",
+   "size": [
+    1904,
+    1636
+   ],
+   "seconds": 3.3
+  },
+  {
+   "name": "lottie-logo-intro",
+   "category": "lottie",
+   "files": [
+    "lottie-logo-intro.json"
+   ],
+   "source": "App Animation/Logo splash/لوجو .json",
+   "note": "Official logo intro scene",
+   "size": [
+    1320,
+    660
+   ],
+   "seconds": 3.1
+  },
+  {
+   "name": "font-regular",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-regular.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-Regular.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  },
+  {
+   "name": "font-medium",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-medium.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-Medium.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  },
+  {
+   "name": "font-semibold",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-semibold.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-SemiBold.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  },
+  {
+   "name": "font-bold",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-bold.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-Bold.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  },
+  {
+   "name": "font-extrabold",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-extrabold.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-ExtraBold.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  },
+  {
+   "name": "font-black",
+   "category": "font",
+   "files": [
+    "fonts/montserrat-arabic-black.woff2"
+   ],
+   "source": "Fonts/Montserrat-Arabic-Black.ttf",
+   "note": "Official brand typeface (Arabic + Latin)"
+  }
+ ],
+ "excluded": [
+  {
+   "source": "Guideline p31 cluster 5",
+   "reason": "Open book with surah names (Al-Asr, Al-Fatiha, Al-Baqara, Ya-Sin, Al-Kawthar)"
+  },
+  {
+   "source": "Guideline p29 cluster 6",
+   "reason": "Character reading a book (content unverifiable)"
+  },
+  {
+   "source": "App Animation/مشهد القمر",
+   "reason": "Rayan reading a book on the moon (content unverifiable)"
+  },
+  {
+   "source": "App Animation/ترديد الآيات",
+   "reason": "Quran recitation scene"
+  },
+  {
+   "source": "App Animation/تسميع القرآن",
+   "reason": "Quran memorisation scene"
+  }
+ ]
+}
