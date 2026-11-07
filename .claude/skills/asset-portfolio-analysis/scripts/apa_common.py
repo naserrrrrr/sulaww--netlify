@@ -213,10 +213,20 @@ def _hijri_to_greg(y: int, m: int, d: int) -> Tuple[Optional[str], Optional[str]
         return None, f"تاريخ هجري غير صالح: {exc}"
 
 
+AMBIGUOUS_DATE_NOTE = "تاريخ ملتبس: اليوم والشهر ≤ 12؛ قُرئ يوم/شهر"
+
+
+def _join_notes(*notes) -> Optional[str]:
+    parts = [n for n in notes if n]
+    return "؛ ".join(parts) if parts else None
+
+
 def parse_date(v: Any, calendar_hint: str = "auto") -> dict:
     """Return {"v": iso_gregorian|None, "s": status, "raw": str, "calendar": ..., "note": ...}.
 
     calendar_hint: auto | hijri | gregorian. The original text is always kept in raw.
+    Text in day/month/year order is read as day/month; when both day and month are ≤ 12 (and differ) the note
+    carries AMBIGUOUS_DATE_NOTE so the reading is checked against the source.
     """
     out = {"v": None, "s": S_BLANK, "raw": None if v is None else str(v), "calendar": None, "note": None}
     if v is None:
@@ -241,10 +251,14 @@ def parse_date(v: Any, calendar_hint: str = "auto") -> dict:
     nums = [int(x) for x in re.findall(r"\d+", c)]
     if len(nums) >= 3:
         a, b, d3 = nums[0], nums[1], nums[2]
+        ambiguous = None
         if a >= 1000:
             y, m, d = a, b, d3
         elif d3 >= 1000:
             y, m, d = d3, b, a
+            if a <= 12 and b <= 12 and a != b:
+                # «03/04/2021» may be 3 April (day/month) or 4 March (month/day): read as day/month, but say so
+                ambiguous = AMBIGUOUS_DATE_NOTE
         else:
             out.update(s=S_TEXT, note="صيغة تاريخ غير محددة")
             return out
@@ -252,13 +266,13 @@ def parse_date(v: Any, calendar_hint: str = "auto") -> dict:
         if hijri:
             out["calendar"] = "hijri"
             g, note = _hijri_to_greg(y, m, d)
-            out.update(v=g, s=S_VALUE if g else S_TEXT, note=note)
+            out.update(v=g, s=S_VALUE if g else S_TEXT, note=_join_notes(ambiguous, note))
             out["hijri"] = f"{y:04d}-{m:02d}-{d:02d}"
             return out
         try:
-            out.update(v=_dt.date(y, m, d).isoformat(), s=S_VALUE, calendar="gregorian")
+            out.update(v=_dt.date(y, m, d).isoformat(), s=S_VALUE, calendar="gregorian", note=ambiguous)
         except ValueError as exc:
-            out.update(s=S_TEXT, note=f"تاريخ ميلادي غير صالح: {exc}")
+            out.update(s=S_TEXT, note=_join_notes(ambiguous, f"تاريخ ميلادي غير صالح: {exc}"))
         return out
     if len(nums) == 1 and 1300 <= nums[0] <= 1500:
         out.update(s=S_TEXT, calendar="hijri", note="سنة هجرية فقط")
@@ -364,6 +378,27 @@ def _self_test_pii() -> None:
         assert pii_value_hits(x), f"PII pattern miss: {x!r}"
     for x in tests.get("must_not_match", []):
         assert not pii_value_hits(x), f"PII false positive: {x!r} -> {pii_value_hits(x)}"
+
+
+# Header test that tolerates spelling variants the raw pattern misses: tatweel («اســم المستــأجر»), hamza/taa-marbuta
+# folding («المستاجر»، «هويه»). Same pattern source as PII_HEADER_RE, folded the way normalize_arabic folds text.
+def _fold_ar_letters(s: str) -> str:
+    s = re.sub("[أإآٱ]", "ا", s)
+    return s.replace("ى", "ي").replace("ة", "ه").replace("ؤ", "و").replace("ئ", "ي")
+
+
+PII_HEADER_FOLDED_RE = re.compile("(" + _fold_ar_letters(PII_PATTERNS["header"]["pattern"]) + ")",
+                                  _flags(PII_PATTERNS["header"].get("flags")))
+
+
+def is_pii_header(header: Any) -> bool:
+    """True when a column header names personal data (contact, ID, IBAN, a person such as tenant/owner/beneficiary)."""
+    if header is None:
+        return False
+    s = clean_text(header)
+    if not s:
+        return False
+    return bool(PII_HEADER_RE.search(s) or PII_HEADER_FOLDED_RE.search(normalize_arabic(s)))
 
 
 def ref(sheet: str, coord: str) -> str:

@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 
+sys.dont_write_bytecode = True  # never leave __pycache__ inside the skill folder
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import argparse  # noqa: E402
@@ -34,9 +35,9 @@ import zipfile  # noqa: E402
 from collections import Counter, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    CONTRACT_VERSION, EMAIL_RE, EXCEL_ERRORS, NA_TOKENS, NOT_APPLICABLE_TOKENS, PII_HEADER_RE,
-    PHONE_RE, clean_text, extract_years, is_filler, looks_like_phone, name_key,
-    normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
+    AMBIGUOUS_DATE_NOTE, CONTRACT_VERSION, EXCEL_ERRORS, NA_TOKENS, NOT_APPLICABLE_TOKENS, REDACTED,
+    clean_text, extract_years, is_filler, is_pii_header, is_total_label, looks_like_phone, mask_pii, name_key,
+    normalize_arabic, parse_date, parse_number, pii_value_hits, ref, save_json, sha256_file,
 )
 import formula_eval as fe  # noqa: E402
 from functools import lru_cache  # noqa: E402
@@ -45,8 +46,7 @@ from functools import lru_cache  # noqa: E402
 normalize_arabic = lru_cache(maxsize=262144)(normalize_arabic)
 name_key = lru_cache(maxsize=262144)(name_key)
 
-SCRIPT_VERSION = "1.0.0"
-REDACTED = "<محجوب>"
+SCRIPT_VERSION = "1.1.0"
 TOL = fe.TOLERANCE
 SEV_RANK = {"high": 0, "medium": 1, "low": 2, "info": 3}
 SEV_AR = {"high": "مرتفعة", "medium": "متوسطة", "low": "منخفضة", "info": "معلوماتية"}
@@ -84,6 +84,8 @@ TYPE_AR = {
     "outside_table_rows": "بيانات خارج نطاق جدول Excel",
     "hidden_rows": "صفوف بيانات مخفية",
     "hidden_columns": "أعمدة مخفية تحتوي بيانات",
+    "mixed_calendar": "عمود تواريخ يخلط التقويمين الهجري والميلادي",
+    "formula_blank_inputs": "صيغة قيمتها المخزنة صفر ومدخلاتها فارغة",
 }
 
 ROLE_AR = {
@@ -100,7 +102,7 @@ KIND_AR = {"data": "بيانات", "header": "عناوين", "title": "عنوا�
            "total_formula": "إجمالي بصيغة", "total_label": "إجمالي مدوّن", "filler": "حشو", "blank": "فارغ"}
 
 # --- regexes applied to normalize_arabic() text -----------------------------------------
-TOTAL_LABEL_RE = re.compile(r"^(ال)?(مجموع|اجمالي|جمله)(\s|$|ال)|^(grand\s+)?total\b|^sum\b")
+# Total/subtotal row labels: apa_common.TOTAL_LABEL_RE / is_total_label (shared with normalize.py).
 TOTAL_HDR_RE = re.compile(r"(اجمالي|مجموع|\btotal\b)")
 SECTION_RE = re.compile(r"^(اولا|ثانيا|ثالثا|رابعا|خامسا|سادسا|سابعا|ثامنا|تاسعا|عاشرا|الحادي عشر|الثاني عشر"
                         r"|القسم|الجزء|المجموعه|الفئه|section|part)\b")
@@ -116,6 +118,9 @@ COUNT_HDR_RE = re.compile(r"^(ال)?عدد")
 AREA_HDR_RE = re.compile(r"(مساحه|مسطح|م2|متر مربع|\barea\b)")
 VALUATION_HDR_RE = re.compile(r"(تقييم|القيمه السوقيه|قيمه العقار|valuation)")
 REVENUE_HDR_RE = re.compile(r"(ايراد|ايجار|دخل|revenue|income|rent)")
+# «طبيعة الدخل»، «نوع الإيراد»، «تصنيف الأصل»، «حالة التقييم»: a classification of an amount, not an amount.
+CLASSIFIER_HDR_RE = re.compile(r"(^|[\s/(\-])(ال)?(طبيعه|نوع|تصنيف|حاله)($|[\s/)\-])"
+                               r"|\b(type|category|status|nature)\b")
 EXPENSE_HDR_RE = re.compile(r"(مصروف|مصاريف|تكلفه|تكاليف|expense|cost)")
 DATE_HDR_RE = re.compile(r"(تاريخ|\bdate\b)")
 VAT_EXCL_RE = re.compile(r"((بدون|غير شامل|قبل|بلا|دون|غير متضمن)\s*(ال)?ضريب|excl)")
@@ -132,6 +137,10 @@ LOOKUP_NAME_RE = re.compile(r"(منسدل|قوايم|قايمه|lookup|list|تر
 MANAGED_NAME_RE = re.compile(r"(اداره املاك|اداره الاملاك|املاك الغير|للغير|managed)")
 ALLOC_NAME_RE = re.compile(r"(تخصيص|توزيع|allocation)")
 ACTIVITY_RE = re.compile(r"(نشاط|مدارس|مدرسه|تشغيل|activity)")
+
+# A header candidate below an accepted header (a new sub-table) needs this share of its labels above numeric/date
+# columns, unless it scores at least as high as the header above it (see analyze_structure).
+LATER_HEADER_MIN_CONTRAST = 0.5
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 _NA_SET = {normalize_arabic(t) for t in NA_TOKENS} | {normalize_arabic(t) for t in NOT_APPLICABLE_TOKENS}
@@ -184,14 +193,11 @@ def jnum(v):
 
 
 def redact_text(s: str) -> str:
-    """Mask phone numbers and e-mails inside free text."""
+    """Mask personal data inside free text (mobile/landline numbers, e-mails, IBANs — the block-level patterns of
+    assets/pii_patterns.json). Arabic-Indic digits are matched too; the rest of the text is kept as written."""
     if not s:
         return s
-    t = EMAIL_RE.sub(REDACTED, s)
-    t2 = t.translate(_AR_DIGITS)
-    if PHONE_RE.search(t2):
-        t = PHONE_RE.sub(REDACTED, t2)
-    return t
+    return mask_pii(s, ("block",))[0]
 
 
 def short(s: str, n: int = 80) -> str:
@@ -785,10 +791,21 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
     def total_label(r):
         content, texts, _ = feats[r]
         for c in texts:
-            t = normalize_arabic(sv.value(r, c))
-            if len(t) <= 45 and TOTAL_LABEL_RE.search(t):
+            v = sv.value(r, c)
+            if len(clean_text(v)) <= 45 and is_total_label(v):
                 return c
         return None
+
+    def label_only_total(r):
+        """A total/subtotal label whose other cells are empty, Excel errors (#VALUE!…) or n/a marks — e.g. «المجموع»
+        with a broken SUBTOTAL. It has no number, yet it is a total row, never an asset."""
+        content, texts, nums = feats[r]
+        if nums or len(texts) != 1:
+            return False
+        lab = total_label(r)
+        if lab is None:
+            return False
+        return all(sv.kind(r, c) in ("E", "A") for c in content if c != lab)
 
     def agg_cells(r):
         """Numeric cells holding vertical aggregates of their own column above r."""
@@ -825,6 +842,22 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
                     out.append(c)
                     break
         return out
+
+    def total_row(r):
+        """A total/subtotal row: a table totals row, a total label next to numbers, a label-only total, or (outside
+        Excel tables) a row of vertical aggregates of its own columns."""
+        if r in table_tot:
+            return True
+        _content, _texts, nums = feats[r]
+        if not nums:
+            return label_only_total(r)
+        if total_label(r) is not None:
+            return True
+        if any((r, c) in sv.formulas for c in nums):
+            ag = agg_cells(r)
+            if ag and not in_table_data(r) and (len(ag) >= 2 or len(ag) >= 0.5 * len(nums)):
+                return True
+        return False
 
     # --- header candidates -----------------------------------------------------------------
     used_cols = {c for r in content_rows for c in feats[r][0]}
@@ -863,20 +896,66 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
         if mean_len > 50:
             score -= 0.3
         score -= 0.2 * (len(nums) / len(content))
-        cand.append((r, round(max(0.0, min(1.0, score)), 3), contrast))
+        cand.append((r, round(max(0.0, min(1.0, score)), 3), round(contrast, 3)))
 
+    # --- choose header rows -------------------------------------------------------------------
+    # Walk down the sheet. The first candidate is the header. A later candidate is a header only when it opens a new
+    # block: it is separated from the rows above it (a blank/filler row, or a title / section label / total row right
+    # above it) and looks like a header (contrast ≥ LATER_HEADER_MIN_CONTRAST, or scores at least as high as the header
+    # above). A text-heavy row inside a block of data rows (e.g. «4 محلات ومستودع» in a numeric column) stays data.
     selected = {}
     for r, ts in table_hdr.items():
         selected[r] = "table"
-    zero_contrast_taken = False
-    for r, s, contrast in sorted(cand, key=lambda x: (-x[1], x[0])):
-        if r in selected or in_table_data(r) or r in table_tot or s < 0.6:
+    table_end = {r: max(t.max_row for t in ts) for r, ts in table_hdr.items()}
+    info = {r: (s, contrast) for r, s, contrast in cand}
+    sa.candidate_contrast = {r: contrast for r, _s, contrast in cand}
+
+    def boundary_row(p):
+        """Right above a new sub-table header: a total row or a short text line (title / section label / note)."""
+        content, _texts, nums = feats[p]
+        return total_row(p) or (not nums and len(content) <= 2)
+
+    def group_header(h):
+        return any(r1 == h and c2 > c1 for (r1, c1, _r2, c2) in sv.merged)
+
+    def separator_row(p):
+        """Strictly not data: a total row, a section label («ثانيًا: …»، «…:») or a title merged across columns."""
+        content, texts, nums = feats[p]
+        if total_row(p):
+            return True
+        if nums or len(content) > 2 or not texts:
+            return False
+        t = normalize_arabic(sv.value(p, texts[0]))
+        return bool(SECTION_RE.match(t)) or t.endswith(":") or group_header(p)
+
+    eligible = sorted(r for r, s, _ in cand
+                      if s >= 0.6 and r not in selected and not in_table_data(r) and r not in table_tot)
+    for r in eligible:
+        s, contrast = info[r]
+        above = [h for h in selected if h < r]
+        if not above:
+            selected[r] = "scored"
             continue
+        h = max(above)
         if contrast == 0:
-            if zero_contrast_taken or any(h < r for h in selected):
-                continue
-            zero_contrast_taken = True
-        selected[r] = "scored"
+            continue
+        i_from = bisect.bisect_right(content_rows, h)      # first content row below the header above
+        if not any(not separator_row(content_rows[k]) for k in range(i_from, pos[r])):
+            # no data row since the header above (only totals / section labels / merged titles, or nothing):
+            # both rows compete for the same block of data
+            if selected[h] == "table":
+                if r > table_end[h]:
+                    selected[r] = "scored"
+            elif i_from == pos[r] and r - 1 == h and group_header(h):
+                selected[r] = "scored"              # two-tier header: merged group labels over column labels
+            elif s > info.get(h, (0.0, 0.0))[0]:
+                del selected[h]                     # the lower row is the better header; the upper one is a title line
+                selected[r] = "scored"
+            continue
+        separated = (r - 1) not in feats or boundary_row(content_rows[pos[r] - 1])
+        s_above = info[h][0] if h in info and selected[h] == "scored" else 0.99
+        if separated and (contrast >= LATER_HEADER_MIN_CONTRAST or s >= s_above):
+            selected[r] = "scored"
     # repeated headers (same texts as an accepted header)
     hdr_sets = {h: {normalize_arabic(sv.value(h, c)) for c in feats[h][1]} for h in selected if h in feats}
     for r in content_rows:
@@ -907,18 +986,8 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
         if r in selected:
             sa.row_kind[r] = "header"
             continue
-        is_total = False
-        if r in table_tot:
-            is_total = True
-        elif nums:
-            lab = total_label(r)
-            ag = agg_cells(r) if any((r, c) in sv.formulas for c in nums) else []
-            if lab is not None:
-                is_total = True
-            elif ag and not in_table_data(r) and (len(ag) >= 2 or len(ag) >= 0.5 * len(nums)):
-                is_total = True
-        if is_total:
-            sa.row_kind[r] = "total_formula" if any((r, c) in sv.formulas for c in nums) else "total_label"
+        if total_row(r):
+            sa.row_kind[r] = "total_formula" if any((r, c) in sv.formulas for c in content) else "total_label"
             sa.total_rows.append(r)
             continue
         if not nums and len(content) <= 2 and texts:
@@ -1056,8 +1125,20 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
 # =========================================================================================
 # Column profiling
 # =========================================================================================
-def is_pii_header(header: str) -> bool:
-    return bool(header) and bool(PII_HEADER_RE.search(header))
+_NUMERIC_MEANING_HINTS = {"serial", "valuation", "revenue", "expense", "money", "count", "area", "date", "deed",
+                          "total", "land", "building"}
+
+
+def _is_national_id_value(v) -> bool:
+    """The whole cell is one 10-digit number starting with 1 or 2 (shared «national_id» pattern, review level)."""
+    if isinstance(v, bool) or v is None:
+        return False
+    if isinstance(v, float):
+        if not v.is_integer():
+            return False
+        v = int(v)
+    s = str(v).translate(_AR_DIGITS).strip()
+    return len(re.sub(r"\D", "", s)) == 10 and "national_id" in pii_value_hits(s, ("review",))
 
 
 def column_hints(hn: str, profile: dict, url_like: int, digit_share: float = 0.0) -> list:
@@ -1066,13 +1147,17 @@ def column_hints(hn: str, profile: dict, url_like: int, digit_share: float = 0.0
         hints.append("serial")
     if NAME_HDR_RE.search(hn) and not NOT_NAME_HDR_RE.search(hn):
         hints.append("name")
-    if VALUATION_HDR_RE.search(hn):
+    # «طبيعة الدخل»/«نوع الإيراد»/«حالة التقييم» classify an amount; the column holds categories, not money
+    classifier = bool(CLASSIFIER_HDR_RE.search(hn))
+    if classifier:
+        hints.append("category")
+    if VALUATION_HDR_RE.search(hn) and not classifier:
         hints.append("valuation")
-    if REVENUE_HDR_RE.search(hn):
+    if REVENUE_HDR_RE.search(hn) and not classifier:
         hints.append("revenue")
-    if EXPENSE_HDR_RE.search(hn):
+    if EXPENSE_HDR_RE.search(hn) and not classifier:
         hints.append("expense")
-    if MONEY_HDR_RE.search(hn):
+    if MONEY_HDR_RE.search(hn) and not classifier:
         hints.append("money")
     if COUNT_HDR_RE.search(hn):
         hints.append("count")
@@ -1113,7 +1198,8 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
         prof = Counter()
         samples, seen = [], set()
         text_keys = {}
-        phone_like = url_like = hijri = digit_cells = 0
+        phone_like = nid_like = url_like = digit_cells = 0
+        hijri_rows, greg_rows = [], []
         nonempty = 0
         num_vals = []
         text_examples = []
@@ -1152,12 +1238,16 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
                     url_like += 1
             elif k == "D":
                 prof["date"] += 1
+                if isinstance(v, (dt.datetime, dt.date)):
+                    greg_rows.append(r)       # an Excel date cell is always Gregorian
             elif k == "H":
                 prof["date"] += 1
                 prof["date_text"] += 1
-                pdv = parse_date(v)
-                if pdv.get("calendar") == "hijri":
-                    hijri += 1
+                cal = parse_date(v).get("calendar")
+                if cal == "hijri":
+                    hijri_rows.append(r)
+                elif cal == "gregorian":
+                    greg_rows.append(r)
             elif k == "A":
                 prof["na"] += 1
             elif k == "E":
@@ -1166,8 +1256,10 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
                 prof["uncached"] += 1
             elif k == "L":
                 prof["bool"] += 1
-            if looks_like_phone(v) or (isinstance(v, str) and EMAIL_RE.search(v)):
+            if looks_like_phone(v) or ({"email", "iban"} & set(pii_value_hits(v, ("block",)))):
                 phone_like += 1
+            elif (k == "X" or (k == "N" and hdr)) and _is_national_id_value(v):
+                nid_like += 1         # a bare number in an unlabeled column may be an amount: text form only
             if k in ("N", "Z", "X") or (isinstance(v, str) and re.search(r"\d", v.translate(_AR_DIGITS))):
                 digit_cells += 1
             if len(samples) < 3 and k not in ("M",):
@@ -1176,11 +1268,6 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
                     seen.add(d)
                     samples.append(d)
         hn = normalize_arabic(hdr) if hdr else ""
-        pii_reason = None
-        if hdr and is_pii_header(hdr):
-            pii_reason = "header"
-        elif nonempty and phone_like >= 0.5 * nonempty:
-            pii_reason = "pattern"
         profile = {key: prof.get(key, 0) for key in ("numeric", "zero", "text", "blank", "filler", "error",
                                                      "formula", "date")}
         for extra in ("numeric_text", "date_text", "na", "uncached", "bool"):
@@ -1188,14 +1275,27 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
                 profile[extra] = prof[extra]
         groups = sum(1 for g in (profile["numeric"], profile["text"], profile["date"]) if g)
         hints = column_hints(hn, profile, url_like, digit_cells / nonempty if nonempty else 0.0)
+        pii_reason = None
+        if hdr and is_pii_header(hdr):
+            pii_reason = "header"
+        elif nonempty and phone_like >= 0.5 * nonempty:
+            pii_reason = "pattern"
+        elif nonempty and nid_like >= 0.5 * nonempty and not (set(hints) & _NUMERIC_MEANING_HINTS):
+            # 10-digit numbers starting with 1/2 (Saudi national ID / iqama) in a column whose header gives them
+            # no other meaning (not an amount, area, serial, deed or date)
+            pii_reason = "pattern"
         if pii_reason:
             hints = ["pii"] + [h for h in hints if h not in ("name",)]
+        hijri = len(hijri_rows)
         notes = []
         if "count" in hints and profile["numeric"] and not profile["text"]:
             notes.append("عمود عددي («عدد…»): تحقّق من تعريف العدد قبل جمعه أو استنتاج الإشغال منه "
                          "(مثل الوحدات مقابل الأدوار أو الصكوك)")
         if hijri:
             notes.append(f"تواريخ هجرية مخزنة كنص ({hijri}) — تُحوَّل بتقويم أم القرى مع حفظ النص الأصلي")
+        if hijri and greg_rows:
+            notes.append(f"العمود يخلط التقويمين (هجري {hijri}، ميلادي {len(greg_rows)}) — يُحدَّد التقويم لكل قيمة "
+                         "ولا يُترك auto")
         if "url" in hints:
             notes.append("روابط مواقع (ليست بيانات مالية)")
         out[c] = {
@@ -1214,6 +1314,8 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
             "_text_examples": text_examples,
             "_num_vals": num_vals,
             "_hijri": hijri,
+            "_hijri_rows": hijri_rows,
+            "_greg_rows": greg_rows,
             "_hn": hn,
         }
     return out
@@ -1249,7 +1351,7 @@ def detect_key_columns(sa: SheetAnalysis, fam, profiles: dict) -> dict:
         keys["name"] = best[1]
     for c, p in profiles.items():
         hn = p["_hn"]
-        if not hn:
+        if not hn or p["pii"]:
             continue
         if "serial" in p["hints"] and "serial" not in keys:
             vals = [v for _, v in p["_num_vals"] if v is not None]
@@ -1261,7 +1363,7 @@ def detect_key_columns(sa: SheetAnalysis, fam, profiles: dict) -> dict:
     if "serial" not in keys and rows:
         # fallback: leftmost column whose header is a serial word even if values are sparse
         for c, p in sorted(profiles.items()):
-            if p["_hn"] in SERIAL_EXACT:
+            if p["_hn"] in SERIAL_EXACT and not p["pii"]:
                 keys["serial"] = c
                 break
     _ = sv
@@ -1291,6 +1393,63 @@ class Anomalies:
 
 
 # ---- formulas ----------------------------------------------------------------------------
+_COUNT_FUNCS = {"COUNT", "COUNTA", "COUNTBLANK", "COUNTIF", "COUNTIFS", "ROWS", "COLUMNS"}
+_BLANK_INPUT_KINDS = ("B", "F", "A")      # empty, whitespace-only, n/a marks («-»، «غير متوفر»)
+_BLANK_SCAN_CELLS = 5000                  # larger precedent ranges are not scanned (not flagged)
+
+
+def blank_input_areas(book: Book, ev: fe.Evaluator, sheet: str, r: int, c: int, memo: dict, depth: int = 0):
+    """Referenced areas of the formula at sheet!(r, c) when EVERY referenced cell is blank / filler / n-a, or is
+    itself a formula of that kind with a cached 0 (or no cached value); else None. Counting formulas (COUNT…) are
+    excluded: a count of nothing is a true zero."""
+    key = (sheet, r, c)
+    if key in memo:
+        return memo[key]
+    memo[key] = None                      # cycle guard
+    sv = book.sheet(sheet)
+    text = sv.formulas.get((r, c)) if sv is not None else None
+    if not text or depth > 4:
+        return None
+    try:
+        ast = ev.parse(text)
+    except fe.NotEvaluable:
+        return None
+    ag = fe.aggregate_kind(ast)
+    if {f.upper() for f in fe.functions_used(ast)} & _COUNT_FUNCS or (ag and ag[0] in ("count", "counta")):
+        return None
+    nodes = fe.iter_ref_nodes(ast)
+    if not nodes:
+        return None
+    budget = _BLANK_SCAN_CELLS
+    areas = []
+    for node in nodes:
+        try:
+            area = ev.resolve(node, sheet, r, c)
+        except fe.NotEvaluable:
+            return None
+        osv = book.sheet(area.sheet)
+        if osv is None:
+            return None
+        budget -= (area.r2 - area.r1 + 1) * (area.c2 - area.c1 + 1)
+        if budget < 0:
+            return None
+        for rr in range(area.r1, area.r2 + 1):
+            for cc in range(area.c1, area.c2 + 1):
+                if (osv.name, rr, cc) == key:
+                    continue
+                k = osv.kind(rr, cc)
+                if k in _BLANK_INPUT_KINDS:
+                    continue
+                if (rr, cc) in osv.formulas and k in ("Z", "M") and \
+                        blank_input_areas(book, ev, osv.name, rr, cc, memo, depth + 1) is not None:
+                    continue
+                return None
+        a1 = f"{col_letter(area.c1)}{area.r1}" + ("" if area.is_single() else f":{col_letter(area.c2)}{area.r2}")
+        areas.append(a1 if area.sheet == sheet else ref(area.sheet, a1))
+    memo[key] = areas
+    return areas
+
+
 def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, an: Anomalies, pii_cols: set):
     sv = sa.sv
     stats = {"count": len(sv.formulas), "cached_missing": 0, "errors": 0, "evaluated": 0, "not_evaluated": 0,
@@ -1299,6 +1458,8 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
     missing, errors, mismatches, broken = [], [], [], []
     year_groups = defaultdict(list)
     derived_groups = defaultdict(list)
+    blank_groups = defaultdict(list)
+    blank_memo = {}
     year_flagged = set()
     for (r, c) in sorted(sv.formulas):
         text = sv.formulas[(r, c)]
@@ -1329,6 +1490,11 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
         except fe.NotEvaluable:
             continue
         hdr = sa.header_for(r, c)
+        # --- formula_blank_inputs: a cached 0 computed only from empty cells is unknown, not zero
+        if sv.kind(r, c) == "Z":
+            areas = blank_input_areas(book, ev, sv.name, r, c, blank_memo)
+            if areas is not None:
+                blank_groups[c].append((r, text, areas))
         # --- formula_year_mismatch
         if hdr and sa.row_kind.get(r) == "data":
             years_h = set(extract_years(hdr))
@@ -1576,6 +1742,22 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
                 "rows": compress_ints([x[0] for x in items])[:30], "count": len(items)},
                order=(r0, c))
 
+    # formula_blank_inputs (aggregated per column)
+    for c, items in sorted(blank_groups.items()):
+        r0, text0, areas0 = items[0]
+        hdr = sa.header_for(r0, c)
+        rows_ = [x[0] for x in items]
+        an.add("formula_blank_inputs", "medium", sv.name, ref(sv.name, area_ref(c, rows_)),
+               f"صيغ في العمود {col_letter(c)}" + (f" «{short(hdr, 60)}»" if hdr else "")
+               + f" (عددها {len(items)}) قيمتها المخزنة صفر وكل الخلايا التي تقرؤها فارغة أو غير متاحة: "
+               f"{col_letter(c)}{r0} بالصيغة {text0} ومدخلاتها {'، '.join(areas0[:4])}"
+               + (f"؛ والصفوف {rows_text(rows_, 8)}" if len(items) > 1 else "")
+               + ". الصفر هنا ناتج عن خانات فارغة لا عن قيمة مسجلة؛ يُعامل كغير متاح ولا يدخل المجاميع صفرًا.",
+               {"col": col_letter(c), "header": hdr, "count": len(items), "rows": compress_ints(rows_)[:30],
+                "examples": [{"ref": f"{col_letter(c)}{x[0]}", "formula": x[1], "cached": 0, "inputs": x[2][:6]}
+                             for x in items[:8]]},
+               order=(r0, c))
+
 
 # ---- totals -----------------------------------------------------------------------------
 def check_totals(sa: SheetAnalysis, an: Anomalies, ev: fe.Evaluator, pii_cols: set):
@@ -1619,7 +1801,7 @@ def check_totals(sa: SheetAnalysis, an: Anomalies, ev: fe.Evaluator, pii_cols: s
         serial_col = keys.get("serial")
         label_c = None
         for c in texts:
-            if TOTAL_LABEL_RE.search(normalize_arabic(sv.value(t_row, c))):
+            if is_total_label(sv.value(t_row, c)):
                 label_c = c
                 break
         label = re.sub("ـ+", "", sv.text(t_row, label_c)) if label_c else ("صف إجمالي الجدول" if t_row in table_tot else "")
@@ -1831,12 +2013,8 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                        "لا تجمعها SUM في Excel؛ تُحوَّل عند التطبيع مع حفظ النص الأصلي.",
                        {"col": L, "header": hdr, "cells": pr["numeric_text"]}, order=(first_row, c))
             if p["_hijri"]:
-                ex_rows = [r for r in rows if sv.kind(r, c) == "H"][:3]
-                conv = []
-                for r in ex_rows:
-                    d = parse_date(sv.value(r, c))
-                    conv.append({"ref": f"{L}{r}", "raw": clean_text(sv.value(r, c)), "hijri": d.get("hijri"),
-                                 "gregorian": d.get("v"), "note": d.get("note")})
+                ex_rows = p["_hijri_rows"][:3]       # Hijri cells only (never a Gregorian «15/03/2019» as example)
+                conv = [_date_example(sv, r, c) for r in ex_rows]
                 an.add("hijri_date_text", "low", sv.name, ref(sv.name, f"{L}{ex_rows[0]}" if ex_rows else f"{L}:{L}"),
                        f"العمود {L}{hdr_txt} يحتوي {p['_hijri']} تاريخًا هجريًا مخزنًا كنص (مثل «{conv[0]['raw']}» ≈ "
                        f"{conv[0]['gregorian'] or 'غير قابل للتحويل'} ميلادي). يُحوَّل بتقويم أم القرى مع حفظ الأصل، "
@@ -1844,6 +2022,26 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                        f"العمود {L}{hdr_txt} يحتوي تواريخ هجرية نصية.",
                        {"col": L, "header": hdr, "count": p["_hijri"], "examples": conv},
                        order=(ex_rows[0] if ex_rows else first_row, c))
+            if p["_hijri_rows"] and p["_greg_rows"]:
+                h_rows, g_rows = p["_hijri_rows"], p["_greg_rows"]
+                g_ex = [_date_example(sv, r, c) for r in g_rows[:3]]
+                h_ex = [_date_example(sv, r, c) for r in h_rows[:3]]
+                both = sorted(h_rows + g_rows)
+                an.add("mixed_calendar", "medium", sv.name, ref(sv.name, area_ref(c, both)),
+                       f"العمود {L}{hdr_txt}{fam_label} يخلط التقويمين: تواريخ هجرية (عددها {len(h_rows)}، مثل "
+                       f"«{h_ex[0]['raw']}» في {h_ex[0]['ref']}) وتواريخ ميلادية (عددها {len(g_rows)}، مثل "
+                       f"«{g_ex[0]['raw']}» في {g_ex[0]['ref']}). لا يُربط العمود بتقويم auto ولا تُقارن قيمه قبل تحديد "
+                       "تقويم كل خلية؛ ويُسجل الخلط مشكلة بيانات.",
+                       {"col": L, "header": hdr, "hijri_count": len(h_rows), "gregorian_count": len(g_rows),
+                        "hijri_rows": compress_ints(h_rows)[:20], "gregorian_rows": compress_ints(g_rows)[:20],
+                        "hijri_examples": h_ex, "gregorian_examples": g_ex},
+                       order=(both[0], c))
+            ambiguous = [r for r in rows if sv.kind(r, c) == "H"
+                         and (parse_date(sv.value(r, c)).get("note") or "").startswith(AMBIGUOUS_DATE_NOTE)]
+            if ambiguous:
+                p["notes"].append(f"{len(ambiguous)} تاريخًا نصيًا ملتبسًا (اليوم والشهر ≤ 12، مثل "
+                                  f"«{clean_text(sv.value(ambiguous[0], c))}» في {L}{ambiguous[0]}) — قُرئ يوم/شهر؛ "
+                                  "يُتحقق من ترتيب اليوم والشهر في المصدر")
             if "valuation" in p["hints"] and pr["zero"]:
                 zero_val[c] = (pr["zero"], pr["numeric"],
                                [r for r in rows if sv.kind(r, c) == "Z" or (sv.kind(r, c) == "X" and sv.numval.get((r, c)) == 0)])
@@ -1983,7 +2181,14 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                        f"رقم الصك «{short(k, 40)}» مشترك بين {len(rws)} صفوف ({rows_text(rws)})"
                        + (f": {'، '.join('«' + short(sv.text(r, nc2), 40) + '»' for r in rws[:4])}" if nc2 else "")
                        + ". قد يمثل أصلًا واحدًا بعدة سجلات أو صكًا يغطي عدة قطع؛ يحتاج فصلًا أو تحققًا قبل العد والجمع.",
-                       {"col": col_letter(dc), "deed": k, "rows": rws[:20], "refs": [ref(sv.name, f"{col_letter(dc)}{r}") for r in rws[:20]]}, order=(rws[0], dc))
+                       {"col": col_letter(dc), "deed": redact_text(k), "rows": rws[:20], "refs": [ref(sv.name, f"{col_letter(dc)}{r}") for r in rws[:20]]}, order=(rws[0], dc))
+
+
+def _date_example(sv: SheetView, r: int, c: int) -> dict:
+    v = sv.value(r, c)
+    d = parse_date(v)
+    return {"ref": f"{col_letter(c)}{r}", "raw": clean_text(v) if isinstance(v, str) else display_value(v),
+            "calendar": d.get("calendar"), "hijri": d.get("hijri"), "gregorian": d.get("v"), "note": d.get("note")}
 
 
 def _garbled(h: str):
@@ -2116,7 +2321,8 @@ def check_pii(sa: SheetAnalysis, an: Anomalies, pii_out: list):
             pii_out.append({"sheet": sv.name, "col": col_letter(c), "header": p["header"], "reason": p["_pii_reason"]})
             an.add("pii_column", "info", sv.name, ref(sv.name, f"{col_letter(c)}:{col_letter(c)}"),
                    f"العمود {col_letter(c)}" + (f" «{short(p['header'], 40)}»" if p["header"] else "")
-                   + " يحتوي بيانات شخصية (" + ("عنوان العمود" if p["_pii_reason"] == "header" else "نمط القيم: أرقام جوال/بريد")
+                   + " يحتوي بيانات شخصية (" + ("عنوان العمود" if p["_pii_reason"] == "header"
+                                               else "نمط القيم: أرقام اتصال أو بريد أو آيبان أو هوية")
                    + "). لا تُنقل قيمه إلى أي مخرج، ويُربط في التعيين بنوع pii ليُسقط.",
                    {"col": col_letter(c), "header": p["header"], "reason": p["_pii_reason"]}, order=(0, c))
 
@@ -2137,80 +2343,129 @@ def _loose_tokens(s: str) -> list:
     return toks
 
 
+_AMOUNT_SKIP_HINTS = {"serial", "count", "area", "date", "deed", "url", "pii", "category"}
+
+
+def _row_amounts(sa: SheetAnalysis) -> dict:
+    """{row: [(col, value)]} for amount-like cells of the sheet's data rows (|value| ≥ 1000, not a year, not a
+    serial/count/area/date/deed/personal-data column). Used only as matching evidence between sheets."""
+    sv = sa.sv
+    cols = {}
+    for fam, profs in sa.profiles.items():
+        for c, p in profs.items():
+            if p["pii"] or not p["profile"]["numeric"] or set(p["hints"]) & _AMOUNT_SKIP_HINTS:
+                continue
+            cols.setdefault(c, p["header"])
+    out = {}
+    for rows in sa.family_rows.values():
+        for r in rows:
+            vals = []
+            for c in cols:
+                v = sv.num(r, c)
+                if v is None or abs(v) < 1000 or (float(v).is_integer() and (1300 <= v <= 1500 or 1900 <= v <= 2100)):
+                    continue
+                vals.append((c, v))
+            if vals:
+                out[r] = vals
+    return out
+
+
 def check_cross_sheet_names(sas: dict, an: Anomalies):
-    """Flag names that appear (after normalisation) in the name columns of two different sheets.
+    """Flag names that appear (after normalisation) in the name columns of two different sheets — every pair of
+    non-lookup sheets, hidden ones included, and every sub-table that has a name column.
 
     Three levels: exact_key (name_key equal), loose_key (digits / leading «ب» dropped),
-    token_subset (all distinctive tokens of the shorter name appear in the longer one).
-    Linking candidates only - never a proof that two rows are the same asset."""
+    token_subset (every word of the shorter name — at least one of them distinctive — appears in the longer one).
+    When the two rows also hold the same amount (e.g. the annual rent of a managed property and an allocation line),
+    the match carries `equal_amounts`. Linking candidates only - never a proof that two rows are the same asset."""
     index = []
     for sa in sas.values():
         if sa.role == "lookup":
             continue
-        nc = sa.key_cols.get(sa.primary, {}).get("name")
-        if nc is None:
-            continue
         entries = []
-        for fam2, rows in sa.family_rows.items():
-            if fam2 is not None and sa.key_cols.get(fam2, {}).get("name") != nc:
+        seen_rows = set()
+        fams = sorted(sa.family_rows, key=lambda f: (f != sa.primary, f is None, f or 0))
+        for fam2 in fams:
+            nc = sa.key_cols.get(fam2, {}).get("name") if fam2 is not None else \
+                sa.key_cols.get(sa.primary, {}).get("name")
+            if nc is None:
                 continue
-            for r in rows:
-                if sa.sv.kind(r, nc) != "T":
+            for r in sa.family_rows[fam2]:
+                if r in seen_rows or sa.sv.kind(r, nc) != "T":
                     continue
+                seen_rows.add(r)
                 raw = sa.sv.text(r, nc)
                 toks = _loose_tokens(raw)
-                entries.append((r, name_key(raw), " ".join(toks), frozenset(toks)))
+                entries.append((r, nc, name_key(raw), " ".join(toks), frozenset(toks)))
         if entries:
-            index.append((sa, nc, entries))
+            main_col = Counter(e[1] for e in entries).most_common(1)[0][0]
+            index.append((sa, main_col, entries, _row_amounts(sa)))
     for i in range(len(index)):
         for j in range(i + 1, len(index)):
-            a, ac, ea = index[i]
-            b, bc, eb = index[j]
+            a, ac, ea, amt_a = index[i]
+            b, bc, eb, amt_b = index[j]
             by_exact, by_loose, by_tok = defaultdict(list), defaultdict(list), defaultdict(list)
             for e in eb:
-                by_exact[e[1]].append(e)
-                if len(e[3]) >= 2:
-                    by_loose[e[2]].append(e)
-                for t in e[3]:
+                by_exact[e[2]].append(e)
+                if len(e[4]) >= 2:
+                    by_loose[e[3]].append(e)
+                for t in e[4]:
                     if t not in GENERIC_NAME_TOKENS:
                         by_tok[t].append(e)
             matches, used = [], set()
 
-            def add(x, y, kind):
+            def add(x, xc, e, kind):
+                y, yc = e[0], e[1]
                 if (x, y) in used or len(matches) >= 300:
                     return
                 used.add((x, y))
-                matches.append({"a": f"{col_letter(ac)}{x}", "b": f"{col_letter(bc)}{y}",
-                                "a_name": short(a.sv.text(x, ac), 70), "b_name": short(b.sv.text(y, bc), 70),
-                                "match": kind})
+                m = {"a": f"{col_letter(xc)}{x}", "b": f"{col_letter(yc)}{y}",
+                     "a_name": short(a.sv.text(x, xc), 70), "b_name": short(b.sv.text(y, yc), 70), "match": kind}
+                eq = [{"a": f"{col_letter(c1)}{x}", "b": f"{col_letter(c2)}{y}", "value": jnum(v1)}
+                      for c1, v1 in amt_a.get(x, []) for c2, v2 in amt_b.get(y, []) if abs(v1 - v2) <= TOL]
+                if eq:
+                    m["equal_amounts"] = eq[:3]
+                matches.append(m)
 
-            for (x, kx, lx, tx) in ea:
+            def token_subset(tx, ty):
+                small, big = (tx, ty) if len(tx) <= len(ty) else (ty, tx)
+                return len(small) >= 2 and small <= big and any(t not in GENERIC_NAME_TOKENS for t in small)
+
+            for (x, xc, kx, lx, tx) in ea:
                 if kx:
                     for e in by_exact.get(kx, [])[:3]:
-                        add(x, e[0], "exact_key")
+                        add(x, xc, e, "exact_key")
                 if len(tx) >= 2:
                     for e in by_loose.get(lx, [])[:3]:
-                        add(x, e[0], "loose_key")
-                distinct = [t for t in tx if t not in GENERIC_NAME_TOKENS]
-                if len(distinct) < 2:
-                    continue
-                rarest = min(distinct, key=lambda t: len(by_tok.get(t, [])))
-                for e in by_tok.get(rarest, [])[:50]:
-                    ty = e[3]
-                    small, big = (tx, ty) if len(tx) <= len(ty) else (ty, tx)
-                    if len([t for t in small if t not in GENERIC_NAME_TOKENS]) >= 2 and small <= big:
-                        add(x, e[0], "token_subset")
+                        add(x, xc, e, "loose_key")
+                cands = {}
+                for t in tx:
+                    if t not in GENERIC_NAME_TOKENS:
+                        for e in by_tok.get(t, [])[:50]:
+                            cands[e[0]] = e
+                for e in sorted(cands.values()):
+                    if token_subset(tx, e[4]):
+                        add(x, xc, e, "token_subset")
             if not matches:
                 continue
+            matches.sort(key=lambda m: (0 if m.get("equal_amounts") else 1,
+                                        {"exact_key": 0, "loose_key": 1, "token_subset": 2}[m["match"]]))
             cnt = Counter(m["match"] for m in matches)
+            n_amt = sum(1 for m in matches if m.get("equal_amounts"))
             ex = matches[0]
+            amt_txt = ""
+            if n_amt:
+                q = ex["equal_amounts"][0]
+                amt_txt = (f" منها {n_amt} بمبلغ متساوٍ في الصفين (مثل {q['a']} = {q['b']} = {fmt_num(q['value'])})؛ "
+                           "تساوي المبلغ قرينة إضافية على الربط لا دليل كافٍ.")
             an.add("cross_sheet_name_match", "info", a.sv.name, ref(a.sv.name, f"{col_letter(ac)}:{col_letter(ac)}"),
                    f"{len(matches)} اسمًا متطابقًا أو متقاربًا بين «{a.sv.name.strip()}» ({col_letter(ac)}) و«{b.sv.name.strip()}» "
                    f"({col_letter(bc)}): تطابق بعد التطبيع {cnt.get('exact_key', 0)}، تقارب {cnt.get('loose_key', 0)}، "
-                   f"احتواء كلمات {cnt.get('token_subset', 0)} (مثل «{ex['a_name']}» ↔ «{ex['b_name']}»). "
-                   "تشابه الاسم وحده لا يثبت أنه الأصل نفسه؛ يُستخدم مرشحًا للربط بعد مطابقة المعرّف والصك والموقع.",
+                   f"احتواء كلمات {cnt.get('token_subset', 0)} (مثل «{ex['a_name']}» ↔ «{ex['b_name']}»)." + amt_txt +
+                   " تشابه الاسم وحده لا يثبت أنه الأصل نفسه؛ يُستخدم مرشحًا للربط بعد مطابقة المعرّف والصك والموقع.",
                    {"sheet_a": a.sv.name, "col_a": col_letter(ac), "sheet_b": b.sv.name, "col_b": col_letter(bc),
-                    "count": len(matches), "by_level": dict(cnt), "matches": matches[:100]}, order=(0, 0))
+                    "count": len(matches), "by_level": dict(cnt), "with_equal_amounts": n_amt,
+                    "matches": matches[:100]}, order=(0, 0))
 
 
 # =========================================================================================
@@ -2635,11 +2890,10 @@ def inspect(src: str, out_dir: str) -> dict:
         if sv.sheet_type != "worksheet":
             continue
         sas[sv.name] = analyze_structure(sv, book)
-    # profiles & key columns
+    # profiles, then PII propagation, then key columns (a personal-data column is never proposed as a key)
     for sa in sas.values():
         for fam, rows in sa.family_rows.items():
             sa.profiles[fam] = profile_columns(sa, fam, rows, sa.family_header.get(fam, {}))
-            sa.key_cols[fam] = detect_key_columns(sa, fam, sa.profiles[fam])
     pii_cols = set()
     for sa in sas.values():
         for fam, profs in sa.profiles.items():
@@ -2654,7 +2908,10 @@ def inspect(src: str, out_dir: str) -> dict:
                     p["pii"] = True
                     p["_pii_reason"] = p["_pii_reason"] or "header"
                     p["samples"] = [REDACTED] if p["samples"] else []
-                    p["hints"] = ["pii"] + [h for h in p["hints"] if h != "pii"]
+                    p["hints"] = ["pii"] + [h for h in p["hints"] if h not in ("pii", "name")]
+    for sa in sas.values():
+        for fam in sa.family_rows:
+            sa.key_cols[fam] = detect_key_columns(sa, fam, sa.profiles[fam])
     assign_roles(sas, book, raw)
 
     an = Anomalies()
