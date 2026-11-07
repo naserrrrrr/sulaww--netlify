@@ -144,11 +144,41 @@ def word_count_ar(text: str) -> int:
 # ---------------------------------------------------------------------------
 # Number parsing
 # ---------------------------------------------------------------------------
-def parse_number(v: Any) -> Tuple[Optional[float], str, Optional[str]]:
+AMOUNT_KINDS = ("money", "area", "count")   # a '%' or a «12.500» here is never read as a plain decimal
+AMBIGUOUS_THOUSANDS_NOTE = ("فاصل ملتبس: «{raw}» قد تكون نقطته فاصل آلاف ({alt:,}) أو فاصلة عشرية ({dec})؛ "
+                            "لم تُحوَّل إلى رقم")
+FOREIGN_CURRENCY_NOTE = "مبلغ بعملة أخرى ({cur}) في حقل بعملة {home}؛ لم يُحوَّل إلى رقم ولم يُجمع"
+_FOREIGN_CURRENCY_RE = re.compile(
+    r"(?<![A-Za-z])(USD|EUR|GBP|AED|KWD|QAR|BHD|OMR|EGP|JOD|US\$)(?![A-Za-z])|(\$|€|£)|(دولار|يورو|جنيه|درهم|دينار)",
+    re.IGNORECASE)
+_HOME_CURRENCY_TOKENS = {"SAR": ("SAR", "SR", "ريال", "﷼")}
+_AREA_UNIT_RE = re.compile(r"(?:(?:m|M)\s*(?:2|²)|sq\.?\s*m|sqm|م\s*(?:2|²)|م\.?\s*م|(?:ال)?متر(?:\s*(?:ال)?مربع)?|متر\s*م|m\^2)\.?",
+                           re.IGNORECASE)
+
+
+def foreign_currency(v: Any, home: str = "SAR") -> Optional[str]:
+    """The currency token of a text amount written in a currency other than the mapping's («USD 100,000», «$ 5,000»,
+    «3000 دولار»), or None. Numbers are never in a foreign currency (the cell format is not read)."""
+    if not isinstance(v, str):
+        return None
+    t = clean_text(v)
+    m = _FOREIGN_CURRENCY_RE.search(t)
+    if not m:
+        return None
+    tok = m.group(0)
+    if tok.upper() == (home or "").upper():
+        return None
+    return tok
+
+
+def parse_number(v: Any, kind: Optional[str] = None) -> Tuple[Optional[float], str, Optional[str]]:
     """Return (number_or_None, status, note).
 
     Never turns unknown into zero. A numeric 0 returns status zero_recorded; the caller
     applies the column's zero policy (e.g. valuation 0 -> zero_as_missing).
+    kind (optional, the mapping column kind): for an amount kind (money/area/count) a text such as «12.500» — one dot
+    followed by exactly three digits — is ambiguous (thousands separator or decimal) and stays text with
+    AMBIGUOUS_THOUSANDS_NOTE; for kind area a trailing/leading square-metre unit («500 m2»، «٨٠٠ م²») is removed and noted.
     """
     if v is None:
         return None, S_BLANK, None
@@ -174,19 +204,30 @@ def parse_number(v: Any) -> Tuple[Optional[float], str, Optional[str]]:
         return None, S_NOT_AVAILABLE, c
     t = c.translate(_AR_INDIC)
     t = _CURRENCY_RE.sub("", t)
+    unit_note = None
+    if kind == "area":
+        t2 = _AREA_UNIT_RE.sub("", t)
+        if t2 != t and re.search(r"\d", t2):
+            t, unit_note = t2, "حُذفت وحدة المتر المربع من النص"
     neg = False
     if re.fullmatch(r"\(\s*[\d.,٫٬\s]+\s*\)", t.strip()):
         neg = True
         t = t.strip()[1:-1]
-    t = t.replace("٫", ".").replace("٬", ",").replace("،", ",")
+    t = t.replace("٫", ".").replace("٬", ",").replace("،", ",").replace("\u2212", "-")
     pct = t.strip().endswith("%")
     t = t.replace("%", "")
+    if kind in AMOUNT_KINDS and not pct:
+        m = re.fullmatch(r"\s*([-+]?)(\d{1,3})\.(\d{3})\s*", t)
+        if m:
+            alt = int(m.group(2) + m.group(3))
+            dec = float(m.group(2) + "." + m.group(3))
+            return None, S_TEXT, AMBIGUOUS_THOUSANDS_NOTE.format(raw=c, alt=alt, dec=f"{dec:g}")
     t = re.sub(r"(?<=\d)[,\s](?=\d{3}(\D|$))", "", t).strip()
     if re.fullmatch(r"[-+]?\d+(\.\d+)?", t):
         num = float(t)
         if neg:
             num = -num
-        note = "نص رقمي حُوِّل إلى رقم" + (" (نسبة مئوية)" if pct else "")
+        note = "نص رقمي حُوِّل إلى رقم" + (" (نسبة مئوية)" if pct else "") + (f"؛ {unit_note}" if unit_note else "")
         return num, (S_ZERO_RECORDED if num == 0 else S_VALUE), note
     return None, S_TEXT, c
 
@@ -378,6 +419,10 @@ def _self_test_pii() -> None:
         assert pii_value_hits(x), f"PII pattern miss: {x!r}"
     for x in tests.get("must_not_match", []):
         assert not pii_value_hits(x), f"PII false positive: {x!r} -> {pii_value_hits(x)}"
+    for x in tests.get("block_must_match", []):
+        assert pii_value_hits(x, ("block",)), f"PII block-level miss: {x!r}"
+    for x in tests.get("block_must_not_match", []):
+        assert not pii_value_hits(x, ("block",)), f"PII block-level false positive: {x!r} -> {pii_value_hits(x, ('block',))}"
     htests = PII_PATTERNS.get("header_tests") or {}
     for x in htests.get("must_match", []):
         assert is_pii_header(x), f"PII header miss: {x!r}"

@@ -220,10 +220,10 @@
   "records": {
     "count": 29,
     "by_type": {
-      "asset": 12,
+      "asset": 21,
       "land_parcel": 4,
       "operating_activity": 1,
-      "other": 12
+      "other": 3
     },
     "by_scope": {
       "in_scope": 17,
@@ -947,7 +947,7 @@
       "ALC-r4": {
         "source_id": "ALC",
         "row": 4,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -960,7 +960,7 @@
       "ALC-r5": {
         "source_id": "ALC",
         "row": 5,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -973,7 +973,7 @@
       "ALC-r6": {
         "source_id": "ALC",
         "row": 6,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -986,7 +986,7 @@
       "ALC-r7": {
         "source_id": "ALC",
         "row": 7,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -999,7 +999,7 @@
       "ALC-r8": {
         "source_id": "ALC",
         "row": 8,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -1012,7 +1012,7 @@
       "ALC-r13": {
         "source_id": "ALC",
         "row": 13,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -1025,7 +1025,7 @@
       "ALC-r14": {
         "source_id": "ALC",
         "row": 14,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -1038,7 +1038,7 @@
       "ALC-r15": {
         "source_id": "ALC",
         "row": 15,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {
@@ -1051,7 +1051,7 @@
       "ALC-r16": {
         "source_id": "ALC",
         "row": 16,
-        "record_type": "other",
+        "record_type": "asset",
         "scope": "isolated",
         "dims": {},
         "fields": {

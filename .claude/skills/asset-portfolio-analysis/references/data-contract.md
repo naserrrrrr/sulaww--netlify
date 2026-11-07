@@ -97,8 +97,9 @@ recalculated its formulas — say so in `methodology_notes`.
 Everything else has `v = null` and is *unknown* — never summed as zero.
 N/A tokens (`apa_common.NA_TOKENS`: «غير متوفر»، «غير متاح»، «لا يوجد»، «غير معروف»، «-»، «—»، «–»، «؟»، «n/a») give
 `not_available` and «لا ينطبق»/«غير منطبق» give `not_applicable`, in numeric, text, url and date columns alike (raw kept).
-Optional TV keys: `formula`, `no_cache`, `zero_from_blank_inputs`, `percent_in_amount`, `redacted`, `joined_from`,
-`override` (`{from_s, from_v, evidence}`), `calendar`, `hijri`.
+Optional TV keys: `formula`, `no_cache`, `zero_from_blank_inputs`, `percent_in_amount`, `ambiguous_thousands`,
+`foreign_currency`, `redacted`, `joined_from`, `rollup` (`{from, evidence}`), `override` (`{from_s, from_v, evidence}`),
+`calendar`, `hijri`.
 Zero policy per column (mapping `zero_policy`): `recorded` (default for revenue, expense, units, counts) → `zero_recorded`; `missing` (default for `val.*`, areas) → `zero_as_missing`.
 Dates: `{"v": "1982-12-14", "s": "value", "raw": "1403/2/29هـ", "calendar": "hijri", "hijri": "1403-02-29"}`.
 Text fields: `{"v": "منفوحة", "s": "value", "raw": "...", "ref": "..."}`.
@@ -160,7 +161,9 @@ Text fields: `{"v": "منفوحة", "s": "value", "raw": "...", "ref": "..."}`.
                        "asset_type": "عمارة", "location": "جنوب الرياض", "managed_for_others": false},
               "dims_evidence": {"use": "عقارات الجمعية !M3", "ownership": "عقارات الجمعية !J3 (شراء)"},
               "field_overrides": {"rev.2025.excl_vat": {"s": "zero_confirmed", "evidence": "..."}},
-              "notes": "..."}
+              "notes": "..."},
+    "W-1": {"rollup": {"from": ["W-2", "W-3", "W-4"], "fields": ["rev.2024.recorded"],   // units carry the revenue,
+                       "evidence": "الإيراد مدون على الوحدات H4:H6 لا على صف العمارة"}}   // the building only its valuation
   },
   "links": [{"record": "REG-1", "other_ref": "تخصيص الايرادات!B12", "match": "probable|confirmed|rejected",
              "basis": "تشابه الاسم فقط؛ لا معرّف مشترك", "used": false, "reason": "..."},
@@ -231,9 +234,10 @@ More rules:
   warn (`unit_levels_mixed`).
 - Lines of an isolated sheet that name properties (allocation lines, a second register) are typed by what they describe
   (`asset`, `land_parcel` or `unit`) with `scope: isolated`, not `other`: they then count in the fact
-  `records.isolated_assetlike` and the coverage card says the register may be incomplete (the dashboard also counts
-  isolated rows of sheets whose role is `asset_register`, `managed_properties` or `allocation`). `other` is for section
-  headers, notes and lines that describe no property.
+  `records.isolated_assetlike` and the coverage card says the register may be incomplete. The fact and the card use
+  one rule (facts.py): isolated records typed `asset`/`land_parcel`/`unit`, or read from a sheet whose `sheets[]` role
+  is `asset_register`, `managed_properties` or `allocation`. `other` is for section headers, notes and lines that
+  describe no property.
 
 ## 4. `03_records.json` (normalize.py)
 
@@ -260,12 +264,15 @@ More rules:
               "field": "...", "source_id": "...", "row": 18, "rows": [...], "count": 3, "dim": "...",
               "mapping_override": true}],                 // extra keys only where the issue type has them
   "excluded_rows": [{"source_id": "REG", "sheet": "...", "row": 18, "reason": "صف إجمالي (SUBTOTAL)", "auto": true,
-                     "values": {"rev.2025.excl_vat": TV, ...}}],
+                     "values": {"rev.2025.excl_vat": TV, ...}},
+                    {"source_id": "REG", "sheet": "...", "row": 20, "auto": true, "after_data_rows": true,
+                     "reason": "صف إجمالي بعد نطاق البيانات — للمطابقة فقط: …", "values": {...}}],
   "context": {"entity": {...}, "data_period": {...}, "study_date": {...}, "analysis_date": "...", "currency": "SAR",
               "valuation_dates": [...], "sheets": [...]},
   "stats": {"records": 1, "by_type": {...}, "by_scope": {...}, "by_source": {...}, "pii_columns_dropped": 2,
             "pii_values_dropped": 0, "rows_skipped_blank": 0, "rows_skipped_with_content": 0, "rows_excluded": 1,
-            "rows_total_excluded": 0, "rows_joined": 0, "issues": 9, "issues_by_severity": {...}}
+            "rows_total_excluded": 0, "rows_total_after_range": 1, "rows_joined": 0, "issues": 9,
+            "issues_by_severity": {...}}
 }
 ```
 `excluded_rows[].reason` is the `exclude_rows` reason, «صف إجمالي مكتشف آليًا: …» (`auto: true`) or «تُخطّي الصف لأن خانة …
@@ -273,7 +280,14 @@ More rules:
 Auto checks in normalize (issue types): `duplicate_id` (high), `possible_duplicate_name`, `shared_deed`, `total_like_row`,
 `valuation_total_mismatch`, `valuation_component_formula`, `vat_incl_lt_excl`, `vat_equal`, `text_in_numeric`, `excel_error`,
 `zero_as_missing`, `numeric_text_converted`, `count_mixed_text`, `formula_no_cache`, `hijri_conversion`, `date_note`,
-`date_unparsed`, `missing_classification` (unknown `use`/`income_nature` on in-scope records), `pii_redacted`,
+`date_unparsed`, `missing_classification` (unknown `use`/`income_nature` on in-scope records), `pii_redacted` (high: a
+block-level pattern of `assets/pii_patterns.json` — phone, e-mail, IBAN, a national ID next to «هوية/سجل مدني/إقامة/ID» — in a
+text field; the personal span is replaced by «<محجوب>» and the rest of the text kept, a value that is only a phone is
+dropped), `ambiguous_thousands_separator` (medium: «12.500» in a money/area/count column stays text — thousands separator or
+decimal), `foreign_currency` (high: «USD 100,000»، «$»، «دولار» in a money column of another currency stays text),
+`percent_scale_mixed` (medium: one percent field holds both fractions ≤ 1 and percentages > 1), `possible_total_row`,
+`section_label_skipped` (low), `rollup_applied` (low), `rollup_incomplete`/`rollup_conflict` (medium),
+`rollup_unknown_record` (high),
 `pii_header_not_marked`, `derived_field`, `field_override`, `mapping_unknown_record`, `mapping_sheet_name`, plus the
 types below. PII columns are dropped (count only).
 
@@ -282,11 +296,18 @@ Additional behaviour (issue types in brackets):
   a short total label (≤ 4 words, no digits) in another mapped text cell, a SUBTOTAL/SUM-range formula in a numeric cell, or
   a `total*` row kind in `RUN/01_workbook_map.json` (used only when its sha256 matches the workbook). Such rows go to
   `excluded_rows` with `auto: true`, `values` and an issue whose `record_ids` is `[]` (plus `source_id`, `row`).
+  A row with a real id **and** a non-total name is a record even when only the weak signs fire (a «إجمالي/صافي» rent-basis
+  column, a building row whose formula sums its unit rows, 01's row kind): it is kept with [`possible_total_row`, medium]
+  for review, never dropped silently. Inspect does not label such a row `total_label` either.
+- **Totals after the data rows** (inspect's `data_rows` usually stop before them): 01 `regions[].total_rows` below
+  `data_rows.to` inside the source's region (without 01: the next rows whose name/id/text cell is a total label) are added to
+  `excluded_rows` with `auto: true`, `after_data_rows: true` and their `values`, for reconciliation only.
   Excluded total rows keep `values` `{field: TV}` for mapped numeric fields: auto-detected ones, and rows listed in
   `exclude_rows` that read as a total or whose reason names one («إجمالي»، «مجموع»، «جملة»، total، sum); separator and
   header rows do not. `facts.py` reads them as `excluded.<sid>.r<row>.<field>`, and validation reconciles them
   (`totals_reconciliation`, §6).
-- Blank rows [`blank_rows_skipped`, low, with `count`]; a row skipped by `skip_if_blank` that still holds mapped content
+- Blank rows [`blank_rows_skipped`, low, with `count`]; a row whose only content is a label in the id/key column («Jeddah»)
+  or that 01 classed `section_label` [`section_label_skipped`, low, with `rows`]; a row skipped by `skip_if_blank` that still holds mapped content
   [`row_skipped_with_content`, medium + an `excluded_rows` entry]. Name/id/key cells inside a vertical merge read the merge
   anchor and the record gets `source.merge_note`.
 - A cached 0 of a formula whose referenced cells are all blank/unknown becomes `not_available`
@@ -296,7 +317,16 @@ Additional behaviour (issue types in brackets):
   percent-formatted cell (0.12) is stored × 100.
   N/A tokens (§2) become `not_available`/`not_applicable` in every column kind (raw kept); they are never dimension
   categories.
-- Vocabulary [`dim_out_of_vocabulary`, high], joins [`join_conflict`, `join_unmatched`, `join_ambiguous`], sheet scope
+- Numbers: in a money/area/count column «12.500» (one dot + exactly three digits) is ambiguous and stays text
+  [`ambiguous_thousands_separator`]; an area «500 m2»/«٨٠٠ م²»/«300 متر مربع» is read without its unit (note kept); a money text
+  in another currency than `currency` stays text [`foreign_currency`, high]; «−» (U+2212) is a minus.
+- **Rollup** (`records/<parent>.rollup`): when revenue sits on unit rows and the building row holds only the valuation, the
+  children's known values of `fields` are summed into the parent's unknown field (status `derived`, `ref` = the children's
+  cells, TV key `rollup`), and the children go to `scope: excluded` unless their own override states a scope. Any unknown
+  child value leaves the parent unknown [`rollup_incomplete`]; a known parent value is kept [`rollup_conflict`].
+- Vocabulary [`dim_out_of_vocabulary`, high], joins [`join_conflict`, `join_unmatched`, `join_ambiguous`; the join index
+  prefers targets that are not excluded and are asset/land_parcel/operating_activity after `records/` overrides, so units
+  sharing their building's deed do not make every deed ambiguous], sheet scope
   [`sheet_scope_mismatch`, `managed_unflagged`, high], the same sheet row read into more than one record by non-join
   sources [`overlapping_source_rows`, high], a PII column used as name/id [`pii_header_not_marked`, high].
 - **Issue order and impact**: issues touching in-scope records (or none) come first, then those on isolated/excluded records
@@ -323,7 +353,7 @@ Additional behaviour (issue types in brackets):
             "where": {...}, "comparable": {"status": "confirmed|unverified|not_comparable", "reason": "..."}},
   "filters": ["asset_type", "location", "use"],     // dims offered as dashboard filters (+ period always)
   "parity_max_values_per_dim": 3,
-  "init_warnings": [{"code": "revenue_incl_vat|yield_periods_limited|no_in_scope_records", "period": "2025",
+  "init_warnings": [{"code": "revenue_incl_vat|yield_periods_limited|no_in_scope_records|expense_fields_partial", "period": "2025",
                      "field": "rev.2025.incl_vat", "text": "Arabic"}]   // written by --init-config; review before editing
 }
 ```
@@ -332,10 +362,16 @@ with known values on **in-scope** records (isolated/excluded data never drives t
 periods and `init_warnings` has `no_in_scope_records`). A VAT-inclusive fallback revenue field makes every revenue label
 say «شامل الضريبة» (`revenue_incl_vat`). `value_by_*`/`revenue_by_*` breakdowns are created only when their own records hold
 ≥ 2 distinct classified values of the dim. Revenue metrics, revenue breakdowns and the trend also require
-`record_type ∈ {asset, land_parcel, operating_activity}` (unit/contract rows are never added to their asset).
+`record_type ∈ {asset, land_parcel, operating_activity}` (unit/contract rows are never added to their asset; use a
+`rollup` in 02 when the amounts are recorded only on the unit rows). NOI subtracts one expense field per period — a field
+named `exp.<P>.total` (e.g. a `derived_fields` sum of the components) is preferred; when other expense fields of the period
+are left out, `init_warnings` gets `expense_fields_partial` and the NOI source text says «لا يشمل: …». `activity_revenue` and
+`operating_records_count` are not cards when no operating activity is in scope.
 `compute_metrics.py` exits 2 (Arabic message, nothing written) on a schema error and on these semantic errors: a period
 or the trend not marked `not_comparable` although field_meta shows a known difference (see growth below); `eq`/`in`
-against a dim that holds a list in any record (use `has`), in `base_where`, a metric, a breakdown or the trend; a
+against a dim that holds a list in any record (use `has`), in `base_where`, a metric, a breakdown or the trend; an
+`eq`/`in`/`has` literal on `use`, `income_nature`, `record_type`, `scope`, `ownership` or `waqf` that is not a key of
+`assets/vocab.json` (e.g. «Investment»); a
 `prev_id` that is not a period id; duplicate period, metric or breakdown ids; a `valid_periods` entry that is not a
 period id; `empty_as_zero` on a kind other than sum/count.
 To trim periods: delete the period object (and its id from every `valid_periods`), set `prev_id: null` on the next period
@@ -521,16 +557,31 @@ exists but no longer emits: every undeclared same-asset overlap is now blocking 
 `reconciliation[]` (one per excluded total row and field with values):
 `{source_id, sheet, row, ref, field, recorded, sum_in_scope, n_in_scope_known, n_in_scope_unknown, difference,
 sum_all_records, matched_sum, status, status_ar}` with `status ∈ match | match_section | match_all_records |
-match_section_all_records | match_without_text_numbers | mismatch | recorded_unknown` (same wording as the export sheet
-«المطابقة مع الإجماليات»); only `mismatch` raises the `totals_reconciliation` warning.
+match_section_all_records | match_without_text_numbers | match_original | mismatch | recorded_unknown` (same wording as
+the export sheet «المطابقة مع الإجماليات»; `match_original`: the total equals the sum of `<field>__original`, the values
+before a documented `derived_fields` override); only `mismatch` raises the `totals_reconciliation` warning.
 Data-integrity checks (blocking): `total_like_in_scope`, `unit_double_count`, `duplicate_ids_in_scope`, `overlapping_rows`,
 `dims_vocabulary`, `sheet_scope`, `mapping_context`, `fact_tokens`, `pii_export_patterns`; (warning): `total_like_records`,
 `unit_levels_mixed`, `duplicate_ids_kept`, `overlapping_rows_other`, `hidden_sheet_in_scope`, `totals_reconciliation`,
-`pii_review_patterns`, `message_numbers`. Narrative-quality checks (blocking): `period_fields`,
+`pii_review_patterns`, `message_numbers`, `totals_not_reconciled` (01 lists total rows after a source's `data_rows.to`
+that neither `excluded_rows` nor a record covers), `partial_ownership_full_amount` (an in-scope record with ownership
+`partial` or a share field below 100 whose full valuation/revenue enters `recorded_value` or a revenue metric, without a
+share-based field — e.g. `derived_fields` `val.<Y>.share` — or an `assumptions` entry naming it). `total_like_records`
+also warns (not blocks) when a record with a real id and a non-total name holds a total word in another field.
+Narrative-quality checks (blocking): `period_fields`,
 `growth_comparability_basis`, `yield_zero_revenue_scope`, `label_vat_basis`, `label_years`, `label_roi`,
 `narrative_metric_naming`, `narrative_scores`, `drastic_without_study`, `plan_completeness`; (warning):
 `yield_vat_inclusive`, `partial_unnamed`, `growth_token_caveat`, `promised_outcomes`, `scenario_consistency`, `plan_phasing`,
-`top_lists_count`, `recommendation_quality`, `gap_completeness`, `gap_unsupported_claims`. Every value scan uses the shared
+`top_lists_count`, `recommendation_quality`, `gap_completeness`, `gap_unsupported_claims` (also «أداء منخفض»/«دون
+المستهدف» on investment assets without a `sources[]` target or a comparison metric in the evidence), `annualised_text`
+(«الإيراد السنوي الكامل»، «على أساس سنوي»، «يعادل سنويًا» in 06 or 09 while the linked revenue field is not documented
+`full_year`, unless the sentence says «تقدير» and 06 has `assumptions`), `card_metric_empty` (a card metric empty without a
+filter: a mistyped where or an empty scope). `narrative_scores` also blocks scores that need no context word («75/100»،
+«82 من 100»، «8/10»، «4/5»; a following count noun — عقود، مستأجرين، أصول … — makes it a count); `assessment_scores` warns on
+«N من 5/10/100» in an assessment judgment; `exec_summary_elements` warns when «أبرز الفجوات»/«الأولويات» are announced but
+fewer than 3 items are listed or named (asset id, evidence token or title words of `top_gaps`/`top_actions`);
+`scenario_consistency` warns when an amount has no `start`, `year1_effect` or `run_rate_effect`; `label_vat_basis` ignores
+a rejected alternative («… لا الإيراد مع الضريبة»). Every value scan uses the shared
 patterns of `assets/pii_patterns.json` (block level blocks, review level — national-ID-like numbers — warns) over 02, 03, 06,
 `analysis.json`, the dashboard text and embedded data, `supporting_workbook.xlsx` (or `--xlsx-out`; text cells, and numbers
 under a personal-data header; a workbook older than 03/06 is flagged as possibly stale) and `09_message.md`. The

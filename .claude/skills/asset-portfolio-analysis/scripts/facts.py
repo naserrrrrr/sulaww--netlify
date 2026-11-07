@@ -9,7 +9,8 @@ API (used by build_dashboard.py to render and by validate_analysis.py to resolve
                                                   "label": Arabic label, "source": "file:path"}
 Keys are stable, ASCII, dot-separated:
     records.total | records.in_scope | records.isolated | records.excluded | records.excluded_rows
-    records.isolated_assetlike            isolated records typed asset/land_parcel/unit
+    records.isolated_assetlike            isolated records typed asset/land_parcel/unit, or read from a sheet whose
+                                          role is asset_register/managed_properties/allocation (as the dashboard)
     records.in_scope.<record_type>        e.g. records.in_scope.asset
     sources.<source_id>.records | sources.<source_id>.isolated
     sheets.total | sheets.hidden
@@ -30,6 +31,7 @@ from collections import OrderedDict
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+PROPERTY_ROLES = ("asset_register", "managed_properties", "allocation")
 FACT_TOKEN_RE = re.compile(r"\{\{\s*f:\s*([A-Za-z0-9_.\-]+)\s*\}\}")
 _MONEY_KEYS = ("value", "recorded", "recomputed", "recomputed_from_details", "cached", "difference", "diff",
                "sum", "total", "expected", "sections_sum")
@@ -63,10 +65,17 @@ def compute_facts(run_dir: str) -> "OrderedDict[str, dict]":
         put("records.in_scope", by_scope.get("in_scope", 0), "count", "السجلات ضمن النطاق", "03_records.json:records[scope=in_scope]")
         put("records.isolated", by_scope.get("isolated", 0), "count", "السجلات المعزولة", "03_records.json:records[scope=isolated]")
         put("records.excluded", by_scope.get("excluded", 0), "count", "السجلات المستبعدة", "03_records.json:records[scope=excluded]")
-        iso_like = sum(1 for r in records if r.get("scope") == "isolated"
-                       and r.get("record_type") in ("asset", "land_parcel", "unit"))
+        # same rule as the dashboard's coverage caveat: an isolated record typed asset/land/unit, or read from a sheet
+        # whose role in 02 sheets[] names properties (asset_register, managed_properties, allocation)
+        mp = _load(os.path.join(run_dir, "02_mapping.json")) or {}
+        decls = (rec.get("context") or {}).get("sheets") or mp.get("sheets") or []
+        role_of = {str(d.get("sheet") or "").strip(): d.get("role") for d in decls if isinstance(d, dict)}
+        iso_like = sum(1 for r in records if r.get("scope") == "isolated" and (
+            r.get("record_type") in ("asset", "land_parcel", "unit")
+            or role_of.get(str((r.get("source") or {}).get("sheet") or "").strip()) in PROPERTY_ROLES))
         put("records.isolated_assetlike", iso_like, "count", "سجلات معزولة تمثل أصولًا أو أراضي أو وحدات",
-            "03_records.json:records[scope=isolated,record_type∈asset|land_parcel|unit]")
+            "03_records.json:records[scope=isolated, record_type∈asset|land_parcel|unit أو ورقتها دورها "
+            "asset_register|managed_properties|allocation]")
         types = {}
         for r in records:
             if r.get("scope") == "in_scope":

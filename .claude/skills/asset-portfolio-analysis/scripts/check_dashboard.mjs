@@ -5,7 +5,8 @@
  * Usage:
  *   node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000] [--allow-draft]
  *   node scripts/check_dashboard.mjs --self-test     (number parsing and shared PII patterns, no browser)
- * Writes RUN/08_dashboard_check.json and RUN/screens/{desktop.png, desktop_01.png …, details_open.png, mobile.png,
+ * Writes RUN/08_dashboard_check.json and RUN/screens/{desktop.png, desktop_01.png …, details_open.png and its
+ * readable slices details_open_01.png … (≤ 1400 px each), mobile.png,
  * mobile_full.png, mobile_360.png, mobile_detail.png, print.pdf}.
  * Exit code: 0 = every check passed, 1 = a check failed (or the browser could not run), 2 = bad arguments.
  *
@@ -188,6 +189,9 @@ function loadPiiPatterns() {
   const tests = raw.tests || {};
   for (const x of tests.must_match || []) if (!values.some((v) => v.re.test(toAsciiDigits(x)))) selfTest.push('لا يطابق: ' + x.replace(/\d/g, '#'));
   for (const x of tests.must_not_match || []) if (values.some((v) => v.re.test(toAsciiDigits(x)))) selfTest.push('يطابق خطأً: ' + x);
+  const blockHit = (x) => values.some((v) => v.level === 'block' && v.re.test(toAsciiDigits(x)));
+  for (const x of tests.block_must_match || []) if (!blockHit(x)) selfTest.push('لا يطابق (حجب): ' + x.replace(/\d/g, '#'));
+  for (const x of tests.block_must_not_match || []) if (blockHit(x)) selfTest.push('يطابق خطأً (حجب): ' + x);
   return { values, hits, selfTest, version: raw.version };
 }
 
@@ -966,8 +970,23 @@ async function main() {
           // the sticky filter bar would be painted over the capture of a section taller than the window
           const unstick = await page.addStyleTag({ content: '.filterbar{position:static!important}' });
           await det.screenshot({ path: path.join(screensDir, 'details_open.png') });
-          await unstick.evaluate((el) => el.remove());
           report.screenshots.push('screens/details_open.png');
+          // and readable slices of at most 1400 px (a 40,000 px image is shrunk past legibility when viewed)
+          const box = await det.boundingBox();
+          if (box && box.height > 0) {
+            const top = box.y + (await page.evaluate(() => window.scrollY));
+            const n = Math.min(30, Math.ceil(box.height / 1400));
+            for (let i = 0; i < n; i++) {
+              const y = top + i * 1400;
+              const hgt = Math.min(1400, box.height - i * 1400);
+              if (hgt <= 0) break;
+              const name = `details_open_${String(i + 1).padStart(2, '0')}.png`;
+              await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
+                clip: { x: Math.max(0, box.x), y, width: box.width, height: hgt } });
+              report.screenshots.push('screens/' + name);
+            }
+          }
+          await unstick.evaluate((el) => el.remove());
         }
       } catch (e) { report.warnings.push({ check: 'details_open', detail: 'تعذر التقاط screens/details_open.png: ' + short(String(e.message || e), 160) }); }
       const texts = await page.evaluate(() => {

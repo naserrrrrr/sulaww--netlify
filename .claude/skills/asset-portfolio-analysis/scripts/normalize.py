@@ -41,6 +41,7 @@ from apa_common import (  # noqa: E402
     S_NOT_APPLICABLE, S_NOT_AVAILABLE, S_TEXT, S_VALUE, S_ZERO_AS_MISSING, S_ZERO_CONFIRMED, S_ZERO_RECORDED,
     SKILL_DIR, USES, WAQF_VALUES, clean_text, is_filler, is_pii_header, is_total_label, load_json, load_vocab,
     looks_like_phone, name_key, normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
+    REDACTED, mask_pii, pii_value_hits, foreign_currency, FOREIGN_CURRENCY_NOTE,
 )
 import formula_eval  # noqa: E402
 
@@ -58,6 +59,7 @@ SEV_RANK = {"high": 0, "medium": 1, "low": 2, "info": 3}
 TOTAL_WORD_RE = re.compile(r"(اجمالي|مجموع|جمله|المجمل|subtotal|total|(?<![a-z])sum(?![a-z]))", re.IGNORECASE)
 VAL_RE = re.compile(r"^val\.([^.]+)\.(total|land|building)$")
 MAX_REFS_IN_WHERE = 30
+HOME_CURRENCY = ["SAR"]   # set from mapping.currency by normalize(); amounts in another currency stay text
 _NA_NORM = frozenset(normalize_arabic(t) for t in NA_TOKENS)
 _NOT_APPL_NORM = frozenset(normalize_arabic(t) for t in NOT_APPLICABLE_TOKENS)
 
@@ -428,8 +430,13 @@ def make_tv(val, kind: str, cspec: dict, field: str, cell_ref: str, number_forma
                   "note": "نسبة مئوية في حقل مبلغ أو مساحة أو عدد؛ لم تُحوَّل إلى رقم", "percent_in_amount": True}
             if isinstance(val, (int, float)):
                 tv["raw"] = f"{raw_str(val)} (تنسيق نسبة مئوية {number_format})"
+        elif kind == "money" and foreign_currency(val, HOME_CURRENCY[0]):
+            cur = foreign_currency(val, HOME_CURRENCY[0])
+            tv = {"v": None, "s": S_TEXT, "raw": raw_str(val), "ref": cell_ref,
+                  "note": FOREIGN_CURRENCY_NOTE.format(cur=cur, home=HOME_CURRENCY[0]), "foreign_currency": cur}
         else:
-            v, s, note = parse_number(val)
+            v, s, note = parse_number(val, kind)
+            ambiguous = s == S_TEXT and isinstance(note, str) and note.startswith("فاصل ملتبس")
             if kind == "percent" and isinstance(val, (int, float)) and not isinstance(val, bool) \
                     and number_format and "%" in number_format and v is not None:
                 v = v * 100
@@ -441,10 +448,12 @@ def make_tv(val, kind: str, cspec: dict, field: str, cell_ref: str, number_forma
                     note = "صفر في حقل لا يُعد الصفر فيه قيمة مقبولة؛ عومل كغير متاح"
                 else:
                     v = 0
-            if s == S_TEXT:
+            if s == S_TEXT and not ambiguous:
                 note = ("وصف نصي مختلط؛ لا يُجمع" if kind == "count_mixed" else "نص في حقل رقمي؛ لم يُحوَّل")
             tv = {"v": tidy_num(v) if s in KNOWN_STATUSES else None, "s": s, "raw": raw_str(val),
                   "ref": cell_ref, "note": note}
+            if ambiguous:
+                tv["ambiguous_thousands"] = True
     elif kind == "date":
         if is_na_token(val) or is_not_applicable_token(val):
             tv = {"v": None, "s": S_NOT_APPLICABLE if is_not_applicable_token(val) else S_NOT_AVAILABLE,
@@ -477,17 +486,26 @@ def make_tv(val, kind: str, cspec: dict, field: str, cell_ref: str, number_forma
 
 
 def redact_if_contact(tv: dict, kind: str) -> bool:
-    """Contact-like values in non-PII text columns are never stored."""
+    """Personal data in non-PII text columns is never stored (block-level patterns of assets/pii_patterns.json:
+    phone, e-mail, IBAN, a labelled national ID). A value that is only a phone is dropped; otherwise the personal
+    spans are replaced by the redaction mark and the rest of the text is kept."""
     if kind not in TEXT_KINDS + ("count_mixed",):
         return False
     raw = tv.get("raw")
     if raw is None:
         return False
-    if looks_like_phone(raw) or EMAIL_RE.search(str(raw)) or \
-            any(looks_like_phone(tok) for tok in re.split(r"[\s,،/;|]+", clean_text(raw)) if tok):
-        tv.update(v=None, s=S_NOT_AVAILABLE, raw=None, note="حُجبت قيمة تشبه بيانات اتصال شخصية")
-        return True
-    return False
+    whole = looks_like_phone(raw) or any(looks_like_phone(tok) for tok in re.split(r"[\s,،/;|]+", clean_text(raw)) if tok)
+    if not whole and not pii_value_hits(raw, ("block",)):
+        return False
+    masked, kinds = mask_pii(clean_text(raw), ("block",))
+    rest = re.sub(r"[\s\u00A0\-.,:;()/+]", "", masked.replace(REDACTED, ""))
+    if whole or not rest:
+        tv.update(v=None, s=S_NOT_AVAILABLE, raw=None,
+                  note="حُجبت قيمة تحمل بيانات شخصية (" + "، ".join(kinds or ["phone"]) + ")")
+    else:
+        tv.update(v=masked if tv.get("s") in KNOWN_STATUSES else tv.get("v"), raw=masked,
+                  note="حُجبت بيانات شخصية من النص (" + "، ".join(kinds) + ")")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -836,6 +854,19 @@ def row_kinds_by_sheet(wb_map) -> dict:
     return out
 
 
+def section_rows_by_sheet(wb_map) -> dict:
+    """{sheet name: {rows}} that 01_workbook_map.json classified section_label."""
+    out = {}
+    for sh in (wb_map or {}).get("sheets") or []:
+        rows = set()
+        for span, kind in (sh.get("row_kinds") or {}).items():
+            m = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+))?\s*", str(span))
+            if m and kind == "section_label":
+                rows.update(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
+        out[sh.get("name")] = rows
+    return out
+
+
 def find_sheet_decl(decls: list, sheet: str):
     exact = [d for d in decls if d.get("sheet") == sheet]
     if exact:
@@ -855,6 +886,8 @@ class Ctx:
         self.wb_v, self.wb_f = open_workbook(xlsx)
         self.finputs = FormulaInputs(self.wb_v, self.wb_f)
         self.row_kinds = row_kinds_by_sheet(wb_map)
+        self.section_rows = section_rows_by_sheet(wb_map)
+        self.regions = {sh.get("name"): sh.get("regions") or [] for sh in (wb_map or {}).get("sheets") or []}
         self.overrides = mapping.get("records") or {}
         self.decls = mapping.get("sheets") or []
         self.records = []
@@ -866,7 +899,8 @@ class Ctx:
         self.scope_problems = []         # (source_id, sheet, [Arabic problems])
         self.managed_sources = []        # (source_id, sheet) on managed_properties sheets
         self.stats = OrderedDict([("pii_columns", 0), ("pii_values", 0), ("rows_skipped", 0), ("rows_excluded", 0),
-                                  ("rows_skipped_with_content", 0), ("rows_total_excluded", 0), ("rows_joined", 0)])
+                                  ("rows_skipped_with_content", 0), ("rows_total_excluded", 0), ("rows_joined", 0),
+                                  ("rows_total_after_range", 0)])
 
 
 def _candidate_id(prefix: str, id_text, row: int) -> str:
@@ -1002,33 +1036,30 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
         return True
 
     def total_reasons(row, id_text, name):
-        reasons = []
+        """(strong, weak) reasons for a total row. Strong: the name/id cell itself reads as a total label. Weak: a total
+        label in another mapped cell, a vertical SUM/SUBTOTAL, or 01's row kind — signs a named asset row can also carry
+        (a «إجمالي/صافي» rent-basis column, a parent building summing its unit rows)."""
+        strong, weak = [], []
         for lab, txt, col in (("الاسم", name, name_col), ("المعرّف", id_text, id_col)):
             if txt and is_total_label(txt):
-                reasons.append(f"{lab} «{txt}» ({col}{row}) يدل على إجمالي")
+                strong.append(f"{lab} «{txt}» ({col}{row}) يدل على إجمالي")
         for col in pii_label_cols:
             if is_total_label(cell_val(ws, row, col_index(col))):
-                reasons.append(f"الخلية {col}{row} تدل على إجمالي")
+                strong.append(f"الخلية {col}{row} تدل على إجمالي")
+        seen_formula = False
         for col, cspec, ci in data_cols:
             if col in (name_col, id_col):
                 continue
             v = cell_val(ws, row, ci)
             if label_like_total(v):
-                reasons.append(f"الخلية {col}{row} «{clean_text(v)}» تدل على إجمالي")
-            if cspec["kind"] in NUMERIC_KINDS and is_total_formula(cell_val(wsf, row, ci)):
-                reasons.append(f"صيغة تجميع في {col}{row} (SUBTOTAL/SUM لنطاق)")
+                weak.append(f"الخلية {col}{row} «{clean_text(v)}» تدل على إجمالي")
+            if cspec["kind"] in NUMERIC_KINDS and not seen_formula and is_total_formula(cell_val(wsf, row, ci)):
+                weak.append(f"صيغة تجميع في {col}{row} (SUBTOTAL/SUM لنطاق)")
+                seen_formula = True   # one formula reason is enough
         k = kinds01.get(row)
         if k:
-            reasons.append(f"خريطة المصنف (01) صنّفت الصف «{ROW_KIND_AR.get(k, k)}»")
-        # one formula reason is enough
-        out, seen_formula = [], False
-        for x in reasons:
-            if x.startswith("صيغة تجميع"):
-                if seen_formula:
-                    continue
-                seen_formula = True
-            out.append(x)
-        return out
+            weak.append(f"خريطة المصنف (01) صنّفت الصف «{ROW_KIND_AR.get(k, k)}»")
+        return strong, weak
 
     def row_values(row):
         vals = OrderedDict()
@@ -1042,8 +1073,22 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
                                            cell.number_format if cell is not None else "General", f, meta)
         return vals
 
+    sections01 = ctx.section_rows.get(sheet) or set()
+
+    def section_label_of(row):
+        """The text of a section-label row («Jeddah», «عقارات الرياض») whose only content is in the id/key column (or
+        that 01 classified section_label): reported as a section label, not as a blank row."""
+        for col in [c for c in (id_col, key_col) if c]:
+            v = cell_val(ws, row, col_index(col))
+            if isinstance(v, str) and not is_blankish(v):
+                t = clean_text(v)
+                if row in sections01 or (re.search(r"[A-Za-z\u0600-\u06FF]{3,}", t) and not re.search(r"\d", t)):
+                    return t
+        return None
+
     rows_out = []
     blank_rows, beyond = [], 0
+    section_rows = []      # (row, label)
     skipped_content = []   # (row, [refs])
     total_rows = []        # (row, reasons, where)
     for row in range(start, end + 1):
@@ -1053,7 +1098,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
             if row <= last_row:
                 iv = resolved(id_col, row)[0] if id_col else None
                 nv = resolved(name_col, row)[0] if name_col else None
-                is_tot = bool(total_reasons(row, clean_text(raw_str(iv)) or None, clean_text(raw_str(nv)) or None)) \
+                is_tot = any(total_reasons(row, clean_text(raw_str(iv)) or None, clean_text(raw_str(nv)) or None)) \
                     or bool(TOTAL_WORD_RE.search(normalize_arabic(excl[row] or "")))
                 if is_tot:
                     vals = row_values(row)
@@ -1066,7 +1111,11 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
             continue
         content = [col for col, ci in content_cols if has_content(ci, row)]
         if not content:
-            blank_rows.append(row)
+            lab = section_label_of(row)
+            if lab:
+                section_rows.append((row, lab))
+            else:
+                blank_rows.append(row)
             continue
         if skip_col:
             sv, _note = resolved(skip_col, row)
@@ -1097,8 +1146,10 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
             name = clean_text(raw_str(nv)) or None
             if name and note:
                 merge_notes.append(note)
-        reasons = total_reasons(row, id_text, name)
+        strong, weak = total_reasons(row, id_text, name)
         cand = _candidate_id(prefix, id_text, row)
+        named = bool(id_text and name)   # a real id and a non-total name: weak signs alone do not make it a total
+        reasons = strong + weak if (strong or not named) else []
         if reasons and not (not join and _overridden_as_record(ctx, cand)):
             where = ref(sheet, f"{name_col or id_col or (data_cols[0][0] if data_cols else 'A')}{row}")
             total_rows.append((row, reasons, where, cand))
@@ -1111,6 +1162,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
             ctx.excluded_rows.append(entry)
             continue
         rr = {"row": row, "id_text": id_text, "name": name, "merge_notes": merge_notes, "total_reasons": reasons,
+              "possible_total": weak if (weak and not strong and named) else None,
               "prefix": prefix, "id_col": id_col, "name_col": name_col, "sheet": sheet, "source_id": sid}
         if key_col:
             kv, note = resolved(key_col, row)
@@ -1183,6 +1235,27 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
                    detail + " — كل خاناتها المربوطة فارغة أو مسافات.",
                    "لا أثر على المؤشرات؛ لم تُنشأ منها سجلات",
                    "تُجووزت الصفوف وعُدّت فقط؛ ضيّق data_rows إن كانت خارج السجل", source_id=sid, count=n)
+    if section_rows:
+        lab_col = id_col or key_col or "A"
+        issues.add("section_label_skipped", "low", join_refs([ref(sheet, f"{lab_col}{r}") for r, _ in section_rows]), [],
+                   f"{count_ar(len(section_rows), 'row')} في المصدر {sid} "
+                   + ("عنوان قسم لا سجل" if len(section_rows) == 1 else "عناوين أقسام لا سجلات") + ": "
+                   + "، ".join(f"الصف {r} «{lab}»" for r, lab in section_rows[:6]) + ".",
+                   "لا أثر على المؤشرات؛ لم تُنشأ منها سجلات",
+                   "تُجووزت كعناوين أقسام؛ إن كانت تصنّف السطور التي تحتها (مدينة، حي) فأضف التصنيف بـ dim_rules",
+                   source_id=sid, rows=[r for r, _ in section_rows])
+    after_rows = totals_after_range(ctx, src, sheet, ws, wsf, end, last_row, id_col, name_col, data_cols, row_values)
+    for row, why in after_rows:
+        entry = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row),
+                             ("reason", "صف إجمالي بعد نطاق البيانات — للمطابقة فقط: " + why), ("auto", True),
+                             ("after_data_rows", True)])
+        vals = row_values(row)
+        if any(tv.get("s") in KNOWN_STATUSES for tv in vals.values()):
+            entry["values"] = vals
+        else:
+            entry["reason"] += " (لا قيم معروفة في خاناته المربوطة)"
+        ctx.excluded_rows.append(entry)
+        ctx.stats["rows_total_after_range"] += 1
     if skipped_content:
         refs = [r for _, rs in skipped_content for r in rs]
         issues.add("row_skipped_with_content", "medium", join_refs(refs), [],
@@ -1198,6 +1271,49 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
                    "لم يُنشأ منه سجل؛ أُدرج في excluded_rows مع قيمه للمطابقة مع مجموع السجلات. إن لم يكن إجماليًا "
                    f"فأضف records/{cand} بنوعه ونطاقه الصحيحين مع الدليل", source_id=sid, row=row)
     return rows_out
+
+
+def totals_after_range(ctx: Ctx, src: dict, sheet: str, ws, wsf, end: int, last_row: int, id_col, name_col,
+                       data_cols, row_values) -> list:
+    """Recorded total rows just after data_rows.to (inspect's proposal usually ends before them): [(row, why)].
+    From 01: the region holding the source's rows lists them in total_rows. Without 01: the next rows (up to 6, stopping
+    at the first row that is neither blank nor a total) whose name/id cell or another mapped text cell is a total label.
+    Rows read by another source of the same sheet are skipped. They are kept only for reconciliation (A14)."""
+    others = set()
+    for o in ctx.mapping.get("sources") or []:
+        if o is src or o.get("sheet") != src.get("sheet"):
+            continue
+        dr = o.get("data_rows") or {}
+        if isinstance(dr.get("from"), int) and isinstance(dr.get("to"), int):
+            others.update(range(dr["from"], dr["to"] + 1))
+    excl = set()
+    for ex in src.get("exclude_rows") or []:
+        excl.update(parse_rows(ex.get("rows")))
+    start = src["data_rows"]["from"]
+    out = []
+    regions = ctx.regions.get(sheet)
+    if regions:
+        for reg in regions:
+            rows = reg.get("rows") or []
+            if len(rows) != 2 or not (rows[0] <= start <= rows[1] or rows[0] <= end <= rows[1]):
+                continue
+            for r in reg.get("total_rows") or []:
+                if isinstance(r, int) and end < r <= min(rows[1], last_row) and r not in others and r not in excl:
+                    out.append((r, f"خريطة المصنف (01) تعده صف إجمالي في منطقة الجدول ({rows[0]}–{rows[1]})"))
+        return sorted(set(out))
+    for r in range(end + 1, min(end + 6, last_row) + 1):
+        if r in others or r in excl:
+            break
+        texts = [cell_val(ws, r, col_index(c)) for c in (name_col, id_col) if c]
+        texts += [cell_val(ws, r, ci) for _c, cs, ci in data_cols if cs["kind"] in TEXT_KINDS]
+        vals = [cell_val(ws, r, ci) for _c, cs, ci in data_cols]
+        if all(is_blankish(v) for v in vals + texts):
+            continue
+        lab = next((clean_text(t) for t in texts if isinstance(t, str) and is_total_label(t)), None)
+        if not lab:
+            break
+        out.append((r, f"الصف يبدأ بعبارة إجمالي «{lab}»"))
+    return out
 
 
 def new_record(ctx: Ctx, src: dict, rr: dict, scope: str, scope_reason, record_type=None) -> OrderedDict:
@@ -1238,6 +1354,8 @@ def new_record(ctx: Ctx, src: dict, rr: dict, scope: str, scope_reason, record_t
         rec["_oov"] = OrderedDict(rr["oov"])
     if rr.get("total_reasons"):
         rec["_total"] = rr["total_reasons"]
+    if rr.get("possible_total"):
+        rec["_possible_total"] = rr["possible_total"]
     ctx.seen_ids[rid] = rec
     ctx.id_texts[rid] = id_text
     ctx.records.append(rec)
@@ -1287,6 +1405,18 @@ def _row_key(rr: dict, on: str) -> str:
     return _deed_key(raw)
 
 
+JOIN_TARGET_TYPES = ("asset", "land_parcel", "operating_activity")
+
+
+def _join_eligible(ctx: Ctx, rec: dict) -> bool:
+    """A join target that is not excluded and is an asset/land parcel/operating activity, counting records/ overrides
+    (applied later in normalize) so that units set to excluded as validate instructs never compete with their parent."""
+    ov = ctx.overrides.get(rec["id"]) or {}
+    scope = ov.get("scope") or rec.get("scope")
+    rtype = ov.get("record_type") or rec.get("record_type")
+    return scope != "excluded" and rtype in JOIN_TARGET_TYPES
+
+
 def merge_join_source(ctx: Ctx, src: dict, sheet: str, rows: list) -> None:
     """Merge a join source's mapped fields into the records of `join.into` (A7). Never creates in-scope records."""
     sid, j = src["id"], src["join"]
@@ -1302,6 +1432,9 @@ def merge_join_source(ctx: Ctx, src: dict, sheet: str, rows: list) -> None:
     for rr in rows:
         k = _row_key(rr, on)
         cands = index.get(k, []) if k else []
+        # units/contracts and excluded rows usually share their parent's deed: match the parent (an in-scope asset,
+        # land parcel or activity, after records/ overrides); fall back to every candidate only when none qualifies
+        cands = [t for t in cands if _join_eligible(ctx, t)] or cands
         if len(cands) == 1:
             tgt = cands[0]
             ctx.stats["rows_joined"] += 1
@@ -1371,6 +1504,8 @@ def merge_join_source(ctx: Ctx, src: dict, sheet: str, rows: list) -> None:
 
 
 def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
+    cur = mapping.get("currency")
+    HOME_CURRENCY[0] = (cur.get("value") if isinstance(cur, dict) else cur) or "SAR"
     ctx = Ctx(xlsx, mapping, wb_map)
     issues, meta = ctx.issues, ctx.meta
     sources = mapping["sources"]
@@ -1398,6 +1533,7 @@ def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
     apply_derived(records, mapping.get("derived_fields") or [], issues, meta)
     apply_dim_rules(records, mapping.get("dim_rules") or [])
     apply_overrides(records, by_id, ctx.overrides, issues, meta)
+    apply_rollups(records, by_id, ctx.overrides, issues, meta)
     for r in records:
         d = r["dims"]
         if "managed_for_others" not in d or d.get("managed_for_others") is None:
@@ -1411,6 +1547,15 @@ def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
 
     # ---- automatic checks -------------------------------------------------
     for rec in records:
+        weak = rec.pop("_possible_total", None)
+        if weak:
+            src = rec["source"]
+            issues.add("possible_total_row", "medium", src.get("ref_name") or ref(src["sheet"], f"A{src['row']}"),
+                       [rec["id"]], f"الصف {src['row']} في المصدر {src['source_id']} له معرّف واسم أصل («{rec.get('name')}») "
+                       "لكن فيه علامات إجمالي: " + "؛ ".join(weak) + ". أُبقي سجلًا ولم يُستبعد آليًا.",
+                       "إن كان يجمع سطورًا تابعة (وحدات أو عقود) مدرجة ضمن النطاق فقد تتضاعف المبالغ",
+                       "تحقق من الصف: إن كان إجماليًا فأضفه إلى exclude_rows؛ وإن كان أصلًا تجمع صيغته وحداته فأبقِ أحد "
+                       "المستويين فقط ضمن النطاق لتجنب الازدواج")
         why = rec.pop("_total", None)
         if why:
             issues.add("total_like_row", "high", rec["source"]["ref_name"] or ref(rec["source"]["sheet"], f"A{rec['source']['row']}"),
@@ -1448,6 +1593,7 @@ def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
     stats["rows_skipped_with_content"] = st["rows_skipped_with_content"]
     stats["rows_excluded"] = st["rows_excluded"]
     stats["rows_total_excluded"] = st["rows_total_excluded"]
+    stats["rows_total_after_range"] = st["rows_total_after_range"]
     stats["rows_joined"] = st["rows_joined"]
     stats["issues"] = len(items)
     stats["issues_by_severity"] = dict(sorted(_count(i["severity"] for i in items).items()))
@@ -1636,6 +1782,68 @@ def apply_overrides(records: list, by_id: dict, overrides: dict, issues: Issues,
                        field=field)
 
 
+def apply_rollups(records: list, by_id: dict, overrides: dict, issues: Issues, meta: dict) -> None:
+    """records/<parent>.rollup: sum the children's known values into the parent's unknown fields (revenue recorded on
+    unit rows while the building row holds only the valuation). Children go out of scope so nothing is counted twice."""
+    for rid in sorted(overrides):
+        ru = (overrides[rid] or {}).get("rollup")
+        if not ru:
+            continue
+        parent = by_id.get(rid)
+        missing = [c for c in [rid] + list(ru["from"]) if c not in by_id]
+        if parent is None or missing:
+            issues.add("rollup_unknown_record", "high", f"02_mapping.json/records/{rid}/rollup", [],
+                       "تجميع الوحدات في الأصل يذكر معرّفات لا سجل لها: " + "، ".join(missing) + ".",
+                       "لم يُطبَّق التجميع؛ تبقى مبالغ الوحدات خارج الأصل", "صحّح المعرّفات في records/<id>/rollup")
+            continue
+        kids = [by_id[c] for c in ru["from"]]
+        for k in kids:
+            if "scope" not in (overrides.get(k["id"]) or {}):
+                k["scope"] = "excluded"
+                k["scope_reason"] = f"جُمعت مبالغه في الأصل {rid} (records/{rid}/rollup)"
+        done, incomplete, conflicts = [], [], []
+        for f in ru["fields"]:
+            tvs = [(k, (k.get("fields") or {}).get(f)) for k in kids]
+            unknown = [k["id"] for k, tv in tvs if not _known(tv)]
+            total = None if unknown else tidy_num(sum(tv["v"] for _k, tv in tvs))
+            cur = parent["fields"].get(f)
+            if _known(cur):
+                if total is None or abs(float(cur["v"]) - float(total)) > 0.5:
+                    conflicts.append((f, cur.get("v"), total, unknown))
+                continue
+            if unknown:
+                incomplete.append((f, unknown))
+                continue
+            refs = [tv.get("ref") for _k, tv in tvs if tv.get("ref")]
+            new = OrderedDict([("v", total), ("s", S_DERIVED), ("raw", None), ("ref", join_refs(refs)),
+                               ("note", "مجموع " + "، ".join(f"{k['id']} ({fmt(tv['v'])})" for k, tv in tvs)
+                                + f" — تجميع موثق: {ru['evidence']}"),
+                               ("rollup", OrderedDict([("from", list(ru["from"])), ("evidence", ru["evidence"])]))])
+            if cur:
+                new["from_parent_cell"] = OrderedDict([("s", cur.get("s")), ("ref", cur.get("ref"))])
+            parent["fields"][f] = new
+            done.append((f, total))
+        ids = [rid] + list(ru["from"])
+        if done:
+            issues.add("rollup_applied", "low", f"02_mapping.json/records/{rid}/rollup", ids,
+                       f"جُمعت مبالغ {len(kids)} سجلات تابعة في الأصل {rid}: "
+                       + "؛ ".join(f"{f} = {fmt(t)}" for f, t in done) + f". الدليل: {ru['evidence']}",
+                       "تدخل المبالغ مرة واحدة على مستوى الأصل؛ السجلات التابعة خارج النطاق",
+                       "طُبّق التجميع كما ورد في 02_mapping.json")
+        for f, unknown in incomplete:
+            issues.add("rollup_incomplete", "medium", f"02_mapping.json/records/{rid}/rollup", ids,
+                       f"تعذر تجميع {f} في الأصل {rid}: القيمة غير معروفة في " + "، ".join(unknown) + ".",
+                       impact_for(f, "money", meta),
+                       "بقي الحقل غير معروف في الأصل؛ لا يُجمع مجموع جزئي. وثّق القيم الناقصة أو أخرجها من التجميع")
+        for f, cur_v, total, unknown in conflicts:
+            issues.add("rollup_conflict", "medium", (parent["fields"].get(f) or {}).get("ref") or rid, ids,
+                       f"الأصل {rid} يحمل قيمة معروفة في {f} ({fmt(cur_v)}) "
+                       + (f"تخالف مجموع السجلات التابعة ({fmt(total)})" if total is not None
+                          else "وبعض السجلات التابعة غير معروفة القيمة") + ".",
+                       impact_for(f, "money", meta),
+                       "أُبقيت قيمة الأصل ولم يُستبدل بها المجموع؛ والسجلات التابعة خارج النطاق")
+
+
 # ---------------------------------------------------------------------------
 # Checks
 # ---------------------------------------------------------------------------
@@ -1820,6 +2028,10 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
             if kind in NUMERIC_KINDS:
                 if tv.get("percent_in_amount"):
                     add(("percent_in_amount", f), r["id"], tv, tv.get("raw"))
+                elif tv.get("foreign_currency"):
+                    add(("foreign_currency", f), r["id"], tv, tv.get("raw"))
+                elif tv.get("ambiguous_thousands"):
+                    add(("ambiguous_thousands_separator", f), r["id"], tv, tv.get("raw"))
                 elif s == S_TEXT:
                     add(("text_in_numeric", f), r["id"], tv, tv.get("raw"))
                 elif s == S_ERROR:
@@ -1841,12 +2053,39 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
                 elif tv.get("note") and s not in (S_NOT_AVAILABLE, S_NOT_APPLICABLE):
                     add(("date_note", f), r["id"], tv, f"{tv.get('raw')}: {tv.get('note')}")
 
+    # one percent field holding both fractions (0.5) and percentages (50): the scale is mixed and shares cannot be summed
+    for f, kind in kinds.items():
+        if kind != "percent":
+            continue
+        small, big = [], []
+        for r in records:
+            tv = (r.get("fields") or {}).get(f)
+            if not isinstance(tv, dict) or tv.get("s") not in KNOWN_STATUSES or not isinstance(tv.get("v"), (int, float)):
+                continue
+            (small if 0 < tv["v"] <= 1 else big if tv["v"] > 1 else []).append((r["id"], tv))
+        if small and big:
+            ex = [f"{rid}: {tv.get('raw')}" for rid, tv in (small[:2] + big[:2])]
+            issues.add("percent_scale_mixed", "medium", join_refs([tv.get("ref") for _, tv in small + big]),
+                       [rid for rid, _ in small + big],
+                       f"الحقل {f} يخلط نسبًا مدونة كسورًا (≤ 1: {len(small)} سجل) ونسبًا مئوية (> 1: {len(big)} سجل)"
+                       " — أمثلة: " + "؛ ".join(f"«{x}»" for x in ex) + ".",
+                       impact_for(f, kind, meta),
+                       "خُزّنت القيم كما هي؛ وحّد المقياس (0.5 تعني 50%؟) في records أو derived_fields مع الدليل قبل "
+                       "استعمالها في حصة ملكية أو نسبة", field=f)
+
     texts = {
         "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {n} سجل",
                             "لم يُحوَّل النص إلى رقم ولم يُعامل كصفر؛ القيمة غير معروفة مع حفظ النص الأصلي"),
         "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {n} سجل",
                               "لم تُحوَّل إلى رقم ولم تُجمع؛ القيمة غير معروفة مع حفظ النص الأصلي، ويلزم التحقق من "
                               "المبلغ الفعلي في المصدر"),
+        "foreign_currency": ("high", "مبالغ بعملة غير عملة الدراسة في الحقل {f} ({n} سجل)",
+                             "لم تُحوَّل إلى أرقام ولم تُجمع (status text)؛ لا يُجمع مبلغان بعملتين. حوّل المبلغ بسعر "
+                             "صرف موثق في derived_fields أو records مع الدليل، أو اتركه غير معروف"),
+        "ambiguous_thousands_separator": ("medium", "أرقام نصية بفاصل ملتبس في الحقل {f} ({n} سجل)",
+                                          "نقطة يتبعها ثلاث خانات بالضبط (مثل «12.500») قد تكون فاصل آلاف (12,500) "
+                                          "أو فاصلة عشرية (12.5)؛ لم تُحوَّل إلى رقم. تحقق من المصدر وثبّت القيمة في "
+                                          "records مع الدليل"),
         "zero_from_blank_inputs": ("medium", "صيغ ناتجها المخزن 0 لأن مدخلاتها فارغة في الحقل {f} ({n} سجل)",
                                    "عوملت القيمة كغير متاحة (not_available) لا كصفر مسجل؛ الصفر هنا نتيجة خانات فارغة "
                                    "وليس رقمًا مدونًا"),
@@ -1866,8 +2105,8 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
                           "حُفظ النص الأصلي دون تحويل (status text)"),
         "formula_no_cache": ("medium", "خلايا صيغ بلا قيم مخزنة في الحقل {f} ({n} سجل)",
                              "عوملت القيم كغير معروفة؛ افتح الملف في Excel واحفظه لإعادة الحساب"),
-        "pii_redacted": ("high", "قيم تشبه بيانات اتصال شخصية في الحقل {f} ({n} سجل)",
-                         "حُجبت القيم ولم تُخزَّن؛ علّم العمود pii في mapping"),
+        "pii_redacted": ("high", "قيم تحمل بيانات شخصية (جوال أو بريد أو آيبان أو رقم هوية) في الحقل {f} ({n} سجل)",
+                         "حُجب الجزء الشخصي ولم يُخزَّن؛ علّم العمود pii في mapping إن كان شخصيًا كله"),
     }
     for (typ, f), g in groups.items():
         sev, det, treat = texts[typ]

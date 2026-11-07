@@ -59,7 +59,8 @@ FMT_SHARE = "0.0%"                 # shares stored in 0..1
 PLAN_STATUSES = ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]  # plan items and recommendation follow-up
 MAX_WIDTH, MIN_WIDTH = 60, 9
 PII_KIND_AR = {"mobile": "رقم جوال", "landline": "رقم هاتف", "email": "بريد إلكتروني", "iban": "رقم حساب بنكي (IBAN)",
-               "national_id": "رقم من 10 خانات قد يكون رقم هوية"}
+               "national_id": "رقم هوية أو رقم من 10 خانات قد يكون هوية",
+               "mobile_unprefixed": "رقم من 9 خانات يبدأ بـ5 قد يكون جوالًا"}
 _ORPHAN_BRACKET_RE = re.compile(r"\(\s*" + re.escape(REDACTED))
 TOKEN_RE = re.compile(r"\{\{\s*m:([A-Za-z0-9_\-]+)((?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 MONEY_FIELDS = {"num", "den", "num_known_total", "prev_sum", "curr_sum", "abs_change", "total", "top_sum",
@@ -122,6 +123,7 @@ RECON_STATUS_AR = {
     "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
+    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق (derived_fields)؛ الفرق سببه الاشتقاق لا نقص في السجلات",
     "mismatch": "فرق غير مفسَّر",
     "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
 }
@@ -153,11 +155,12 @@ DIM_AR_DEFAULT = {"income_generation": "توليد الدخل", "income_stabilit
 # ---------------------------------------------------------------------------
 class C:
     """A cell value with optional formatting."""
-    __slots__ = ("v", "fmt", "fill", "color", "bold", "wrap", "formula")
+    __slots__ = ("v", "fmt", "fill", "color", "bold", "wrap", "formula", "raw_ok")
 
-    def __init__(self, v, fmt=None, fill=None, color=None, bold=False, wrap=True, formula=False):
+    def __init__(self, v, fmt=None, fill=None, color=None, bold=False, wrap=True, formula=False, raw_ok=False):
         self.v, self.fmt, self.fill, self.color, self.bold, self.wrap = v, fmt, fill, color, bold, wrap
         self.formula = formula  # only deliberate formulas (SUM totals) are written unescaped
+        self.raw_ok = raw_ok    # a deed number: review-level digits are kept (block-level patterns are still masked)
 
 
 def is_num(x):
@@ -178,17 +181,18 @@ class Privacy:
 PRIVACY = Privacy()
 
 
-def safe_text(x):
-    """Text for a cell. Block-level personal-data patterns (assets/pii_patterns.json: mobile and landline numbers in
-    any separator style, e-mail, IBAN; Arabic-Indic digits are matched after translation) are replaced by REDACTED.
-    Review-level hits (a 10-digit number that may be a deed) are kept; privacy_self_check reports them."""
+def safe_text(x, review=True):
+    """Text for a cell. Personal-data patterns of assets/pii_patterns.json are replaced by REDACTED: block level (mobile
+    and landline numbers in any separator style, e-mail, IBAN, a labelled national ID; Arabic-Indic digits are matched
+    after translation) always, and review level (a bare 10-digit number that may be a national ID) too unless review=False
+    — deed-number cells (C(..., raw_ok=True)) keep their digits; privacy_self_check reports what is left."""
     if x is None:
         return None
     if isinstance(x, (list, tuple)):
         x = "\n".join(str(i) for i in x if i is not None and str(i) != "")
     elif isinstance(x, dict):
         x = "؛ ".join(f"{k}: {v}" for k, v in x.items())
-    s, kinds = mask_pii(str(x), ("block",))
+    s, kinds = mask_pii(str(x), ("block", "review") if review else ("block",))
     if kinds:
         PRIVACY.masked += 1
         PRIVACY.kinds.update(kinds)
@@ -226,9 +230,9 @@ class Sheet:
         if spec.formula:
             pass
         elif isinstance(v, str) or isinstance(v, (list, tuple, dict)):
-            v = safe_text(v)
+            v = safe_text(v, review=not spec.raw_ok)
         elif v is not None and not is_num(v) and not isinstance(v, (_dt.date, _dt.datetime)):
-            v = safe_text(v)
+            v = safe_text(v, review=not spec.raw_ok)
         cell = self.ws.cell(row=r, column=col, value=v)
         cell.border = BORDER
         if header:
@@ -412,7 +416,14 @@ def render_tokens(text, metrics):
     return TOKEN_RE.sub(rep, text)
 
 
-def status_cell(status, vocab):
+def status_cell(status, vocab, res=None):
+    """Arabic metric status. An empty result names its cause (C3): no qualifying record in the file (empty_cause
+    scope, the default for an unfiltered export) or none under the current filters."""
+    if status == "empty":
+        cause = (res or {}).get("empty_cause")
+        lab = "لا توجد سجلات ضمن التصفية الحالية" if cause == "filters" else "لا توجد سجلات مؤهلة في الملف"
+        fill, color = METRIC_STATUS_STYLE.get(status, (None, None))
+        return C(lab, fill=fill, color=color)
     lab = ((vocab.get("metric_status") or {}).get(status) or {}).get("ar") or status or "—"
     fill, color = METRIC_STATUS_STYLE.get(status, (None, None))
     return C(lab, fill=fill, color=color)
@@ -429,6 +440,15 @@ def unknown_text(tv, vocab):
     if raw and s not in ("blank", "filler") and raw != lab:
         text += f": «{raw if len(raw) <= 200 else raw[:200] + '…'}»"
     return text
+
+
+_DEED_FIELD_RE = re.compile(r"deed|صك|صكوك", re.IGNORECASE)
+
+
+def is_deed_field(field, meta=None) -> bool:
+    """A deed-number field (deed_no, «رقم الصك»): its 10-digit values are deeds, not national IDs."""
+    label = str(((meta or {}).get(field) or {}).get("label") or "")
+    return bool(_DEED_FIELD_RE.search(str(field or "")) or _DEED_FIELD_RE.search(label))
 
 
 def tv_cell(tv, vocab, fmt=None):
@@ -592,7 +612,7 @@ class Export:
                         else C("غير قابل للاحتساب بالبيانات الحالية" if res.get("status") != "empty" else empty_text(res),
                                fill=GRAY_FILL, color=GRAY_TXT))
             rows.append([C(res.get("label") or mid, bold=bool(res.get("card"))), val_cell, UNIT_AR.get(unit, unit or "—"),
-                         status_cell(res.get("status"), self.vocab),
+                         status_cell(res.get("status"), self.vocab, res),
                          f"{res.get('n_included', 0)} من {res.get('n_scope', 0)}",
                          res.get("scope_text"), res.get("basis"), res.get("valuation_date"),
                          result_notes(res) or ("بطاقة في الداشبورد" if res.get("card") else "")])
@@ -668,7 +688,7 @@ class Export:
             for f in text:
                 tv = fields.get(f)
                 row.append(tv_cell(tv, self.vocab) if isinstance(tv, dict) and tv.get("s") not in KNOWN_STATUSES else
-                           (tv or {}).get("v"))
+                           C((tv or {}).get("v"), raw_ok=is_deed_field(f, self.meta)))
             src = rec.get("source") or {}
             refs = [f"{f}: {(fields.get(f) or {}).get('ref')}" for f in numeric if (fields.get(f) or {}).get("ref")]
             row += [src.get("ref_name") or (f"{src.get('sheet')}!{src.get('row')}" if src.get("sheet") else None),
@@ -693,7 +713,7 @@ class Export:
             share = res.get("coverage_num_share")
             rows.append([
                 mid, res.get("label"), KIND_AR.get(res.get("kind"), res.get("kind")), val_cell, UNIT_AR.get(unit, unit),
-                status_cell(res.get("status"), self.vocab), res.get("n_scope"), res.get("n_included"), len(excl),
+                status_cell(res.get("status"), self.vocab, res), res.get("n_scope"), res.get("n_included"), len(excl),
                 "؛ ".join(f"{k}: {v}" for k, v in rf.items()) if rf else "—",
                 C(res.get("num"), fmt=FMT_INT) if is_num(res.get("num")) else None,
                 C(res.get("den"), fmt=FMT_INT) if is_num(res.get("den")) else None,
@@ -822,7 +842,7 @@ class Export:
             above = [x for x in total_rows.get(sid, []) if isinstance(row, int) and x < row]
             lo = max(above) if above else None
 
-            def agg(field, in_scope_only, section):
+            def agg(field, in_scope_only, section, original=False):
                 s, n_known, n_unknown, s_text, ids = 0.0, 0, 0, 0.0, []
                 for r in by_src.get(sid, []):
                     if in_scope_only and r.get("scope") != "in_scope":
@@ -830,7 +850,8 @@ class Export:
                     rr = (r.get("source") or {}).get("row")
                     if section and not (isinstance(rr, int) and isinstance(row, int) and (lo is None or rr > lo) and rr < row):
                         continue
-                    tv = (r.get("fields") or {}).get(field)
+                    fl = r.get("fields") or {}
+                    tv = (fl.get(field + "__original") or fl.get(field)) if original else fl.get(field)
                     tv = tv if isinstance(tv, dict) else {}
                     if tv.get("joined_from"):
                         continue
@@ -866,6 +887,11 @@ class Export:
                         break
                 if status == "mismatch" and full[3] and abs(recorded - (full[0] - full[3])) <= tol:
                     status, matched = "match_without_text_numbers", round(full[0] - full[3], 2)
+                if status == "mismatch" and any(field + "__original" in (r.get("fields") or {}) for r in by_src.get(sid, [])):
+                    for res in (agg(field, True, False, True), agg(field, True, True, True)):
+                        if res[1] and abs(recorded - res[0]) <= tol:
+                            status, matched = "match_original", res[0]
+                            break
                 item.update(recorded=recorded, sum_in_scope=full[0], n_known=full[1], n_unknown=full[2],
                             ids=full[4], difference=round(recorded - full[0], 2), sum_all_records=all_rec[0],
                             section_sum=sec[0] if lo is not None or sec[1] != full[1] else None,
@@ -1123,9 +1149,9 @@ class Export:
             n = counts.get(key) if is_num(counts.get(key)) else (len(items) if items is not None else
                                                                    (sum(1 for x in examples if x.get("category") == key)
                                                                     if examples else None))
-            cat_rows.append([self._cat_label(labels, key), n if n is not None else C("غير مذكور", color=GRAY_TXT), key])
+            cat_rows.append([self._cat_label(labels, key), n if n is not None else C("غير مذكور", color=GRAY_TXT)])
         sh.heading("الفئات الخمس")
-        sh.table("tblVersionCategories", ["الفئة", "عدد الفروق", "المفتاح"], cat_rows, filters=False)
+        sh.table("tblVersionCategories", ["الفئة", "عدد الفروق"], cat_rows, filters=False)
         rows = []
         for key, _ in VC_CATEGORIES:
             items = lists.get(key) if isinstance(lists.get(key), list) else [x for x in examples if x.get("category") == key]
@@ -1133,7 +1159,8 @@ class Export:
                 if not isinstance(c, dict):
                     continue
                 fld = c.get("field")
-                fl = ("الاسم" if fld == "name" else (self.meta.get(fld) or {}).get("label") or fld) if fld else c.get("key")
+                fl = ("الاسم" if fld == "name" else (self.meta.get(fld) or {}).get("label") or fld) if fld \
+                    else (c.get("key_ar") or c.get("key"))
                 if fld == "name":
                     pv, cv = c.get("prev_name") or "—", c.get("curr_name") or "—"
                 elif "prev_value" in c or "curr_value" in c:
@@ -1170,12 +1197,21 @@ class Export:
             af = x.get("affected_by") or {}
             unit = x.get("unit")
 
+            hidden = bool(x.get("values_hidden"))
+            pp = x.get("difference_unit") == "pp" or unit == "%"
+
             def mv(v, st):
+                if hidden:
+                    return C("قابلية المقارنة غير مؤكدة", fill=GRAY_FILL, color=GRAY_TXT)
                 return C(v, fmt=unit_fmt(unit)) if is_num(v) else status_cell(st, self.vocab)
+            diff = None
+            if is_num(x.get("difference")) and not hidden:
+                # two percentages differ by percentage points (not a relative %): written as a number + «نقطة مئوية»
+                diff = C(round(x["difference"], 2), fmt='0.00 "نقطة مئوية"') if pp else C(x["difference"], fmt=unit_fmt(unit))
             rows.append([x.get("label") or x.get("id"), x.get("prev_period"), x.get("curr_period"),
                          mv(x.get("prev_value"), x.get("prev_status")), mv(x.get("curr_value"), x.get("curr_status")),
-                         C(x["difference"], fmt=unit_fmt(unit)) if is_num(x.get("difference")) else None,
-                         UNIT_AR.get(unit, unit),
+                         diff,
+                         (UNIT_AR.get(unit, unit) or "") + ("؛ الفرق بالنقاط المئوية" if pp and unit else ""),
                          "؛ ".join(f"{self._cat_label(labels, k)} ({len(v) if isinstance(v, list) else v})" for k, v in af.items()) or "—",
                          x.get("definition_causes") or "—", x.get("note")])
         if rows:

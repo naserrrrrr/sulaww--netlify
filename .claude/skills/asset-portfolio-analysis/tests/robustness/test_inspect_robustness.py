@@ -184,6 +184,13 @@ def build_structure_book(path: str) -> None:
                   [None, "المجموع", None, "#VALUE!", "#VALUE!"],
                   [4, "عمارة القمر", "سكني", 360000, 5500000],
                   [None, None, "جملة القسم", 360000, 5500000]])
+    # round 2: a serial + a real name with «إجمالي» in a later attribute column (rent basis) is a data row
+    ws = wb.create_sheet("أساس الإيجار")
+    put_rows(ws, [["م", "اسم العقار", "الإيراد 2024", "التقييم 2024", "أساس الإيجار"],
+                  [1, "عمارة السنابل", 240000, 4000000, "إجمالي"],
+                  [2, "محلات الفجر", 180000, 3000000, "صافي"],
+                  [3, "عمارة القمر", 360000, 5500000, "إجمالي"],
+                  [None, "الإجمالي", 780000, 12500000, None]])
     # A15: Hijri text, Gregorian text and an Excel date cell in one column
     ws = wb.create_sheet("تواريخ")
     put_rows(ws, [["م", "اسم العقار", "تاريخ التملك"],
@@ -318,6 +325,10 @@ def test_structure(rep: Report, wm: dict) -> None:
               rk.get("7") in ("total_label", "total_formula"), f"row_kinds {rk}")
     rep.check("A3 «مجمع الواحة» stays a data row (row 2)", rk.get("2-4") == "data", f"row_kinds {rk}")
     rep.check("A3 data rows exclude the totals", sh["data_rows"]["count"] == 4, f"got {sh['data_rows']}")
+    sh = sheet(wm, "أساس الإيجار")
+    rk = sh["row_kinds"]
+    rep.check("A3 named rows with «إجمالي» in a later attribute column stay data (rows 2–4)",
+              rk.get("2-4") == "data" and rk.get("5") in ("total_label", "total_formula"), f"row_kinds {rk}")
 
     print("[A15] التقويم")
     hj = anomalies(wm, "hijri_date_text", "تواريخ")

@@ -1323,13 +1323,15 @@ CHILD_TYPES = ("unit", "contract")
 VOCAB_DIMS = ("use", "income_nature", "waqf")          # single code each
 ACK_MIN_WORDS = 8
 PII_KIND_AR = {"mobile": "رقم جوال", "landline": "رقم هاتف ثابت", "email": "بريد إلكتروني",
-               "iban": "رقم حساب بنكي (IBAN)", "national_id": "رقم من 10 خانات يبدأ بـ1 أو 2 (قد يكون هوية وطنية)"}
+               "iban": "رقم حساب بنكي (IBAN)", "national_id": "رقم هوية وطنية أو رقم من 10 خانات يبدأ بـ1 أو 2 (قد يكون هوية)",
+               "mobile_unprefixed": "رقم من 9 خانات يبدأ بـ5 (قد يكون جوالًا)"}
 RECON_STATUS_AR = {
     "match": "مطابق لمجموع السجلات ضمن النطاق",
     "match_section": "مطابق لمجموع سجلات قسمه ضمن النطاق (إجمالي فرعي)",
     "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
+    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق (derived_fields)؛ الفرق سببه الاشتقاق لا نقص في السجلات",
     "mismatch": "فرق غير مفسَّر",
     "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
 }
@@ -1528,7 +1530,13 @@ def g4b_total_like(ctx: Ctx):
         seen.add(rid)
         at = short_list([f"{f} ({ref})" if ref else f for f, ref in cells], 3)
         reason = _evidenced_override(ctx, rid)
-        if reason:
+        named = bool(r.get("name")) and not is_total_label(r.get("name")) and bool(_src(r).get("ref_id")) \
+            and not re.search(r"-r\d+$", str(rid))
+        if named and not reason:
+            # a real id and a non-total name: «إجمالي/صافي» in another column is usually an attribute (rent basis)
+            warnings.append((f"السجل {rid} «{r.get('name')}» له معرّف واسم أصل ويحمل عبارة إجمالي في {at}؛ تحقق أنه أصل "
+                             "لا صف إجمالي (إن كان إجماليًا فأضفه إلى exclude_rows)", f"03_records.json:{rid}"))
+        elif reason:
             warnings.append((f"السجل {rid} يحمل عبارة إجمالي في {at} وأُبقي ضمن النطاق بتجاوز موثق في 02 "
                              f"(«{reason[:160]}»)؛ تأكد أنه ليس مجموعًا لسجلات أخرى", f"03_records.json:{rid}"))
         else:
@@ -1601,8 +1609,9 @@ def g4b_unit_levels(ctx: Ctx):
         else:
             by_parent.setdefault(p.get("id"), (p, []))[1].append((c, basis, amounts))
     blocking, warnings = [], []
-    fix = ("اختر مستوى واحدًا للجمع: الأصل بمبلغه الكامل والوحدات excluded بسبب «تفصيل لأصل مسجل»، أو الوحدات وحدها "
-           "بعد استبعاد مبلغ الأصل")
+    fix = ("اختر مستوى واحدًا للجمع: الأصل بمبلغه الكامل والوحدات excluded بسبب «تفصيل لأصل مسجل»، أو — إن كان مبلغ "
+           "الأصل غير مدون والمبالغ على الوحدات — اجمعها فيه بـ records/<الأصل>/rollup "
+           "({\"from\": [معرّفات الوحدات], \"fields\": [...], \"evidence\": \"...\"}) فتخرج الوحدات من النطاق تلقائيًا")
     for pid, (p, kids) in by_parent.items():
         p_amounts = _amounts(p, meta)
         hard, soft = [], []
@@ -1890,8 +1899,9 @@ def g4b_reconciliation(ctx: Ctx):
         prev = [x for x in total_rows.get(sid, []) if isinstance(row, int) and x < row]
         lo = max(prev) if prev else None
 
-        def agg(field, in_scope_only, section):
-            """(sum of known values, n known, n unknown, sum of numbers that were stored as text in the file)."""
+        def agg(field, in_scope_only, section, original=False):
+            """(sum of known values, n known, n unknown, sum of numbers that were stored as text in the file).
+            original=True reads <field>__original (the value before a documented derived_fields override) when present."""
             s, n_known, n_unknown, s_text = 0.0, 0, 0, 0.0
             for r in by_src.get(sid, []):
                 if in_scope_only and not _in_scope(r):
@@ -1899,7 +1909,8 @@ def g4b_reconciliation(ctx: Ctx):
                 rr = _src(r).get("row")
                 if section and not (isinstance(rr, int) and isinstance(row, int) and (lo is None or rr > lo) and rr < row):
                     continue
-                tv = as_dict(as_dict(r.get("fields")).get(field))
+                fl = as_dict(r.get("fields"))
+                tv = as_dict(fl.get(field + "__original") or fl.get(field)) if original else as_dict(fl.get(field))
                 if tv.get("joined_from"):
                     continue
                 if tv.get("s") in KNOWN_STATUSES and is_num(tv.get("v")):
@@ -1930,6 +1941,11 @@ def g4b_reconciliation(ctx: Ctx):
                     break
             if status == "mismatch" and full[3] and abs(recorded - (full[0] - full[3])) <= tol:
                 status, matched = "match_without_text_numbers", round(full[0] - full[3], 2)
+            if status == "mismatch" and any(field + "__original" in as_dict(r.get("fields")) for r in by_src.get(sid, [])):
+                for res in (agg(field, True, False, True), agg(field, True, True, True)):
+                    if res[1] and abs(recorded - res[0]) <= tol:
+                        status, matched = "match_original", res[0]
+                        break
             item.update(recorded=recorded, sum_in_scope=full[0], n_in_scope_known=full[1], n_in_scope_unknown=full[2],
                         difference=round(recorded - full[0], 2), sum_all_records=all_rec[0], matched_sum=matched,
                         status=status, status_ar=RECON_STATUS_AR[status])
@@ -1963,6 +1979,86 @@ def g4b_md_reconciliation(report: dict) -> list:
                      f"{num(r.get('matched_sum'))} | {_md_cell(r.get('status_ar'))} |")
     lines.append("")
     return lines
+
+
+# --- A14: recorded totals that nothing reconciles ------------------------------------------------------------------
+def c_totals_not_reconciled(ctx: Ctx):
+    """01 lists total rows inside the table region of a source, but no excluded_rows entry keeps their values and no
+    record reads them: the recorded totals are silently left unreconciled (e.g. 03 written without 01 next to it)."""
+    ctx.need("records", "wb", "mapping")
+    covered = defaultdict(set)
+    for e in as_list(ctx.rec_doc.get("excluded_rows")):
+        if isinstance(e, dict) and isinstance(e.get("row"), int):
+            covered[e.get("sheet")].add(e["row"])
+    for r in ctx.records:
+        covered[_src(r).get("sheet")].add(_src(r).get("row"))
+    sheets = {as_dict(sh).get("name"): as_dict(sh) for sh in as_list(ctx.wb.get("sheets"))}
+    out = []
+    for src in as_list(ctx.mapping.get("sources")):
+        src = as_dict(src)
+        if src.get("join"):
+            continue
+        sh = sheets.get(src.get("sheet"))
+        dr = as_dict(src.get("data_rows"))
+        if not sh or not isinstance(dr.get("from"), int) or not isinstance(dr.get("to"), int):
+            continue
+        missing = []
+        for reg in as_list(sh.get("regions")):
+            rows = as_list(as_dict(reg).get("rows"))
+            if len(rows) != 2 or not all(isinstance(x, int) for x in rows):
+                continue
+            if not (rows[0] <= dr["from"] <= rows[1] or rows[0] <= dr["to"] <= rows[1]):
+                continue
+            missing += [x for x in as_list(as_dict(reg).get("total_rows"))
+                        if isinstance(x, int) and x > dr["to"] and x <= rows[1] and x not in covered[src.get("sheet")]]
+        if missing:
+            out.append((f"الورقة «{src.get('sheet')}» فيها صفوف إجمالي مدونة بعد نطاق بيانات المصدر {src.get('id')} "
+                         f"(الصفوف {', '.join(str(x) for x in sorted(set(missing)))}) لم تُحفظ قيمها في excluded_rows فلم "
+                         "تُطابق مع مجموع السجلات؛ أعد normalize ومعه 01_workbook_map.json في مجلد التشغيل، أو أضف الصفوف "
+                         "إلى exclude_rows بسبب «صف إجمالي»", f"02_mapping.json:sources[{src.get('id')}].data_rows"))
+    return out
+
+
+# --- U-3.13: whole-asset amounts of partly owned assets ---------------------------------------------------------------
+SHARE_FIELD_RE = re.compile(r"share|حصه|حصة", re.IGNORECASE)
+
+
+def c_partial_ownership_full_amount(ctx: Ctx):
+    """In-scope records owned in part (ownership partial, or a share field below 100) whose full valuation/revenue
+    enters recorded_value or the revenue metrics, with no share-based field and no assumption that explains it."""
+    ctx.need("records", "metrics")
+    meta = ctx.field_meta
+    assumptions = normalize_arabic(" ".join(str(as_dict(a).get("text") if isinstance(a, dict) else a)
+                                            for a in as_list(as_dict(ctx.data.get("narrative")).get("assumptions"))))
+    contrib = defaultdict(set)
+    for mid, res in ctx.metrics.items():
+        res = as_dict(res)
+        fields = [v for v in as_dict(res.get("resolved_fields")).values() if isinstance(v, str)]
+        if not any(field_group(f, meta) in ("valuation", "revenue") for f in fields) or SHARE_FIELD_RE.search(" ".join(fields)):
+            continue
+        for rid in as_list(res.get("included_ids")):
+            contrib[rid].add(mid)
+    out = []
+    for r in ctx.records:
+        rid = r.get("id")
+        if not _in_scope(r) or rid not in contrib:
+            continue
+        own = as_list(as_dict(r.get("dims")).get("ownership"))
+        fl = as_dict(r.get("fields"))
+        shares = [(f, as_dict(tv).get("v")) for f, tv in fl.items()
+                  if SHARE_FIELD_RE.search(f) and as_dict(tv).get("s") in KNOWN_STATUSES and is_num(as_dict(tv).get("v"))]
+        share_lt = [(f, v) for f, v in shares if 0 < v < 100]
+        if "partial" not in own and not share_lt:
+            continue
+        if any(SHARE_FIELD_RE.search(f) and field_group(f, meta) in ("valuation", "revenue") for f in fl):
+            continue  # a share-based amount field exists (derived_fields)
+        if rid and (normalize_arabic(rid) in assumptions or (str(rid) in assumptions)):
+            continue
+        sh = f" (حصة {fmt_num(share_lt[0][1])}%)" if share_lt else ""
+        out.append((f"السجل {rid} ملكيته جزئية{sh} ويدخل مبلغه الكامل في {short_list(sorted(contrib[rid]), 4)}؛ احسب حصة "
+                    "الجمعية بحقل مشتق في derived_fields (مثل val.<سنة>.share = val.<سنة>.total × الحصة ÷ 100) أو اذكر في "
+                    "assumptions أن المبلغ للأصل كاملًا وسبب ذلك", f"03_records.json:{rid}"))
+    return out
 
 
 # --- C14: {{f:key}} fact tokens -------------------------------------------------------------------------------------
@@ -2255,6 +2351,8 @@ G4B_TITLES = OrderedDict([
     ("totals_reconciliation", "مطابقة الإجماليات المدونة مع مجموع السجلات المؤهلة"),
     ("pii_review_patterns", "أرقام تشبه الهوية الوطنية في المخرجات (للمراجعة)"),
     ("message_numbers", "أرقام رسالة التسليم (09_message.md) مطابقة لـ05 أو للحقائق أو للملف"),
+    ("totals_not_reconciled", "صفوف الإجمالي المدونة بعد نطاق البيانات محفوظة للمطابقة"),
+    ("partial_ownership_full_amount", "الأصول المملوكة جزئيًا لا تدخل بمبلغها الكامل دون حصة أو افتراض موثق"),
     ("acknowledged_warnings", "صحة الإقرار بالتحذيرات في 06 (acknowledged_warnings)"),
     ("pii_text_patterns", "خلو السرد والسجلات والربط ورسالة التسليم من بيانات اتصال أو حسابات بنكية"),
     ("pii_html_patterns", "خلو الداشبورد وanalysis.json من بيانات اتصال أو حسابات بنكية"),
@@ -2279,6 +2377,8 @@ G4B_CHECKS = [
     ("totals_reconciliation", "warning", lambda ctx: g4b_reconciliation(ctx)[1]),
     ("pii_review_patterns", "warning", c_pii_review_patterns),
     ("message_numbers", "warning", c_message_numbers),
+    ("totals_not_reconciled", "warning", c_totals_not_reconciled),
+    ("partial_ownership_full_amount", "warning", c_partial_ownership_full_amount),
 ]
 
 
@@ -2485,10 +2585,72 @@ def c_exec_summary_elements(ctx: Ctx):
         raise Skip("الخلاصة التنفيذية ليست نصًا")
     n = normalize_arabic(s)
     missing = [label for label, rx in ELEMENTS.values() if not rx.search(n)]
+    out = []
     if missing:
-        return [(f"لم يُعثر في الخلاصة على: {', '.join(missing)} (فحص تقريبي بالكلمات المفتاحية)",
-                 "06_narrative.json:executive_summary")]
-    return []
+        out.append((f"لم يُعثر في الخلاصة على: {', '.join(missing)} (فحص تقريبي بالكلمات المفتاحية)",
+                    "06_narrative.json:executive_summary"))
+    # U146: the gaps and priorities must be named, not only announced («أبرز الفجوات تتعلق بالبيانات عمومًا»)
+    nar = ctx.narrative
+    gaps = {g.get("id"): g for g in as_list(nar.get("gaps")) if isinstance(g, dict)}
+    recs = {r.get("id"): r for r in as_list(nar.get("recommendations")) if isinstance(r, dict)}
+    for key, head_rx, top, pool, label in (
+            ("gaps", ES_GAPS_HEAD_RE, as_list(nar.get("top_gaps")), gaps, "أبرز الفجوات"),
+            ("priorities", ES_PRIO_HEAD_RE, as_list(nar.get("top_actions")), recs, "الأولويات")):
+        items = [pool[i] for i in top if i in pool]
+        if not items:
+            continue
+        need = min(3, len(items))
+        enum = _es_enumerated(n, head_rx)
+        seg_raw, seg_n = _es_segment(s, head_rx)   # the sentence after the heading (the whole summary without one)
+        named = sum(1 for it in items if _es_mentions(seg_raw, seg_n, it))
+        if enum < need and named < need:
+            out.append((f"الخلاصة تذكر «{label}» دون أن تسميها: عُدّ {enum} بندًا معددًا بعد العبارة و{named} من "
+                        f"{len(items)} عناصر {('top_gaps' if key == 'gaps' else 'top_actions')} مذكورة بأصولها أو رموزها أو "
+                        f"عناوينها؛ اذكر {need} على الأقل بأسمائها", "06_narrative.json:executive_summary"))
+    return out
+
+
+ES_GAPS_HEAD_RE = re.compile(r"(?:ابرز\s+)?(?:ال)?فجوات?|(?:ال)?فجوه")
+ES_PRIO_HEAD_RE = re.compile(r"(?:ال)?اولويات?|(?:ال)?اولويه")
+_ES_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]{0,6}-\d+(?:[.\-]\d+)*\b")
+_ES_STOP = {"علي", "الي", "التي", "الذي", "بين", "بعد", "قبل", "لكل", "كل", "غير", "دون", "بدون", "عند", "حتي", "ذلك",
+            "هذه", "هذا", "منها", "فيها", "الاصول", "اصول", "المحفظه", "الملف", "البيانات"}
+
+
+def _es_enumerated(n: str, head_rx) -> int:
+    """Items listed after a heading such as «أبرز الفجوات:» up to the end of its sentence (split on «،»/«؛»/numbering)."""
+    best = 0
+    for m in head_rx.finditer(n):
+        seg = re.split(r"[.!؟?\n]", n[m.end():], maxsplit=1)[0]
+        parts = [p for p in re.split(r"[،؛;,]|\s(?:\d+|[-•])[).]?\s", seg) if len(p.split()) >= 2]
+        best = max(best, len(parts))
+    return best
+
+
+def _es_segment(raw: str, head_rx):
+    """(raw, normalised) text of the sentence(s) that follow the heading; the whole summary when no heading is found.
+    Raw sentences are matched by index: normalize_arabic keeps sentence punctuation."""
+    sents = [x for x in re.split(r"(?<=[.!؟?])\s+|\n+", raw) if x.strip()]
+    hit = [x for x in sents if head_rx.search(normalize_arabic(x))]
+    if not hit:
+        return raw, normalize_arabic(raw)
+    seg = " ".join(hit)
+    return seg, normalize_arabic(seg)
+
+
+def _es_mentions(raw: str, n: str, item: dict) -> bool:
+    """A top gap/action is named in the summary by its asset id, a metric token of its evidence, or ≥ 2 title words."""
+    blob = " ".join(str(x) for x in [item.get("scope"), item.get("target")] + as_list(item.get("asset_ids")) if x)
+    if any(i in raw for i in _ES_ID_RE.findall(blob)):
+        return True
+    for e in as_list(item.get("evidence")) + [as_dict(item.get("impact")).get("metric")]:
+        r = as_dict(e).get("ref") if isinstance(e, dict) else e
+        if isinstance(r, str) and r.startswith("m:") and ("{{" + r.split(".")[0]) in raw:
+            return True
+    words = set(n.split())
+    title = " ".join(str(item.get(k) or "") for k in ("title", "problem"))
+    keys = {w for w in normalize_arabic(title).split() if len(w) >= 4 and w not in _ES_STOP}
+    return len(keys & words) >= 2
 
 
 def c_token_null_value(ctx: Ctx):
@@ -2653,9 +2815,15 @@ NQ_COUNT_NOUN_RE = re.compile(r"\s*(?:من\s+)?(?:ال)?(?:اصل|اصول|اص�
                               r"اراضي|قطعه|قطع|نشاط|انشطه|نشاطا|مبني|مباني|مبنيين|يتيم|يتيما|ايتام|مستفيد|مستفيدين|"
                               r"مستفيدا|ورقه|اوراق|فجوه|فجوات|توصيه|توصيات)(?![\w])")
 # --- B6: scores ---------------------------------------------------------------
-NQ_SCORE_NUM_RE = re.compile(
-    r"(?<![\w.])\d+(?:\.\d+)?\s*(?:/|من)\s*(?:5|10|100)(?!\d)(?!\.\d)"
-    r"(?!\s*(?:من\s+)?(?:ال)?(?:اصل|اصول|سجل|عقار|وحد|قطع|ارض|اراض|مبان|مبني|نشاط|انشط|بند|فجو|توصي|ايتام|مستفيد))")
+# a count noun after «N من 10» makes it a count («4 من 10 عقود»، «3 من 5 مستأجرين»), not a score
+NQ_COUNT_AFTER = (r"(?!\s*(?:من\s+)?(?:ال)?(?:اصل|اصول|سجل|عقار|وحد|قطع|ارض|اراض|مبان|مبني|نشاط|انشط|بند|فجو|توصي|ايتام|"
+                  r"مستفيد|عقد|عقود|مستاجر|موقع|مواقع|مدرس|مدارس|صك|صكوك|مشروع|مشاريع|حاله|حالات|عميل|عملاء|شق|محل|"
+                  r"محلات|غرف|دور|ادوار|فتر|سن|عام|اعوام|شهر|اشهر|ورق|اوراق|مؤشر|موشر|حقل|حقول|ملاحظ|مستاجرين))")
+NQ_SCORE_NUM_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s*(?:/|من)\s*(?:5|10|100)(?!\d)(?!\.\d)" + NQ_COUNT_AFTER)
+# scores that need no context word: «75/100»، «82 من 100»، «8/10»، «4/5» (not dates such as 5/10/2024)
+NQ_SCORE_BARE_RE = re.compile(
+    r"(?<![\w./])\d{1,3}(?:\.\d+)?\s*(?:/|من)\s*100(?![\d.,/])(?!\s*[%٪])" + NQ_COUNT_AFTER +
+    r"|(?<![\w./])\d{1,2}(?:\.\d)?\s*/\s*(?:5|10)(?![\d.,/])(?!\s*[%٪])" + NQ_COUNT_AFTER)
 NQ_SCORE_EXPLICIT_RE = re.compile(r"(?<![\w])(?:ب)?(?:ال)?(?:درجه|علامه)\s*\d|\d+(?:\.\d+)?\s*نقاط?\s*(?:من|/)\s*\d")
 NQ_SCORE_CTX_RE = re.compile(
     r"(?<![\w])(?:ب)?(?:ال)?(?:درجه|علامه|نقاط|نقطه|ممتاز|ممتازه|جيد|جيده|ضعيف|ضعيفه|متوسط|متوسطه|مقبول)(?![\w])"
@@ -2710,6 +2878,27 @@ NQ_CLAIM_RE = re.compile(
 NQ_HEDGE_RE = re.compile(r"(?<![\w])(?:قد|ربما|يحتمل|محتمل|محتمله|احتمال|يرجح|هل)(?![\w])|لم\s+يثبت|غير\s+مثبت|"
                          r"للتحقق|(?:دون|بدون)\s+(?:بيان|تحديد|توضيح|ذكر)|غير\s+(?:محدد|معروف|موضح|مبين)|لا\s+(?:يبين|يوضح|يحدد)|التحقق\s+من|يلزم\s+التحقق|ان\s+وجد|افتراض|يستلزم\s+التحقق|يحتاج\s+(?:الي\s+)?تحقق")
 NQ_SUPPORT_METRIC_RE = re.compile(r"اشغال|شغور|تحصيل|متاخر|سوق|occupancy|collection|vacan|arrear|market")
+NQ_LOWPERF_RE = re.compile(r"اداء\s+منخفض|منخفض(?:ه)?\s+(?:ال)?اداء|ضعيف(?:ه)?\s+(?:ال)?اداء|ضعف\s+(?:ال)?اداء|"
+                           r"(?:اقل|ادني|دون)\s+(?:من\s+)?(?:ال)?مستهدف|تدني\s+(?:ال)?اداء")
+NQ_COMPARE_METRIC_RE = re.compile(r"target|benchmark|مستهدف|مقارن|متوسط\s+(?:ال)?سوق|السوق")
+
+
+def _nq_target_evidence(ctx, refs, notes, texts, ext_sources) -> bool:
+    """A low-performance claim is supported by a sources[] target/benchmark cited in the gap, or a comparison metric."""
+    allt = notes + " " + normalize_arabic(" ".join(str(t or "") for t in texts.values()))
+    for src in as_list(ctx.narrative.get("sources")):
+        r = normalize_arabic(as_dict(src).get("ref") or "")
+        if len(r) >= 4 and (r in allt or any(isinstance(x, str) and normalize_arabic(x) == r for x in refs)):
+            return True
+    metrics = ctx.metrics if "metrics" in ctx.data else {}
+    for r in refs:
+        if isinstance(r, str) and r.startswith("m:"):
+            mr = as_dict(metrics.get(r[2:].split(".")[0]))
+            if NQ_COMPARE_METRIC_RE.search(normalize_arabic(f"{r} {mr.get('label') or ''}")):
+                return True
+    return False
+
+
 NQ_NONEARN_RE = re.compile(
     r"غير\s+مدر|لا\s+يدر|بلا\s+ايراد|(?:ب)?ايراد\s+صفري|(?:ب)?عايد\s+(?:منخفض|متدن|ضعيف)|انخفاض\s+(?:ال)?عايد"
     r"|(?:ضعف|ضعيف|تدني)\s+(?:ال)?(?:اداء|عايد)|(?:لا\s+يحقق|عدم\s+تحقيق|لا\s+يحقق)\s+(?:ال)?(?:ايراد|دخل|ايجار|عايد)")
@@ -3145,6 +3334,17 @@ def _nq_collect(found):
     return [(f"{msg} (الفترات: {short_list(pids)})", f"04_metrics_config.json:{sid}") for (sid, msg), pids in found.items()]
 
 
+def _nq_vat_claim(rx, text: str) -> bool:
+    """A VAT claim that is not negated: «اختير الإيراد بدون ضريبة لا الإيراد مع الضريبة» names the rejected
+    alternative after «لا/ليس/وليس/بدلًا من» (up to 3 words before the phrase), which is not a claim about the field."""
+    for m in rx.finditer(text):
+        before = text[:m.start()].split()[-3:]
+        if any(w in NEGATIONS or w in ("بدلا", "عوضا", "خلافا") for w in before):
+            continue
+        return True
+    return False
+
+
 def c_nq_label_vat_basis(ctx: Ctx):
     """B3: the VAT wording of a metric matches field_meta.vat of the revenue field it uses."""
     ctx.need("config", "records")
@@ -3160,7 +3360,7 @@ def c_nq_label_vat_basis(ctx: Ctx):
         vat = as_dict(meta.get(res)).get("vat") or "unknown"
         vis = _nq_norm_texts(texts, ("label", "short_label", "basis", "period_text"))
         allt = _nq_norm_texts(texts, ("label", "short_label", "basis", "period_text", "definition"))
-        excl, incl = bool(NQ_EXCL_CLAIM_RE.search(allt)), bool(NQ_INCL_CLAIM_RE.search(allt))
+        excl, incl = _nq_vat_claim(NQ_EXCL_CLAIM_RE, allt), _nq_vat_claim(NQ_INCL_CLAIM_RE, allt)
         msg = None
         if vat == "incl":
             if excl:
@@ -3477,6 +3677,8 @@ def nq_score_hits(text: str) -> list:
             out.append(m.group(0))
         if NQ_SCORE_CTX_RE.search(sent):
             out += [m.group(0) for m in NQ_SCORE_NUM_RE.finditer(sent)]
+        else:
+            out += [m.group(0) for m in NQ_SCORE_BARE_RE.finditer(sent)]
     return out
 
 
@@ -3507,6 +3709,11 @@ def nq_assessment_judgments(ctx: Ctx):
         txt = a.get("judgment") if isinstance(a.get("judgment"), str) else ""
         n = normalize_arabic(TOKEN_RE.sub(" ", txt)).translate(_AR_INDIC)
         reasons = []
+        # «8 من 10» in a judgment reads as a score even without a context word (narrative_scores blocks the clear cases)
+        if not nq_score_hits(txt):
+            sc = NQ_SCORE_NUM_RE.search(n)
+            if sc:
+                reasons.append(f"درجة رقمية «{sc.group(0)}»")
         for m in PCT_RE.finditer(n):
             if JUDGE_RE.search(n[max(0, m.start() - 40): m.end() + 40]):
                 reasons.append("نسبة مئوية مقرونة بحكم")
@@ -3618,6 +3825,7 @@ def nq_scenario_findings(ctx: Ctx):
             if missing:
                 blocking.append((f"أصول غير موجودة في 03: {short_list(missing)}", f"{base}.asset_ids"))
         nets = []
+        timing_missing = {}
         for case in ("conservative", "base", "optimistic"):
             cs = as_dict(it.get(case))
             rv, ex, ne = cs.get("extra_revenue"), cs.get("extra_expense"), cs.get("net_effect")
@@ -3628,9 +3836,17 @@ def nq_scenario_findings(ctx: Ctx):
                 warns.append(("صافي الأثر رقم بينما الإيراد أو المصروف الإضافي غير محدد؛ غياب المصروف لا يعني صفرًا",
                               f"{base}.{case}"))
             y1, rr = cs.get("year1_effect"), cs.get("run_rate_effect")
+            if (is_num(rv) or is_num(ne)) and (not nonempty(cs.get("start")) or not is_num(y1) or not is_num(rr)):
+                for k, v in (("start", cs.get("start")), ("year1_effect", y1), ("run_rate_effect", rr)):
+                    if not (is_num(v) or nonempty(v)):
+                        timing_missing.setdefault(k, []).append(case)
             if is_num(y1) and is_num(rr) and rr >= 0 and y1 > rr and it.get("recurring") is True:
                 warns.append(("أثر السنة الأولى أكبر من الأثر السنوي بعد اكتمال التنفيذ لفرصة متكررة؛ افصل الأثرين", f"{base}.{case}"))
             nets.append(ne)
+        if timing_missing:  # U167: an amount without its timing reads as a full effect from day one
+            warns.append((f"الأثر المالي رقم بينما التوقيت غير محدد ({'، '.join(sorted(timing_missing))} = null في "
+                          f"{'، '.join(dict.fromkeys(c for cs_ in timing_missing.values() for c in cs_))})؛ حدّد بداية "
+                          "التنفيذ وأثر السنة الأولى والأثر السنوي بعد الاكتمال، فالأثر الكامل لا يتحقق من اليوم الأول", base))
         if all(is_num(x) for x in nets) and not (nets[0] <= nets[1] <= nets[2]):
             warns.append(("صافي الأثر لا يتدرج من المحافظ إلى الأساسي إلى المحسن", base))
         if all(not is_num(as_dict(it.get(c)).get(k)) for c in ("conservative", "base", "optimistic")
@@ -3923,6 +4139,11 @@ def c_nq_gap_unsupported_claims(ctx: Ctx):
         if grp and grp[0] == "use" and grp[1] in ("service", "admin"):
             svc.append(f"group:use={grp[1]}")
         gtxt = normalize_arabic(" ".join(str(t or "") for t in texts.values()))
+        inv = [x for x in rids if as_dict(as_dict(recs.get(x)).get("dims")).get("use") not in ("service", "admin")]
+        if (inv or (grp and grp[1] not in ("service", "admin"))) and NQ_LOWPERF_RE.search(gtxt) and \
+                not _nq_target_evidence(ctx, refs, notes, texts, ext_sources):
+            out.append(("الفجوة تحكم بـ«أداء منخفض» أو «دون المستهدف» دون مستهدف معتمد أو مؤشر مقارنة في الأدلة؛ "
+                        "اذكر المستهدف ومصدره في sources[] أو مؤشر المقارنة، أو صغها ملاحظة تحتاج تحققًا", f"{base}.title"))
         if svc and NQ_NONEARN_RE.search(gtxt):
             out.append((f"الفجوة تحكم على أصل خدمي أو إداري ({short_list(svc)}) بعدم تحقيق إيراد؛ غرضه خدمة المستفيدين فلا يُحكم "
                         "بضعف أدائه لمجرد عدم تحقيق إيجار", f"{base}.title"))
@@ -3940,7 +4161,70 @@ def c_nq_gap_unsupported_claims(ctx: Ctx):
     return out
 
 
+NQ_ANNUAL_RE = re.compile(r"سنوي(?:ا|ه)?\s+(?:ال)?(?:كامل|متوقع)|(?:ال)?سنوي(?:ه)?\s+(?:ال)?كامل|علي\s+اساس\s+سنوي|"
+                          r"تحويل\S*\s+(?:الي|ل)\s*(?:ال)?(?:اساس\s+)?سنوي|يعادل\S*\s+(?:\S+\s+){0,6}سنويا|"
+                          r"(?:ايراد|دخل)ا?\s+سنويا|سنويه?\s+مقدر|annuali[sz]|run[\s-]?rate")
+NQ_ESTIMATE_RE = re.compile(r"تقدير|تقديري|افتراض")
+
+
+def c_nq_annualised_text(ctx: Ctx):
+    """U110: partial-period revenue turned into an annual figure («الإيراد السنوي الكامل»، «على أساس سنوي»).
+    Fires when the linked metric's revenue field (or the default period's) is not documented as a full year, unless the
+    sentence says it is an estimate and 06 lists assumptions."""
+    ctx.need("narrative", "metrics", "records")
+    meta = ctx.field_meta
+    dp = as_dict(nq_default_period(ctx)) if "config" in ctx.data else {}
+    items = nq_text_items(ctx)
+    msg = nq_message_text(ctx)
+    if msg:
+        items.append(("09_message.md", msg))
+    has_assumptions = bool(as_list(ctx.narrative.get("assumptions")))
+    out = []
+    for where, txt in items:
+        for sent in re.split(r"(?<=[.!؟?\n])", txt or ""):
+            n = normalize_arabic(TOKEN_RE.sub(" ", sent))
+            if not NQ_ANNUAL_RE.search(n):
+                continue
+            if NQ_ESTIMATE_RE.search(n) and has_assumptions:
+                continue
+            fields = []
+            for m in TOKEN_RE.finditer(sent):
+                rf = as_dict(as_dict(ctx.metrics.get(m.group(1))).get("resolved_fields"))
+                fields += [v for k, v in rf.items() if isinstance(v, str) and field_group(v, meta) == "revenue"]
+            if not fields and dp.get("rev_field"):
+                fields = [dp["rev_field"]]
+            bad = [f for f in dict.fromkeys(fields) if as_dict(meta.get(f)).get("completeness") != "full_year"]
+            if bad or not fields:
+                comp = "، ".join(f"{f}: {as_dict(meta.get(f)).get('completeness') or 'unknown'}" for f in bad) or "غير محدد"
+                out.append((f"النص يحوّل الإيراد إلى رقم سنوي («{NQ_ANNUAL_RE.search(n).group(0)}») بينما اكتمال الفترة "
+                            f"غير مثبت ({comp})؛ لا يُحوَّل إيراد فترة جزئية أو غير موثقة إلى أداء سنوي إلا تقديرًا صريحًا "
+                            "مع افتراضاته في assumptions", where))
+                break
+    return out
+
+
+def c_nq_card_metric_empty(ctx: Ctx):
+    """B12: a card metric of 05 that is empty under the default filters (a mistyped where, a scope with no record)."""
+    ctx.need("metrics", "config")
+    specs = {m.get("id"): m for m in as_list(ctx.config.get("metrics")) if isinstance(m, dict)}
+    out = []
+    for mid, res in ctx.metrics.items():
+        res = as_dict(res)
+        spec = as_dict(specs.get(mid))
+        if not (spec.get("card") or res.get("card")) or res.get("status") != "empty":
+            continue
+        if res.get("empty_cause") == "filters":
+            continue
+        w = json.dumps(spec.get("where"), ensure_ascii=False)
+        out.append((f"بطاقة المؤشر {mid} فارغة بلا تصفية ({res.get('empty_text') or res.get('reason') or 'لا توجد سجلات مؤهلة'}): "
+                    f"تحقق من شرطه where = {w[:220]} قبل عرض البطاقة؛ إن كان النطاق خاليًا فعلًا فاجعل card = false أو "
+                    "اذكر السبب في empty_text", f"05_metrics.json:metrics.{mid}"))
+    return out
+
+
 CHECK_TITLES.update([
+    ("annualised_text", "لا تحويل لإيراد فترة غير مكتملة إلى رقم سنوي"),
+    ("card_metric_empty", "بطاقات المؤشرات غير فارغة بلا سبب"),
     ("period_fields", "حقول كل فترة في 04 تخص الفترة نفسها"),
     ("growth_comparability_basis", "قابلية مقارنة الفترات مطابقة لوصف الحقول (الضريبة والأساس والاكتمال)"),
     ("yield_zero_revenue_scope", "عدم استبعاد أصل استثماري ذي إيراد صفري من العائد"),
@@ -4034,6 +4318,8 @@ CHECKS = [
     ("recommendation_quality", "warning", c_nq_recommendation_quality),
     ("gap_completeness", "warning", c_nq_gap_completeness),
     ("gap_unsupported_claims", "warning", c_nq_gap_unsupported_claims),
+    ("annualised_text", "warning", c_nq_annualised_text),
+    ("card_metric_empty", "warning", c_nq_card_metric_empty),
     ("numbers_as_tokens", "info", lambda ctx: number_findings(ctx)[1]),
     ("gaps_without_recommendation", "info", c_gaps_without_recommendation),
 ]

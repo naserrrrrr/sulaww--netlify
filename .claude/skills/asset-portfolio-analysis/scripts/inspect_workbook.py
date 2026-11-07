@@ -789,10 +789,19 @@ def analyze_structure(sv: SheetView, book: Book) -> SheetAnalysis:
         return any(a <= r <= b for a, b, _ in table_data)
 
     def total_label(r):
+        """Column of the row's total label. A label that follows a serial/id and a non-total name (e.g. a rent-basis
+        column reading «إجمالي» on a named asset row) describes an attribute, not the row: it does not count."""
         content, texts, _ = feats[r]
         for c in texts:
             v = sv.value(r, c)
             if len(clean_text(v)) <= 45 and is_total_label(v):
+                before = [c2 for c2 in content if c2 < c]
+                names = [c2 for c2 in before if c2 in texts and not is_total_label(sv.value(r, c2))
+                         and len(clean_text(sv.value(r, c2))) >= 3]
+                serial = [c2 for c2 in before if c2 not in texts or re.fullmatch(r"[A-Za-z\u0600-\u06FF]{0,4}[-_ ]?\d{1,6}",
+                                                                                   clean_text(sv.value(r, c2)))]
+                if names and (serial or len(names) >= 2):
+                    continue
                 return c
         return None
 

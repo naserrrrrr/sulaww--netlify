@@ -1118,6 +1118,39 @@
             "string",
             "null"
           ]
+        },
+        "rollup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "fields",
+            "evidence"
+          ],
+          "description": "Sum the known values of child records (units/contracts of this asset) into this record's fields when this record's own field is not known; the children are set to scope excluded unless their own override states a scope. Every child value must be known, otherwise the parent field stays unknown (rollup_incomplete).",
+          "properties": {
+            "from": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/fieldName"
+              }
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 3
+            }
+          }
         }
       }
     },

@@ -111,8 +111,47 @@ def _where_list_dim_errors(where, list_dims: set, path: str) -> list:
     return errs
 
 
+VOCAB_DIMS = ("use", "income_nature", "record_type", "scope", "ownership", "waqf")
+
+
+def _vocab_values() -> dict:
+    try:
+        v = load_json(os.path.join(SKILL_DIR, "assets", "vocab.json"))
+    except Exception:  # noqa: BLE001 — vocab missing: no literal check
+        return {}
+    return {d: set((v.get(d) or {}).keys()) for d in VOCAB_DIMS if isinstance(v.get(d), dict)}
+
+
+def _where_vocab_errors(where, vocab: dict, path: str) -> list:
+    """eq/in/has literals on a vocabulary-controlled dim must be vocabulary keys (assets/vocab.json): a typo such as
+    {"eq": ["use", "Investment"]} matches no record and silently empties the metric (B12)."""
+    errs = []
+    if not isinstance(where, dict):
+        return errs
+    for op, arg in where.items():
+        if op in ("all", "any") and isinstance(arg, list):
+            for i, w in enumerate(arg):
+                errs += _where_vocab_errors(w, vocab, f"{path}/{op}/{i}")
+        elif op == "not":
+            errs += _where_vocab_errors(arg, vocab, f"{path}/not")
+        elif op in ("eq", "in", "has") and isinstance(arg, list) and len(arg) > 1 and arg[0] in vocab:
+            vals = arg[1] if op == "in" and isinstance(arg[1], list) else [arg[1]]
+            bad = [v for v in vals if isinstance(v, str) and not v.startswith("{") and v not in vocab[arg[0]]]
+            if bad:
+                errs.append(f"• {path}: القيمة «{'، '.join(bad)}» ليست من مفردات البُعد «{arg[0]}» "
+                            f"({'، '.join(sorted(vocab[arg[0]]))}) فلا يطابق الشرط أي سجل؛ صحّح القيمة")
+    return errs
+
+
 def semantic_errors(config: dict, records: list = None) -> list:
     errs = []
+    vocab = _vocab_values()
+    if vocab:
+        errs += _where_vocab_errors(config.get("base_where"), vocab, "base_where")
+        for key in ("metrics", "breakdowns"):
+            for x in config.get(key) or []:
+                errs += _where_vocab_errors(x.get("where"), vocab, f"{key}/{x.get('id')}/where")
+        errs += _where_vocab_errors((config.get("trend") or {}).get("where"), vocab, "trend/where")
     ids = [p.get("id") for p in config.get("periods") or []]
     if len(ids) != len(set(ids)):
         errs.append("• periods: معرّفات فترات مكررة")
@@ -337,8 +376,8 @@ def trend_comparability(points: list, meta: dict) -> dict:
             if d["status"] != "confirmed":
                 all_confirmed = False
     if hard:
-        return {"status": "not_comparable", "reason": "فترات التطور الزمني غير قابلة للمقارنة؛ القيم تُعرض للاطلاع فقط "
-                                                      "ولا تُقرأ نموًا — " + " | ".join(hard)}
+        return {"status": "not_comparable", "reason": "فترات التطور الزمني غير قابلة للمقارنة؛ لا يُرسم تطورها ولا "
+                                                      "تُقرأ فروقها نموًا — " + " | ".join(hard)}
     if all_confirmed and len(points) >= 2:
         return {"status": "confirmed", "reason": "أساس الضريبة والإيراد واكتمال الفترات متطابقة وفق وصف الحقول"}
     return {"status": "unverified",
@@ -360,6 +399,8 @@ def _pick_expense(records: list, rev_field: str, cands: list):
     An expense column from another sheet that never sits next to the chosen revenue field would
     only produce a misleading NOI; then exp_field stays null (noi -> not_computable).
     """
+    # a summed component field (e.g. derived_fields «exp.2024.total = exp.2024.maintenance + exp.2024.utilities») wins
+    cands = sorted(cands, key=lambda f: 0 if f.rsplit(".", 1)[-1] in ("total", "all", "sum") else 1)
     for f in cands:
         for r in records:
             fl = r.get("fields") or {}
@@ -417,17 +458,28 @@ def build_periods(records: list, meta: dict, warnings: list = None) -> list:
                 ("text", f"الفترة {pid}: لا يوجد حقل إيراد بدون ضريبة بقيم معروفة ضمن النطاق، فاستُخدم «{m.get('label') or chosen}» "
                          "الشامل للضريبة. الإيراد والعائد لهذه الفترة شاملان للضريبة المحصلة للغير ولا يطابقان تعريف عائد "
                          "الدخل الإجمالي (بدون الضرائب)؛ وُسمت تسمياتها «شامل الضريبة». افصل الضريبة بمستند قبل المقارنة.")]))
+        exp_field = _pick_expense(pool, chosen, exp_cands.get(pid) or [])
+        exp_others = [f for f in exp_cands.get(pid) or [] if f != exp_field and _known_count(pool, f) > 0]
+        if exp_field and exp_others:
+            lab = lambda f: (meta.get(f) or {}).get("label") or f  # noqa: E731
+            warnings.append(OrderedDict([
+                ("code", "expense_fields_partial"), ("period", pid), ("field", exp_field), ("ignored", exp_others),
+                ("text", f"الفترة {pid}: صافي الدخل التشغيلي يطرح حقل المصروفات «{lab(exp_field)}» وحده، ولا يشمل "
+                         + "، ".join(f"«{lab(f)}»" for f in exp_others) + ". إن كانت مكونات للمصروف نفسه فأضف في 02 "
+                         f"derived_fields حقلًا مجمّعًا exp.{pid}.total يساوي مجموعها ثم أعد normalize وinit-config.")]))
         periods.append(OrderedDict([
             ("id", pid),
             ("label", f"{pid} — {_rev_desc(m)}"),
             ("rev_field", chosen),
-            ("exp_field", _pick_expense(pool, chosen, exp_cands.get(pid) or [])),
+            ("exp_field", exp_field),
             ("prev_id", None),
             ("prev_rev_field", None),
             ("comparable_with_prev", None),
             ("meta", {"vat": m.get("vat", "unknown"), "basis": m.get("basis", "unknown"),
                       "cash_basis": m.get("cash_basis", "unknown"), "completeness": m.get("completeness", "unknown"),
-                      "rev_label": m.get("label") or chosen, "alternatives": [f for f in cands if f != chosen]}),
+                      "rev_label": m.get("label") or chosen, "alternatives": [f for f in cands if f != chosen],
+                      "exp_label": (meta.get(exp_field) or {}).get("label") or exp_field,
+                      "exp_not_included": exp_others}),
         ]))
     for i, p in enumerate(periods):
         if i + 1 < len(periods):
@@ -523,6 +575,9 @@ def metric_texts(mid: str, p: dict, val: dict, meta: dict, src: str) -> dict:
     incl_def = (" الإيراد هنا شامل الضريبة المحصلة للغير، إذ لا يتضمن الملف حقل إيراد معروف القيم يستثني الضريبة؛ فالنسبة "
                 "أعلى من عائد الدخل الإجمالي المحسوب على إيراد مستثنى منه الضريبة ولا تُقارن به.") if incl else ""
     no_units = "؛ صفوف الوحدات والعقود التابعة لأصل لا تُجمع معه تجنبًا للازدواج"
+    exp_f = (p or {}).get("exp_field")
+    exp_lab = ((meta.get(exp_f) or {}).get("label") or exp_f) if exp_f else None
+    exp_missing = [(meta.get(f) or {}).get("label") or f for f in ((p or {}).get("meta") or {}).get("exp_not_included") or []]
     T = {}
     T["asset_count"] = dict(
         label="عدد الأصول ضمن النطاق", short_label="الأصول",
@@ -582,7 +637,8 @@ def metric_texts(mid: str, p: dict, val: dict, meta: dict, src: str) -> dict:
         label=f"صافي الدخل التشغيلي {P}{incl_tag}", short_label="صافي الدخل التشغيلي",
         definition="الإيراد العقاري ناقص مصروفات التشغيل المرتبطة به لكل أصل يتوافر له الرقمان، دون الإهلاك والتمويل والنفقات الرأسمالية. لا يساوي المبلغ المتاح لخدمة الأيتام.",
         scope_text="سجلات الإيجارات العقارية (أصول وقطع أراضٍ) ضمن النطاق، عدا المدار للغير والوحدات والعقود", basis=f"{rev_desc}",
-        period_text=period_text, source_text=rev_src,
+        period_text=period_text, source_text=rev_src + (f"؛ المصروفات: {exp_lab}" if exp_lab else "")
+        + (f" (لا يشمل: {'، '.join(exp_missing)})" if exp_missing else ""),
         unavailable_reason="لا توجد مصروفات تشغيل مربوطة بسجلات النطاق لهذه الفترة (إن كانت في ورقة مستقلة فاربطها "
                            "بالسجلات عبر join برابط مؤكد في 02)؛ غياب المصروفات لا يعني أنها صفر")
     T["zero_rev_investment_value"] = dict(
@@ -770,6 +826,13 @@ def init_config(rec_doc: dict) -> dict:
         spec["kind_tag"] = base["kind_tag"]
         if mid == "managed_records_count" and not any(
                 (r.get("dims") or {}).get("managed_for_others") is True for r in in_scope):
+            spec["card"] = False
+            spec["card_group"] = None
+            spec["card_order"] = None
+        # no operating activity in scope: an always-empty activity card says nothing (card_metric_empty would flag it)
+        if mid in ("activity_revenue", "operating_records_count") and not any(
+                (r.get("dims") or {}).get("income_nature") == "operating" or r.get("record_type") == "operating_activity"
+                for r in in_scope):
             spec["card"] = False
             spec["card_group"] = None
             spec["card_order"] = None

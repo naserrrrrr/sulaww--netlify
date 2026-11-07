@@ -556,9 +556,12 @@ def build_truth() -> list:
                                   ("location", r["location"])])),
             ("fields", f)]))
     for row, (s, name, rev, exp) in list(zip(ALC_ROWS_SEC1, ALC_SEC1)) + list(zip(ALC_ROWS_SEC2, ALC_SEC2)):
+        # allocation lines name waqf properties: typed asset (isolated), not other (C16 / scope-and-classification §4)
         recs.append(OrderedDict([("id", f"ALC-r{row}"), ("row", row), ("source_id", "ALC"), ("name", name),
-                                 ("record_type", "other"), ("scope", "isolated"), ("dims", {}),
+                                 ("record_type", "asset"), ("scope", "isolated"), ("dims", {}),
                                  ("fields", OrderedDict([("alloc.rev", tv(rev))]))]))
+    # the expense cross-check lines repeat registered assets (matched by serial): typed other, so they never count as
+    # extra properties outside the register (tests/README.md)
     for i, (s, name, a, b) in enumerate(EXP_ROWS):
         recs.append(OrderedDict([("id", f"EXP-{s}"), ("row", 3 + i), ("source_id", "EXP"), ("name", name),
                                  ("record_type", "other"), ("scope", "isolated"), ("dims", {}),

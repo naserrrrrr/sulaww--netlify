@@ -291,41 +291,46 @@ def raw_is_plain_number(raw: str, v) -> bool:
 _ORPHAN_BRACKET_RE = re.compile(r"\(\s*" + re.escape(ac.REDACTED))
 
 
+_DEED_KEY_RE = re.compile(r"deed|صك", re.IGNORECASE)
+
+
 class Scrubber:
+    """Masks personal data in every string of the embedded data: block-level patterns always; review-level ones (a bare
+    10-digit number that may be a national ID) too, except under a deed key (deed_no …) where 10 digits are a deed."""
     def __init__(self):
         self.keys_dropped = 0
         self.values_masked = 0
         self.kinds = set()
         self.review_hits = 0
 
-    def text(self, s: str) -> str:
-        out, kinds = ac.mask_pii(s, ("block",))  # Arabic-Indic digits are matched after translation
+    def text(self, s: str, review: bool = True) -> str:
+        out, kinds = ac.mask_pii(s, ("block", "review") if review else ("block",))  # Arabic-Indic digits are translated
         if kinds:
             self.values_masked += 1
             self.kinds.update(kinds)
             # "(050) 123-4567" is matched from the first digit: drop the opening bracket left in front of the mask
             out = _ORPHAN_BRACKET_RE.sub(ac.REDACTED, out)
         if ac.pii_value_hits(out, ("review",)):
-            self.review_hits += 1  # kept: may be a deed or another 10-digit number; reported to the analyst
+            self.review_hits += 1  # a deed number kept under a deed key; reported to the analyst
         return out
 
-    def walk(self, x, key=None, parent=None):
+    def walk(self, x, key=None, parent=None, review=True):
         if isinstance(x, str):
             if key in ("sha256", "sha256_short"):
                 return x
             if key == "raw" and isinstance(parent, dict) and isinstance(parent.get("v"), (int, float)) \
                     and not isinstance(parent.get("v"), bool) and raw_is_plain_number(x, parent["v"]):
                 return x
-            return self.text(x)
+            return self.text(x, review)
         if isinstance(x, list):
-            return [self.walk(y, key, parent) for y in x]
+            return [self.walk(y, key, parent, review) for y in x]
         if isinstance(x, dict):
             out = {}
             for k, v in x.items():
                 if isinstance(k, str) and PII_KEY_RE.search(k):
                     self.keys_dropped += 1
                     continue
-                out[k] = self.walk(v, k, x)
+                out[k] = self.walk(v, k, x, review and not (isinstance(k, str) and _DEED_KEY_RE.search(k)))
             return out
         return x
 
@@ -395,16 +400,32 @@ def workbook_summary(wb: dict, mapping: dict) -> dict:
     return out
 
 
+_MSG_TOKEN_RE = re.compile(r"\{\{\s*([mf]):([A-Za-z0-9_\-.]+)\s*\}\}")
+_MSG_STATUS_AR = {"unverified": "غير متحققة", "not_comparable": "غير قابلة للمقارنة", "confirmed": "متحققة",
+                  "partial": "جزئي", "empty": "فارغ", "not_computable": "غير قابل للاحتساب", "complete": "مكتمل"}
+
+
+def _msg_text(t: str) -> str:
+    """Board-facing wording of a validator message: tokens become «name» (a literal {{m:x}} would read as a broken token)
+    and English status words in «…» become Arabic."""
+    t = _MSG_TOKEN_RE.sub(lambda m: f"«{m.group(2)}»", t)
+    return re.sub(r"«(unverified|not_comparable|confirmed|partial|empty|not_computable|complete)»",
+                  lambda m: f"«{_MSG_STATUS_AR[m.group(1)]}»", t)
+
+
 def _msg(x) -> str:
+    """A validator finding as one Arabic line: its Arabic check title (not the English check id) and its detail."""
     if isinstance(x, str):
-        return x
+        return _msg_text(x)
     if isinstance(x, dict):
         for k in ("message", "detail", "text", "reason"):
             if isinstance(x.get(k), str) and x.get(k):
-                pre = x.get("id") or x.get("check") or x.get("name")
-                return f"{pre}: {x[k]}" if pre else x[k]
+                pre = x.get("title") or x.get("check") or x.get("name") or x.get("id")
+                if pre and re.fullmatch(r"[a-z0-9_]+", str(pre)):
+                    pre = None  # an English check id is not shown to the board
+                return _msg_text(f"{pre}: {x[k]}" if pre else x[k])
         return json.dumps(x, ensure_ascii=False)
-    return str(x)
+    return _msg_text(str(x))
 
 
 def blocking_items(v: dict) -> list:

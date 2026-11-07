@@ -254,6 +254,15 @@ sys.exit(0 if iss and tvs and not nums else 1)' "$NEG_B/03_records.json" || true
   fi
 fi
 
+# --- 4b. versions + follow-up in the dashboard (U1) and the delivery message checks (U4) -------------------------
+say "[4b] مقارنة الإصدارات ومتابعة التوصيات ورسالة التسليم"
+if [[ -f "$TESTS_DIR/test_versions_message.py" ]] && have_files "versions/message" "$RUN/05_metrics.json" "$RUN/06_narrative.json"; then
+  VM_ARGS=(--run "$RUN" --work "$BUILD/versions_message")
+  [[ "${APA_SKIP_BROWSER:-0}" == "1" ]] && VM_ARGS+=(--skip-browser)
+  run_step "tests/test_versions_message.py (versions section, follow-up table, 09 message)" 0 "${PY[@]}" \
+    "$TESTS_DIR/test_versions_message.py" "${VM_ARGS[@]}" || true
+fi
+
 # --- 5. unit tests ---------------------------------------------------------------------------------------
 say "[5] اختبارات الوحدة والانحدار"
 if [[ -f "$TESTS_DIR/test_metric_engine.py" ]]; then

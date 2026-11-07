@@ -376,6 +376,17 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .dbody { padding: 0 12px 14px; }
 }
 
+/* ===== Phone headline strip: 3 KPI values above the fold (the full cards follow the summary) ===== */
+.kpi-strip { display: none; }
+@media (max-width: 480px) {
+  .kpi-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 10px 0 2px; }
+  .ks-item { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 8px; min-width: 0; }
+  .ks-label { display: block; font-size: 11.5px; color: var(--muted); font-weight: 600; line-height: 1.4; }
+  .ks-value { display: block; font-size: 15px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; }
+  .ks-value.is-na { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .ks-link { grid-column: 1 / -1; font-size: 12.5px; }
+}
+
 /* ===== Print ====================================================================== */
 @media print {
   @page { size: A4; margin: 14mm 12mm; }
@@ -401,11 +412,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .stack > * + * { margin-top: 8px; }
   .col-h { break-after: avoid; }
   .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  /* the full-width comparison chart prints last, so the two-column rows fill their pages first */
+  .chart-grid > [data-chart-id="asset-comparison"] { order: 9; }
   .chart-card { padding: 10px 12px; }
   .sub-h, .section-note { break-after: avoid; }
   .section-note { break-inside: avoid; }
-  /* the KPI cards start a page: their heading and note never stay orphaned under the assessment */
-  #sec-kpis { break-before: page; margin-top: 0; }
+  /* the KPI heading and note stay with the first row of cards (no forced page: it left page 2 half empty) */
+  #h-kpis, #kpi-note { break-after: avoid; page-break-after: avoid; }
   .plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   /* the executive view prints; the study details stay on screen (brief §11: «ضع التفاصيل في أقسام إضافية») */
   #sec-details { display: none !important; }
@@ -413,13 +426,30 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .meta-grid { margin: 8px 0 12px; }
   .meta-grid > div { padding: 6px 10px; }
   .summary-text { padding: 12px 16px; }
-  .summary-text p { font-size: 13.5px; line-height: 1.85; max-width: none; }
+  .summary-text p { font-size: 13px; line-height: 1.75; max-width: none; }
   .kpi, .chart-card, .item, .plan-col, .assess { break-inside: avoid; page-break-inside: avoid; }
   .summary-text p, .plan-item { break-inside: avoid; }
   details:not([open]) { display: none; }
   .chart-data { display: none; }
   .tip { display: none !important; }
-  .kpi-def.clamp { -webkit-line-clamp: unset; display: block; overflow: visible; }
+  /* print stays short (≤ 8 A4 pages): four KPI columns, definitions kept to 2 lines (the full text is on screen and in
+     the supporting workbook); the asset-comparison chart draws compact rows on paper */
+  .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .kpi { padding: 8px 10px; gap: 4px; }
+  .kpi-def.clamp { -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .kpi-meta { display: none; }
+  .kpi-value { font-size: 17px; }
+  .kpi-title { font-size: 13px; }
+  .kpi-label { font-size: 11px; }
+  .kpi .pill { font-size: 10.5px; padding: 1px 6px; }
+  #sec-kpis { margin-top: 10px; }
+  .kpi-grid { gap: 5px; }
+  .assess { padding: 8px 10px; }
+  .assess-grid { gap: 6px; }
+  .assess .muted, .assess .small { font-size: 10.5px; }
+  .identity-sub { font-size: 11.5px; }
+  .filter-scope { font-size: 11px; padding-bottom: 4px; }
+
   .def-toggle { display: none !important; }
   footer.foot { margin-top: 12px; padding: 8px 0 0; break-before: avoid; }
 }
@@ -436,6 +466,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       <p class="eyebrow">دراسة محفظة الأصول — العرض التنفيذي لمجلس الإدارة</p>
       <h1 id="entity-name">لوحة محفظة الأصول</h1>
       <p class="identity-sub" id="identity-sub"></p>
+      <div class="kpi-strip" id="kpi-strip" data-print="hide" role="group" aria-label="أبرز المؤشرات"></div>
     </div>
     <div data-print="hide">
       <button type="button" class="btn btn-primary" data-action="print" aria-label="طباعة العرض التنفيذي">طباعة العرض التنفيذي</button>
@@ -588,13 +619,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // Such tokens are isolated left-to-right for display only: negative numbers, percentages, ISO dates (with time),
   // hyphen-joined digit groups, cell ranges (C2:D2), and ids/keys holding a digit, hyphen or dot (REG-7, DQ-002, R1,
   // rev.2025.excl_vat).
-  var TOK_RE = /\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|-?\d[\d,]*(?:\.\d+)?%|-\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
+  // «!A1» / «!C95:D95» after a sheet name stays one LTR token with its «!»; a minus may be U+2212 («−238,000»)
+  var TOK_RE = /!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|[-−]?\d[\d,]*(?:\.\d+)?%|[-−]\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
   function tokSpans(s) {
     var out = [], m;
     TOK_RE.lastIndex = 0;
     while ((m = TOK_RE.exec(s)) !== null) {
       var tok = m[0], start = m.index;
-      if (tok.charAt(0) === '-' && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
+      if (/^[-\u2212]/.test(tok) && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
         if (tok.slice(-1) !== '%') continue;          // "2025-12" or "x-5": not a negative number
         start += 1; tok = tok.slice(1);
       }
@@ -1317,8 +1349,9 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var sh = r.source && r.source.sheet !== undefined ? str(r.source.sheet).trim() : '';
       return PROPERTY_ROLES.indexOf(roleOf[sh]) >= 0;
     }).length;
+    // the fact {{f:records.isolated_assetlike}} uses the same rule (facts.py): the narrative and this caveat agree
     var f = FACTS['records.isolated_assetlike'];
-    return Math.max(n, f && typeof f.value === 'number' ? f.value : 0);
+    return f && typeof f.value === 'number' ? f.value : n;
   }
   function naCountInScope(r, field) {
     // with an engine that reports n_not_applicable that count is used; otherwise count it among the records of R
@@ -1372,7 +1405,25 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return h('p', { class: 'kpi-caveat', role: 'note' }, 'التغطية تخص السجلات ضمن النطاق فقط؛ في الملف سجلات معزولة تشبه الأصول أو تصف عقارات ' +
       'لم يُتحقق من نطاقها، عددها ' + n + '، فلا تعني النسبة اكتمال سجل المحفظة.');
   }
+  /** Phone strip under the title: up to three headline card values (CSS shows it at ≤ 480px only). */
+  function renderStrip(all) {
+    var box = $('#kpi-strip');
+    if (!box) return;
+    clear(box);
+    var pref = ['asset_count', 'recorded_value', 'property_revenue'];
+    var ids = pref.filter(function (id) { return all.metrics[id]; });
+    cardGroups().forEach(function (g) { g.specs.forEach(function (sp) { if (ids.length < 3 && ids.indexOf(sp.id) < 0 && all.metrics[sp.id]) ids.push(sp.id); }); });
+    ids.slice(0, 3).forEach(function (id) {
+      var r = all.metrics[id];
+      var known = typeof r.value === 'number' && isFinite(r.value);
+      var txt = known ? (r.unit === 'SAR' ? fmtCompact(r.value) + ' ' + CUR : fmtUnit(r.value, r.unit)) : naText(r);
+      add(box, h('div', { class: 'ks-item' }, h('span', { class: 'ks-label' }, str(r.short_label || r.label || id)),
+        h('span', { class: 'ks-value' + (known ? '' : ' is-na') }, txt)));
+    });
+    if (box.children.length) add(box, h('a', { class: 'ks-link', href: '#sec-kpis' }, 'كل المؤشرات وتعريفاتها ←'));
+  }
   function renderCards(all) {
+    renderStrip(all);
     var grid = clear($('#kpi-grid'));
     cardGroups().forEach(function (g) {
       var rs = g.specs.map(function (s) { return all.metrics[s.id]; }).filter(Boolean);
@@ -1705,7 +1756,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var valW = textW('100.0%', 12, 600) + 12;
     var x0 = W - labelW - 10;
     var maxLen = Math.max(30, x0 - valW);
-    var rowH = 42, bh = 12, top = 6;
+    var rowH = state.printing ? 30 : 42, bh = state.printing ? 10 : 12, top = 6;   // compact rows on paper (≤ 8 pages)
     var H = top * 2 + shown.length * rowH;
     var max = 0;
     shown.forEach(function (x) { max = Math.max(max, x.vs, x.rs); });
@@ -1775,7 +1826,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var fig = figure('revenue-trend', str(t.label || 'تطور الإيراد عبر الفترات'), 'الوحدة: ' + CUR + ' · مجموع السجلات المعروف إيرادها في كل فترة', true);
     var comp = t.comparable || {};
     if (t.status === 'not_computable' && !list(t.points).length) { add(fig._body, emptyState(str(t.reason || 'التطور الزمني غير مفعّل أو لا توجد فترات كافية'))); return fig; }
-    if (comp.status === 'not_comparable') { add(fig._body, emptyState('المقارنة الزمنية غير صالحة: ' + str(comp.reason || 'اختلاف أساس الفترات'))); return fig; }
+    // the engine reason may say how values are shown elsewhere; here no value is drawn, so only its cause is quoted
+    if (comp.status === 'not_comparable') { add(fig._body, emptyState('المقارنة الزمنية غير صالحة، فلا تُعرض قيم التطور: ' + str(comp.reason || 'اختلاف أساس الفترات').replace(/^[^—]*—\s*/, ''))); return fig; }
     if (t.status === 'empty') { add(fig._body, emptyState(emptyChartText(t))); return fig; }
     if (t.status === 'not_computable') { add(fig._body, emptyState(str(t.reason || 'لا توجد قيم إيراد معروفة ضمن النطاق'))); return fig; }
     var pts = list(t.points);
@@ -1856,9 +1908,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(grid, probeWide);
     var Ww = chartWidth(probeWide.firstChild, true);
     clear(grid);
-    var figs = [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn), chartComparison(all, Ww), chartConcentration(all, Wn), chartTrend(all, Wn)];
-    // keep the grid tidy: the trend chart shares a row with concentration
-    figs[4].classList.remove('wide');
+    // on paper the concentration and trend charts take the full width: in a half column their notes wrap into a
+    // page-tall card (the print stays within 8 A4 pages)
+    var pw = !!state.printing;
+    var figs = [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn), chartComparison(all, Ww),
+      chartConcentration(all, pw ? Ww : Wn), chartTrend(all, pw ? Ww : Wn)];
+    if (pw) { figs[3].classList.add('wide'); figs[4].classList.add('wide'); }
+    else figs[4].classList.remove('wide');   // keep the grid tidy: the trend chart shares a row with concentration
     figs.forEach(function (f) { add(grid, f); });
   }
 
@@ -2528,7 +2584,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var defLike = cat === 'definition_change' || items.every(function (c) { return !c.record_id_prev && !c.record_id_curr; });
     if (defLike) {
       return simpleTable([
-        { label: 'البند', cell: function (c) { return h('code', null, str(c.key || c.metric_id || c.field || c.subtype)); } },
+        { label: 'البند', cell: function (c) { return c.key_ar ? str(c.key_ar) : (c.field ? fieldLabel(c.field) : h('code', null, str(c.key || c.metric_id || c.subtype))); } },
         { label: 'السابق', cell: function (c) { return renderAny(c.prev_value !== undefined ? c.prev_value : c.prev, 2); } },
         { label: 'الحالي', cell: function (c) { return renderAny(c.curr_value !== undefined ? c.curr_value : c.curr, 2); } },
         { label: 'ملاحظة', cell: function (c) { return str(c.note) || '—'; } }
@@ -2543,6 +2599,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       { label: 'ملاحظة', cell: function (c) { return str(c.note) || '—'; } }
     ], items, 'mini-table');
   }
+  var VC_HIDDEN = 'قابلية المقارنة غير مؤكدة';
   function renderVersionComparison(b, vc) {
     var labels = vc.category_labels && typeof vc.category_labels === 'object' ? vc.category_labels : {};
     // G6 shape: categories.<key> lists; older shape: changes.<key>; an analyst's summary: counts + examples
@@ -2607,9 +2664,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(b, h('h5', null, 'فروق المؤشرات بين النسختين'));
       add(b, simpleTable([
         { label: 'المؤشر', cell: function (x) { return str(x.label || x.id); } },
-        { label: 'السابق', num: true, cell: function (x) { return typeof x.prev_value === 'number' ? fmtUnit(x.prev_value, x.unit) : statusAr(x.prev_status); } },
-        { label: 'الحالي', num: true, cell: function (x) { return typeof x.curr_value === 'number' ? fmtUnit(x.curr_value, x.unit) : statusAr(x.curr_status); } },
-        { label: 'الفرق', num: true, cell: function (x) { return typeof x.difference === 'number' ? fmtUnit(x.difference, x.unit) : '—'; } },
+        { label: 'السابق', num: true, cell: function (x) { return x.values_hidden ? VC_HIDDEN : typeof x.prev_value === 'number' ? fmtUnit(x.prev_value, x.unit) : statusAr(x.prev_status); } },
+        { label: 'الحالي', num: true, cell: function (x) { return x.values_hidden ? VC_HIDDEN : typeof x.curr_value === 'number' ? fmtUnit(x.curr_value, x.unit) : statusAr(x.curr_status); } },
+        { label: 'الفرق', num: true, cell: function (x) {
+          if (x.values_hidden || typeof x.difference !== 'number') return '—';
+          // two percentages differ in percentage points, not by a relative %
+          return (x.difference_unit === 'pp' || x.unit === '%') ? fmtPlain(Math.round(x.difference * 100) / 100) + ' نقطة مئوية' : fmtUnit(x.difference, x.unit);
+        } },
         { label: 'يتأثر بـ', cell: function (x) {
           var af = x.affected_by && typeof x.affected_by === 'object' ? x.affected_by : {};
           return Object.keys(af).map(function (k) { return vcCatLabel(labels, k) + ' (' + list(af[k]).length + ')'; }).join('؛ ') || '—';

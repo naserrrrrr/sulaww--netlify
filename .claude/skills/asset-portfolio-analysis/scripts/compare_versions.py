@@ -68,6 +68,17 @@ ROLE_AR = {"field": "", "fields": "", "num": " للبسط", "den": " للمقا�
            "prev": " للفترة السابقة", "curr": " للفترة الحالية"}
 SPEC_KEYS = ("kind", "where", "field", "num", "den", "a", "b", "fields", "prev", "curr", "scale", "top", "unit",
              "label", "short_label", "definition", "basis", "scope_text", "card", "card_group")
+PERIOD_KEY_AR = {"rev_field": "حقل الإيراد", "exp_field": "حقل المصروفات", "prev_rev_field": "حقل إيراد الفترة السابقة",
+                 "comparable_with_prev": "حكم قابلية المقارنة"}
+META_ATTR_AR = {"label": "التسمية", "group": "المجموعة", "period": "الفترة", "year": "السنة", "vat": "أساس الضريبة",
+                "basis": "أساس الإيراد", "cash_basis": "أساس التحصيل", "completeness": "اكتمال الفترة",
+                "valuation_basis": "أساس التقييم", "valuation_date": "تاريخ التقييم", "unit": "الوحدة"}
+SPEC_ATTR_AR = {"kind": "نوع الحساب", "where": "شرط النطاق", "field": "الحقل", "num": "البسط", "den": "المقام",
+                "a": "المطروح منه", "b": "المطروح", "fields": "الحقول", "prev": "الفترة السابقة", "curr": "الفترة الحالية",
+                "scale": "المقياس", "top": "عدد الأعلى", "unit": "الوحدة", "label": "التسمية", "short_label": "التسمية المختصرة",
+                "definition": "التعريف", "basis": "الأساس", "scope_text": "وصف النطاق", "card": "البطاقة",
+                "card_group": "مجموعة البطاقة", "base_where": "النطاق العام", "valuation": "التقييم المعتمد",
+                "filters": "مرشحات اللوحة"}
 META_KEYS = ("label", "group", "period", "year", "vat", "basis", "cash_basis", "completeness", "valuation_basis",
              "valuation_date", "unit")
 NAME_SIMILARITY = 0.8
@@ -414,6 +425,7 @@ def definition_changes(prev: Run, curr: Run):
 
     def add(sub, key, a, b, note, **extra):
         item = OrderedDict([("category", "definition_change"), ("subtype", sub), ("key", key),
+                            ("key_ar", _key_ar(prev, curr, sub, key, extra)),
                             ("prev_value", _short(a)), ("curr_value", _short(b)), ("note", note)])
         item.update(extra)
         out.append(item)
@@ -458,6 +470,24 @@ def definition_changes(prev: Run, curr: Run):
     return out
 
 
+def _key_ar(prev, curr, sub, key, extra) -> str:
+    """Arabic name of a definition-change key (periods[2025].rev_field → «حقل الإيراد للفترة 2025»)."""
+    attr, pid, mid, f = extra.get("attr"), extra.get("period"), extra.get("metric_id"), extra.get("field")
+    if sub in ("period_field", "period_comparability"):
+        return f"{PERIOD_KEY_AR.get(attr or 'comparable_with_prev', attr)} للفترة {pid}"
+    if sub == "field_meta":
+        return f"{META_ATTR_AR.get(attr, attr)} — «{_flabel(curr.meta, f) if f in (curr.meta or {}) else _flabel(prev.meta, f)}»"
+    if sub in ("metric_label", "metric_definition"):
+        lab = (((curr.config or {}).get("metrics") and next((m.get("label") for m in curr.config["metrics"]
+                                                              if isinstance(m, dict) and m.get("id") == mid), None)) or mid)
+        return f"{SPEC_ATTR_AR.get(attr, attr)} — مؤشر «{lab}»"
+    if sub in ("metric_added", "metric_removed"):
+        return f"مؤشر {mid}"
+    if sub == "config":
+        return SPEC_ATTR_AR.get(attr, attr)
+    return str(key)
+
+
 def _field_desc(meta: dict, f) -> str:
     """Short Arabic description of a field's VAT / basis / completeness, from field_meta."""
     m = (meta.get(f) or {}) if isinstance(f, str) else {}
@@ -470,9 +500,16 @@ def _switch_text(prev: Run, curr: Run, fa, fb) -> str:
     if not (isinstance(fa, str) or isinstance(fb, str)):
         return ""
     da, db = _field_desc(prev.meta, fa), _field_desc(curr.meta, fb)
-    left = f"{fa or '—'}" + (f" ({da})" if da else "")
-    right = f"{fb or '—'}" + (f" ({db})" if db else "")
+    left = f"«{_flabel(prev.meta, fa)}»" + (f" ({da})" if da else "")
+    right = f"«{_flabel(curr.meta, fb)}»" + (f" ({db})" if db else "")
     return f": {left} ← {right}"
+
+
+def _flabel(meta: dict, f) -> str:
+    """A field's Arabic label from field_meta (the board never reads field ids such as rev.2025.excl_vat)."""
+    if not isinstance(f, str):
+        return "—"
+    return str(((meta or {}).get(f) or {}).get("label") or f)
 
 
 def _resolved(res: dict) -> set:
@@ -497,17 +534,22 @@ def _definition_causes(prev: Run, curr: Run, mid: str, a: dict, b: dict, fields:
         fa, fb = ra.get(role), rb.get(role)
         if json.dumps(fa, sort_keys=True, ensure_ascii=False) != json.dumps(fb, sort_keys=True, ensure_ascii=False):
             if isinstance(fa, list) or isinstance(fb, list):
-                causes.append(f"الحقول المعتمدة{ROLE_AR.get(role, f' ({role})')} تغيرت: {_short(fa, 120)} ← {_short(fb, 120)}")
+                la = "، ".join(_flabel(prev.meta, x) for x in (fa if isinstance(fa, list) else [fa]) if x)
+                lb = "، ".join(_flabel(curr.meta, x) for x in (fb if isinstance(fb, list) else [fb]) if x)
+                causes.append(f"الحقول المعتمدة{ROLE_AR.get(role, f' ({role})')} تغيرت: {la or '—'} ← {lb or '—'}")
             else:
                 causes.append(f"الحقل المعتمد{ROLE_AR.get(role, f' ({role})')} تغير" + _switch_text(prev, curr, fa, fb))
     for d in def_changes:
         sub = d.get("subtype")
         if sub == "metric_definition" and d.get("metric_id") == mid:
-            causes.append(f"تعريف المؤشر تغير ({d.get('attr')})")
+            causes.append(f"تعريف المؤشر تغير ({SPEC_ATTR_AR.get(d.get('attr'), d.get('attr'))})")
         elif sub == "config" and d.get("attr") in ("base_where", "valuation"):  # `filters` only lists dashboard filters
-            causes.append(f"إعداد عام تغير ({d.get('attr')}) — يؤثر في كل المؤشرات")
+            causes.append(f"إعداد عام تغير ({SPEC_ATTR_AR.get(d.get('attr'), d.get('attr'))}) — يؤثر في كل المؤشرات")
         elif sub == "field_meta" and d.get("field") in fields and d.get("attr") != "label":
-            causes.append(f"وصف الحقل {d.get('field')} تغير ({d.get('attr')}): {d.get('prev_value')} ← {d.get('curr_value')}")
+            attr = d.get("attr")
+            tr = {"vat": VAT_AR, "basis": BASIS_AR, "completeness": COMPLETENESS_AR}.get(attr, {})
+            causes.append(f"وصف الحقل «{_flabel(curr.meta, d.get('field'))}» تغير ({META_ATTR_AR.get(attr, attr)}): "
+                          f"{tr.get(d.get('prev_value'), d.get('prev_value'))} ← {tr.get(d.get('curr_value'), d.get('curr_value'))}")
     return list(OrderedDict.fromkeys(causes))
 
 
@@ -549,6 +591,11 @@ def metric_deltas(prev: Run, curr: Run, changes: list, def_changes: list = ()):
             note = ("فترتان مختلفتان: لا يُقرأ الفرق نموًا؛ استخدم مؤشر revenue_growth بشروط قابلية المقارنة" +
                     ("؛ وتعريف المؤشر تغير أيضًا: " + "؛ ".join(causes) if causes else ""))
         affected = OrderedDict((cat, sorted(changed_ids[cat])) for cat in CATEGORIES if changed_ids.get(cat))
+        # a growth whose comparability is not confirmed is not shown as a value (the trend chart hides it too)
+        comp = [((x.get("comparability") or {}).get("status")) for x in (a, b) if isinstance(x.get("comparability"), dict)]
+        hide = bool(comp) and any(c != "confirmed" for c in comp)
+        if hide:
+            note = ("قابلية المقارنة غير مؤكدة في إحدى النسختين؛ لا تُعرض قيمتا النمو ولا فرقهما — " + note)
         out.append(OrderedDict([
             ("id", mid), ("label", b.get("label") or a.get("label")),
             ("prev_period", a.get("period")), ("curr_period", b.get("period")), ("same_period", same_period),
@@ -556,6 +603,9 @@ def metric_deltas(prev: Run, curr: Run, changes: list, def_changes: list = ()):
             ("difference", d), ("unit", b.get("unit")),
             ("prev_n_included", a.get("n_included")), ("curr_n_included", b.get("n_included")),
             ("affected_by", affected), ("definition_causes", causes), ("note", note),
+            # a difference of two percentages is in percentage points, not a relative change
+            ("difference_unit", "pp" if b.get("unit") == "%" or a.get("unit") == "%" else b.get("unit")),
+            ("values_hidden", hide), ("comparability_status", comp[-1] if comp else None),
         ]))
     return out
 

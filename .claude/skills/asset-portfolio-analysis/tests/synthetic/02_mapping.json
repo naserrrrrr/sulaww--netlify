@@ -113,7 +113,7 @@
         {"rows": ["10-12"], "reason": "فاصل وعنوان القسم الثاني وعناوين أعمدته"}
       ],
       "skip_if_blank": "B",
-      "default_record_type": "other",
+      "default_record_type": "asset",
       "default_scope": "isolated",
       "scope_reason": "ورقة مخفية؛ أسماء الأوقاف لا تطابق السجل بمعرّف أو صك، وأرقامها تختلف عنه، وإجماليها الكلي مدوّن يدويًا بخطأ؛ لم يتحقق انتماؤها للمحفظة",
       "id_rule": {"column": null, "prefix": "ALC-"},

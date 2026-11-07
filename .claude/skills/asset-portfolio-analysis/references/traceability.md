@@ -75,20 +75,20 @@
 | 3.10 | النوع والموقع والحالة وتخصيص الريع والقيود المثبتة | SC §5 | أعمدة `dim`؛ `breakdowns`؛ `filters` |
 | 3.11 | إيرادات المدارس والأنشطة ليست إيجارًا | SC §6 | `operating_activity` و`operating`؛ `compute` (`activity_revenue`، واستبعاد التشغيلي من العائد) |
 | 3.12 | إيراد العقار المدار للغير ليس دخلًا للجمعية | SC §6 | `managed_for_others`؛ `compute` (مستبعد من كل المؤشرات القياسية، ويُعد في `managed_records_count`)؛ `normalize:managed_unflagged` و`V:sheet_scope` (مانع)؛ `build` (وسم «مدار للغير») |
-| 3.13 | الأصل كاملًا أم الحصة، قبل نسب الملكية | SC §7 | `partial` و`derived_fields` صريحة؛ `assumptions`؛ حكم المحلل |
+| 3.13 | الأصل كاملًا أم الحصة، قبل نسب الملكية | SC §7 | `partial` و`derived_fields` صريحة؛ `assumptions`؛ `normalize:percent_scale_mixed`؛ `V:partial_ownership_full_amount`؛ حكم المحلل |
 
 ## 4. تنظيف البيانات
 
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
 | 4.1 | معرّف ثابت ومصدر (ملف، ورقة، صف أو خلية) | DC §1 | `normalize` (`id_rule`، `ref`، `source`، `duplicate_id`)؛ `V:duplicate_ids_in_scope` و`V:duplicate_record_ids` (مانعان) |
-| 4.2 | توحيد الأرقام والتواريخ والعملات والمساحات والمسميات مع حفظ الأصل | DC §2 | `parse_number` و`normalize_arabic`؛ `raw`؛ `normalize:percent_in_amount` و`numeric_text_converted` |
+| 4.2 | توحيد الأرقام والتواريخ والعملات والمساحات والمسميات مع حفظ الأصل | DC §2 | `parse_number` و`normalize_arabic`؛ `raw`؛ `normalize:percent_in_amount` و`numeric_text_converted` و`ambiguous_thousands_separator` و`foreign_currency` |
 | 4.3 | التحقق من التقويم قبل تحويل التواريخ | DC §3 | `calendar`؛ `parse_date` (أم القرى، وملاحظة التاريخ الملتبس)؛ `inspect:hijri_date_text` و`mixed_calendar`؛ `normalize:hijri_conversion` و`date_note` و`date_unparsed` |
 | 4.4 | فصل الصفر المؤكد والفارغ وغير المتاح وغير المنطبق، ولا صفر للمجهول | DC §4 | حالات TV و`zero_policy` ورموز «غير متاح»؛ `inspect:formula_blank_inputs`؛ `normalize:zero_from_blank_inputs`؛ `V:tv_status_consistency` (مانع) |
 | 4.5 | لا حذف للأسماء المتشابهة، ومطابقة المعرّف والصك والموقع والمساحة، والصك المشترك | DC §5 | `inspect:duplicate_name` و`shared_deed`؛ `normalize:possible_duplicate_name` و`shared_deed` |
 | 4.6 | محتوى الحقل لا عنوانه: «غير مقيد» ليست مبالغ، والأدوار ليست وحدات | DC §6 | `kind: text` و`count_mixed`؛ `inspect:text_in_numeric` و`mixed_types` (وعناوين التصنيف ليست مبالغ)؛ `normalize:count_mixed_text` و`percent_in_amount` |
 | 4.7 | مراجعة الصيغ وقيمها المخزنة وأخطاء المراجع | DC §7 | `inspect:formula_year_mismatch`، `cached_value_mismatch`، `cached_missing`، `excel_error`؛ `normalize:formula_no_cache` |
-| 4.8 | إعادة حساب المجاميع ومطابقتها مع المدونة وإظهار الفروق | DC §7 | `compute` (`sum`)؛ `inspect:total_mismatch`، `hardcoded_total`، `count_mismatch`؛ `normalize:valuation_total_mismatch`؛ قيم صفوف الإجمالي المستبعدة و`V:totals_reconciliation`؛ `export` («المطابقة مع الإجماليات») |
+| 4.8 | إعادة حساب المجاميع ومطابقتها مع المدونة وإظهار الفروق | DC §7 | `compute` (`sum`)؛ `inspect:total_mismatch`، `hardcoded_total`، `count_mismatch`؛ `normalize:valuation_total_mismatch`؛ قيم صفوف الإجمالي المستبعدة (ومنها صفوف ما بعد `data_rows`) و`V:totals_reconciliation` و`V:totals_not_reconciled`؛ `export` («المطابقة مع الإجماليات») |
 | 4.9 | فصل الضريبة بحسب البيانات، ولا نسبة واحدة، ولا تعديل بالاسم | DC §8 | `vat` في `field_meta`؛ `compute` (اختيار `excl`)؛ `inspect:vat_identical`؛ `normalize:vat_incl_lt_excl` |
 | 4.10 | فعلي أم متوقع، مستحق أم محصل، سنوي أم جزئي، ولا وصف غير مثبت | DC §9 | `basis`، `cash_basis`، `completeness`؛ `compute` (قابلية المقارنة)؛ `inspect:partial_period_header` |
 | 4.11 | سجل مشكلات البيانات (المشكلة، الموضع، الأثر، المعالجة) | DC §10 | `normalize` (`DQ-xxx`، والأثر بحسب نطاق السجل)؛ `data_issues_extra`؛ `export`؛ `build` (قسم `issues`) |
@@ -124,7 +124,7 @@
 | 6.8 | توزيع القيمة والإيراد حسب الأبعاد عند كفاية البيانات | MT §2 | `compute` (`breakdowns`)؛ `C:charts` |
 | 6.9 | إجمالي الإيراد غير المكرر: الإيجارات منفصلة عن الأنشطة، والمتكرر عن الاستثنائي | MT §3 | `property_revenue` و`activity_revenue` بمستوى الأصل؛ عزل المصدر المكرر؛ حقل `one_off` |
 | 6.10 | تعريف عائد الدخل الإجمالي | MT §4.1 | `gross_yield_*`؛ اختيار حقل `excl` |
-| 6.11 | صافي الدخل التشغيلي، وفصل الإهلاك والتمويل والرأسمالي، وأساس توزيع المشترك | MT §4.3 | `noi`؛ `exp_field`؛ `field_meta.note` |
+| 6.11 | صافي الدخل التشغيلي، وفصل الإهلاك والتمويل والرأسمالي، وأساس توزيع المشترك | MT §4.3 | `noi`؛ `exp_field` (وتنبيه `expense_fields_partial`)؛ `field_meta.note` |
 | 6.12 | عائد الدخل التشغيلي الصافي | MT §4.3 | حقل `noi.<P>` المشتق ثم نسبة |
 | 6.13 | العائد من مجاميع متطابقة، لا متوسط بسيط | MT §4.1 | المحرك (Σ/Σ)؛ `V:pairwise_sets` (مانع)؛ `V:metrics_reproducible` (مانع) |
 | 6.14 | ثلاثة نطاقات منفصلة | MT §4.1 | `gross_yield_owned` و`investment` و`income_producing` |
@@ -141,7 +141,7 @@
 | 6.25 | لا عائد كلي إلا بمدخلاته، والمعادلة المبسطة | MT §5 | `V:label_total_return` (مانع؛ يقرأ `num`/`den` النسبة وحدهما، فالمكونات تُعرض منفصلة)؛ `V:narrative_claims` |
 | 6.26 | منهج يراعي التدفقات وتوقيتها، وإلا ذكر التعذر | MT §5 | `derived_fields` للبسط والمقام؛ حكم المحلل |
 | 6.27 | لا جمع لدخل سنة مع تغير تقييم فترة أخرى | MT §5 | `V:label_total_return`؛ حكم المحلل |
-| 6.28 | لا تحويل للجزئي إلى سنوي محقق، والتقدير منفصل | MT §5 | `completeness: partial` يجعلها `not_comparable`؛ `V:growth_comparability_basis`؛ `assumptions` |
+| 6.28 | لا تحويل للجزئي إلى سنوي محقق، والتقدير منفصل | MT §5 | `completeness: partial` يجعلها `not_comparable`؛ `V:growth_comparability_basis`؛ `V:annualised_text`؛ `assumptions` |
 | 6.29 | الإشغال بمدخلات صحيحة فقط، والمساحي مستقل | MT §6 | مؤشرات مخصصة مشروطة؛ `data_requests` |
 | 6.30 | التحصيل مع فصل المتأخرات القديمة والمقدم | MT §6 | حقول منفصلة؛ مؤشر مخصص |
 | 6.31 | المتأخرات ونسبة المصروفات والإيراد للمتر بعد تماثل التعريفات | MT §6 | مؤشرات مخصصة؛ حكم المحلل |
@@ -226,7 +226,7 @@
 | 11.19 | العرض التنفيذي للطباعة، والتفاصيل في أقسام | DS §8 | `C:print` |
 | 11.20 | اختبار العربية والجوال والمرشحات والأزرار | DS §9 | `check_dashboard.mjs`؛ مراجعة اللقطات |
 | 11.21 | لا زر تصدير أو تفاصيل لا يعمل | DS §9 | `C:buttons`؛ القالب بلا زر تصدير |
-| 11.22 | لا بيانات اتصال أو معرفات شخصية | DS §10 | `normalize` (حذف `pii`)؛ `build` و`export` (حجب بالأنماط المشتركة، وفحص ما بعد الحفظ)؛ `V:pii_*` و`V:pii_export_patterns` (مانعة)؛ `V:pii_review_patterns`؛ `C:privacy` |
+| 11.22 | لا بيانات اتصال أو معرفات شخصية | DS §10 | `normalize` (حذف `pii`، وحجب الأنماط داخل النصوص `pii_redacted`)؛ `build` و`export` (حجب بالأنماط المشتركة، وفحص ما بعد الحفظ)؛ `V:pii_*` و`V:pii_export_patterns` (مانعة)؛ `V:pii_review_patterns`؛ `C:privacy` |
 
 ## 12. تحديث التحليل
 

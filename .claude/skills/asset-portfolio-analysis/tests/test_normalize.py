@@ -6,7 +6,10 @@
 Covers: totals never become records (A3/A14), blank and skipped rows (A4/A8), cached 0 of blank inputs (A5),
 controlled vocabulary (A6), joins through confirmed links (A7), merged name/id cells (A8), sheet decisions /
 hidden / managed sheets (A9), overlapping sources (A10), required context copied to 03 (A13), percent text in
-amounts (A16), «غير متاح» tokens in text columns (A19), scope-aware impact and ordering (C12), PII name columns.
+amounts (A16), «غير متاح» tokens in text columns (A19), scope-aware impact and ordering (C12), PII name columns;
+round 2: named rows with weak total signs kept (possible_total_row), totals after data_rows kept for reconciliation,
+ambiguous «12.500», foreign currency, area units, IBAN / labelled national ID masked as spans, percent scale mixed,
+joins on a deed shared with excluded units, rollups of unit revenue, section labels.
 """
 import copy
 import json
@@ -133,6 +136,60 @@ def base_mapping():
     }
 
 
+def build_round2(path):
+    """Units sharing their parent's deed, a parent row summing them, a section label, a total after the data rows,
+    ambiguous / foreign / unit-suffixed numbers and personal data inside notes."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "سجل"
+    ws.append(["م", "اسم العقار", "رقم الصك", "الإيراد 2024", "الإيراد 2023", "التقييم 2024", "المساحة", "الحصة", "ملاحظات",
+               "أساس الإيجار"])
+    rows = [
+        [1, "عمارة الفيصلية", "410112003344", "=SUM(D3:D5)", None, 15000000, 900, 100, None, "إجمالي"],
+        [2, "عمارة الفيصلية - شقة 1", "410112003344", 100000, 290000, None, None, None, "هوية المستأجر 1023456789", "إجمالي"],
+        [3, "عمارة الفيصلية - شقة 2", "410112003344", 100000, 290000, None, None, None, "الحوالة على SA0380000000608010167519", "صافي"],
+        [4, "عمارة الفيصلية - معرض", "410112003344", 100000, 290000, None, None, None, None, "إجمالي"],
+        ["Jeddah", None, None, None, None, None, None, None, None, None],
+        [5, "أرض النسيم", "410112005566", "12.500", None, 4000000, "٨٠٠ م²", 0.5, None, "صافي"],
+        [6, "محلات الوقف", "410112007788", "USD 100,000", 50000, 3000000, 1200, 50, "قيمة الأرض 500 000 000 ريال", "إجمالي"],
+    ]
+    for i, vals in enumerate(rows, start=2):
+        for c, v in enumerate(vals, 1):
+            ws.cell(row=i, column=c, value=v)
+    ws.cell(row=9, column=2, value="الإجمالي")
+    ws.cell(row=9, column=4, value=400000)
+    ex = wb.create_sheet("مصروفات")
+    ex.append(["رقم الصك", "العقار", "مصروفات 2024"])
+    ex.append(["410112003344", "عمارة الفيصلية", 60000])
+    wb.save(path)
+    inject_cached(path, "xl/worksheets/sheet1.xml", {"D2": 300000})
+
+
+def round2_mapping():
+    m = base_mapping()
+    m["sheets"] = [{"sheet": "سجل", "role": "asset_register", "decision": "primary", "reason": "السجل"},
+                   {"sheet": "مصروفات", "role": "other", "decision": "supplementary", "reason": "مصروفات بالصك"}]
+    m["sources"] = [{
+        "id": "W", "sheet": "سجل", "header_row": 1, "data_rows": {"from": 2, "to": 8}, "skip_if_blank": "B",
+        "default_record_type": "asset", "default_scope": "in_scope", "id_rule": {"column": "A", "prefix": "W-"},
+        "name_column": "B",
+        "columns": {"C": {"field": "deed_no", "kind": "text"}, "D": {"field": "rev.2024.recorded", "kind": "money"},
+                    "E": {"field": "rev.2023.recorded", "kind": "money"}, "F": {"field": "val.2024.total", "kind": "money"},
+                    "G": {"field": "area", "kind": "area"}, "H": {"field": "own_share", "kind": "percent"},
+                    "I": {"field": "notes", "kind": "text"}, "J": {"field": "rent_basis", "kind": "text"}}},
+        {"id": "EXP", "sheet": "مصروفات", "header_row": 1, "data_rows": {"from": 2, "to": 2}, "skip_if_blank": "B",
+         "default_scope": "in_scope", "scope_reason": "مصروفات مربوطة برقم الصك عبر L-EXP",
+         "id_rule": {"column": "A", "prefix": "EXP-"}, "name_column": "B",
+         "columns": {"A": {"field": "deed_key", "kind": "text"}, "C": {"field": "exp.2024.opex", "kind": "money"}},
+         "join": {"into": "W", "on": "deed", "key_column": "A", "link_id": "L-EXP"}}]
+    m["field_meta"]["rev.2023.recorded"] = {"label": "الإيراد 2023", "group": "revenue", "period": "2023"}
+    m["records"] = {k: {"record_type": "unit"} for k in ("W-2", "W-3", "W-4")}
+    m["records"]["W-1"] = {"rollup": {"from": ["W-2", "W-3", "W-4"], "fields": ["rev.2023.recorded"],
+                                      "evidence": "إيراد 2023 مسجل على الوحدات وحدها (E3:E5)"}}
+    return m
+
+
 def run_normalize(tmp, xlsx, mapping, name, wb_map=None):
     d = os.path.join(tmp, name)
     os.makedirs(d, exist_ok=True)
@@ -171,15 +228,18 @@ def main():
         ids = [r["id"] for r in d["records"]]
         # A3/A14: «جملة» (name) and «Total» (notes) rows are not records; kept in excluded_rows with their values
         check("A3 total row (name «جملة») is not a record", all(r["source"]["row"] != 4 for r in d["records"]), ids)
-        check("A3 label-like total in a text cell («Total») is not a record",
-              all(r["source"]["row"] != 14 for r in d["records"]), ids)
+        # a named row with an id («10 مبنى الجوري») and «Total» in its notes is kept, flagged for review (round 2)
+        r14 = next((r for r in d["records"] if r["source"]["row"] == 14), None)
+        pt = issues_of(d, "possible_total_row")
+        check("A3 named row with a total word in another cell is kept (possible_total_row, medium)",
+              r14 is not None and any(i["record_ids"] == [r14["id"]] and i["severity"] == "medium" for i in pt), pt)
         check("A3 long note «إجمالي المساحة 500 م2» does not make a total", rec(d, "REG-1") is not None, ids)
         ex4 = next((e for e in d["excluded_rows"] if e["row"] == 4), {})
         check("A14 excluded total row keeps numeric values",
               (ex4.get("values") or {}).get("rev.2024.recorded", {}).get("v") == 216000 and
               (ex4.get("values") or {}).get("val.2024.total", {}).get("v") == 5000000, ex4)
         tl = issues_of(d, "total_like_row")
-        check("A3 total_like_row issues are high", len(tl) == 2 and all(i["severity"] == "high" for i in tl), tl)
+        check("A3 total_like_row issues are high", len(tl) == 1 and all(i["severity"] == "high" for i in tl), tl)
         # A4: blank and filler rows skipped and reported
         b = issues_of(d, "blank_rows_skipped")
         check("A4 blank/filler rows reported once (low, count 2)",
@@ -234,11 +294,11 @@ def main():
         # ---- overrides: a total-like row kept by an explicit override ---------------------------------------
         print("[2] تجاوز صريح لصف يشبه الإجمالي")
         m = base_mapping()
-        m["records"]["REG-10"] = {"record_type": "asset", "scope": "in_scope", "scope_reason": "ليس إجماليًا: مبنى قائم"}
+        m["records"]["REG-r4"] = {"record_type": "asset", "scope": "in_scope", "scope_reason": "ليس إجماليًا: مبنى قائم"}
         rc, log, d2 = run_normalize(tmp, xlsx, m, "override")
         tl = issues_of(d2, "total_like_row") if d2 else []
-        check("A3 overridden total-like row kept as record", d2 is not None and rec(d2, "REG-10") is not None, log[-300:])
-        check("A3 override still reported (mapping_override)", any(i.get("mapping_override") and i["record_ids"] == ["REG-10"]
+        check("A3 overridden total-like row kept as record", d2 is not None and rec(d2, "REG-r4") is not None, log[-300:])
+        check("A3 override still reported (mapping_override)", any(i.get("mapping_override") and i["record_ids"] == ["REG-r4"]
                                                                     for i in tl), tl)
 
         # ---- 01 row kinds -------------------------------------------------------------------------------------
@@ -247,7 +307,9 @@ def main():
         sha = sha256(open(xlsx, "rb").read()).hexdigest()
         wm = {"file": {"sha256": sha}, "sheets": [{"name": "سجل", "row_kinds": {"2": "data", "3": "total_label"}}]}
         rc, log, d3 = run_normalize(tmp, xlsx, base_mapping(), "rowkinds", wb_map=wm)
-        check("A3 row kind total_label in 01 -> row 3 not a record", d3 is not None and rec(d3, "REG-2") is None,
+        check("A3 row kind total_label in 01 on a named row -> kept with possible_total_row",
+              d3 is not None and rec(d3, "REG-2") is not None and
+              any(i["record_ids"] == ["REG-2"] and "01" in i["detail"] for i in issues_of(d3, "possible_total_row")),
               d3 and [r["id"] for r in d3["records"]])
         wm_bad = copy.deepcopy(wm)
         wm_bad["file"]["sha256"] = "0" * 64
@@ -333,6 +395,51 @@ def main():
             sev = {"high": 0, "medium": 1, "low": 2}
             head = [sev[i["severity"]] for i in d4["issues"][:first_iso]]
             check("C12 severity sorted within the in-scope group", head == sorted(head), head)
+
+        # ---- round 2: totals after data_rows, parsing, PII spans, joins on a shared deed, rollups ------------------
+        print("[6] الإجماليات بعد النطاق والأرقام الملتبسة والربط بالصك والتجميع")
+        x2 = os.path.join(tmp, "round2.xlsx")
+        build_round2(x2)
+        rc, log, d6 = run_normalize(tmp, x2, round2_mapping(), "round2")
+        check("round2 run exits 0", rc == 0, log[-500:])
+        if d6 is not None:
+            after = [e for e in d6["excluded_rows"] if e.get("after_data_rows")]
+            check("A14 total row after data_rows.to kept for reconciliation (with values)",
+                  len(after) == 1 and after[0]["row"] == 9 and after[0]["values"]["rev.2024.recorded"]["v"] == 400000, after)
+            check("named parent with a vertical SUM is kept (possible_total_row)", rec(d6, "W-1") is not None and
+                  any(i["record_ids"] == ["W-1"] for i in issues_of(d6, "possible_total_row")),
+                  [r["id"] for r in d6["records"]])
+            w5 = rec(d6, "W-5")["fields"]
+            check("A16 «12.500» in money -> text + ambiguous_thousands_separator (medium)",
+                  w5["rev.2024.recorded"]["s"] == "text" and w5["rev.2024.recorded"]["v"] is None and
+                  [i["severity"] for i in issues_of(d6, "ambiguous_thousands_separator")] == ["medium"], w5["rev.2024.recorded"])
+            check("U-4.2 «٨٠٠ م²» in area -> 800 with the unit noted", w5["area"]["v"] == 800 and "المتر" in (w5["area"]["note"] or ""),
+                  w5["area"])
+            w6 = rec(d6, "W-6")["fields"]
+            check("U-4.2 «USD 100,000» -> text + foreign_currency (high)",
+                  w6["rev.2024.recorded"]["s"] == "text" and
+                  [i["severity"] for i in issues_of(d6, "foreign_currency")] == ["high"], w6["rev.2024.recorded"])
+            notes = {r["id"]: (r["fields"].get("notes") or {}) for r in d6["records"]}
+            blob = json.dumps(d6, ensure_ascii=False)
+            check("A12 IBAN and labelled national ID never stored in 03",
+                  "SA0380000000608010167519" not in blob and "1023456789" not in blob, notes)
+            check("A12 IBAN masked as a span (rest of the note kept)", notes["W-3"].get("v") == "الحوالة على <محجوب>", notes["W-3"])
+            check("A12 «500 000 000» in a note is not a phone number", notes["W-6"].get("v") == "قيمة الأرض 500 000 000 ريال",
+                  notes["W-6"])
+            check("percent field mixing 0.5 and 50 -> percent_scale_mixed",
+                  len(issues_of(d6, "percent_scale_mixed")) == 1, issues_of(d6, "percent_scale_mixed"))
+            w1 = rec(d6, "W-1")["fields"]
+            check("join on a deed shared with excluded units reaches the parent",
+                  w1.get("exp.2024.opex", {}).get("v") == 60000 and not issues_of(d6, "join_ambiguous"),
+                  (w1.get("exp.2024.opex"), issues_of(d6, "join_ambiguous")))
+            check("rollup sums the units' revenue into the parent (derived)",
+                  w1["rev.2023.recorded"]["v"] == 870000 and w1["rev.2023.recorded"]["s"] == "derived", w1.get("rev.2023.recorded"))
+            check("rollup puts the units out of scope", all(rec(d6, x)["scope"] == "excluded" for x in ("W-2", "W-3", "W-4")),
+                  [(x, rec(d6, x)["scope"]) for x in ("W-2", "W-3", "W-4")])
+            sl = issues_of(d6, "section_label_skipped")
+            check("section label in the id column is reported as such, not as a blank row",
+                  len(sl) == 1 and sl[0]["rows"] == [6] and not any(6 in (i.get("rows") or []) for i in issues_of(d6, "blank_rows_skipped")),
+                  (sl, issues_of(d6, "blank_rows_skipped")))
 
         # ---- mapping errors (exit 2) ------------------------------------------------------------------------------
         print("[5] أخطاء الربط (خروج 2)")
