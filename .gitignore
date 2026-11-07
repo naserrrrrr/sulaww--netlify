@@ -4,6 +4,6 @@ outputs/
 *.xlsm
 *.xls
 *.ods
-.claude/skills/asset-portfolio-analysis/tests/_build/
+.claude/skills/asset-portfolio-analysis/tests/_build*/
 __pycache__/
 *.pyc
