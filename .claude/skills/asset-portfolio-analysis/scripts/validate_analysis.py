@@ -3170,7 +3170,7 @@ def nq_token_words(ctx, kind: str, mid: str, path: str) -> int:
                 return 2  # «بدء إيراد»
             return 3  # «غير قابل للاحتساب» / «غير قابل للمقارنة»
         if res.get("kind") == "growth" and as_dict(res.get("comparability")).get("status") != "confirmed":
-            return 6  # «32,000 ر.س (تغير بالريال؛ لا نسبة)» (build_dashboard: an unconfirmed growth reads in riyals)
+            return 6  # «50,000 ر.س (تغير بالريال؛ لا نسبة)» (build_dashboard: an unconfirmed growth reads in riyals)
         return 2 if unit == "SAR" and is_num(v) else 1
     ok, v = resolve_path(res, path.split("."))
     last = path.split(".")[-1]
