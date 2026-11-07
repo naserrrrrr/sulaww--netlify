@@ -1,0 +1,9 @@
+# Asset-portfolio agent: run outputs and source workbooks may contain confidential data — never commit them
+outputs/
+*.xlsx
+*.xlsm
+*.xls
+*.ods
+.claude/skills/asset-portfolio-analysis/tests/_build/
+__pycache__/
+*.pyc

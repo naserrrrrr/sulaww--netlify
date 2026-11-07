@@ -1,0 +1,88 @@
+{
+  "contract_version": "1.0",
+  "status": {
+    "value": {"ar": "قيمة من الملف", "known": true},
+    "derived": {"ar": "قيمة مشتقة بالحساب", "known": true},
+    "zero_recorded": {"ar": "صفر مسجل (لم يُتحقق من سببه)", "known": true},
+    "zero_confirmed": {"ar": "صفر مؤكد بدليل", "known": true},
+    "zero_as_missing": {"ar": "صفر يُعامل كغير متاح", "known": false},
+    "blank": {"ar": "خانة فارغة", "known": false},
+    "filler": {"ar": "خانة فارغة (مسافات)", "known": false},
+    "text": {"ar": "نص في حقل رقمي", "known": false},
+    "error": {"ar": "خطأ صيغة", "known": false},
+    "not_applicable": {"ar": "غير منطبق", "known": false},
+    "not_available": {"ar": "غير متاح", "known": false}
+  },
+  "metric_status": {
+    "complete": {"ar": "مكتمل للنطاق المحدد", "tone": "ok"},
+    "partial": {"ar": "جزئي — للجزء القابل للاحتساب", "tone": "warn"},
+    "not_computable": {"ar": "غير قابل للاحتساب بالبيانات الحالية", "tone": "na"},
+    "not_comparable": {"ar": "غير قابل للمقارنة (اختلاف الأساس أو الفترة)", "tone": "na"},
+    "empty": {"ar": "لا توجد سجلات ضمن التصفية الحالية", "tone": "na"}
+  },
+  "record_type": {
+    "asset": "أصل",
+    "land_parcel": "قطعة أرض",
+    "unit": "وحدة",
+    "contract": "عقد",
+    "operating_activity": "نشاط تشغيلي",
+    "total": "صف إجمالي",
+    "other": "أخرى"
+  },
+  "scope": {
+    "in_scope": "ضمن نطاق الدراسة",
+    "isolated": "معزول (نطاقه غير متحقق)",
+    "excluded": "مستبعد"
+  },
+  "use": {
+    "investment": "استثماري",
+    "service": "خدمي",
+    "admin": "إداري",
+    "development": "قيد التطوير",
+    "unknown": "غير محدد"
+  },
+  "income_nature": {
+    "rent": "إيجارات عقارية",
+    "operating": "نشاط تشغيلي",
+    "other": "إيرادات أخرى",
+    "none": "لا يدر دخلًا",
+    "unknown": "غير محدد"
+  },
+  "ownership": {
+    "owned": "مملوك",
+    "partial": "ملكية جزئية",
+    "usufruct": "حق انتفاع",
+    "leased_land_project": "مشروع على أرض مستأجرة",
+    "managed_for_others": "إدارة أملاك للغير",
+    "unknown": "غير محدد"
+  },
+  "waqf": {
+    "yes": "وقف",
+    "no": "ليس وقفًا",
+    "unknown": "غير محدد"
+  },
+  "statement_kind": {
+    "fact": {"ar": "معلومة واردة بالملف", "short": "ملف"},
+    "derived": {"ar": "حساب مشتق", "short": "حساب"},
+    "inference": {"ar": "استنتاج تحليلي", "short": "استنتاج"},
+    "assumption": {"ar": "افتراض سيناريو", "short": "افتراض"}
+  },
+  "dims": {
+    "asset_type": "نوع الأصل",
+    "location": "الموقع",
+    "district": "الحي",
+    "use": "الاستخدام",
+    "ownership": "الملكية والحقوق",
+    "waqf": "صفة الوقف",
+    "income_nature": "طبيعة الدخل",
+    "managed_for_others": "مدار للغير",
+    "rent_allocation": "تخصيص الريع",
+    "restriction": "قيود الريع",
+    "condition": "الحالة"
+  },
+  "severity": {
+    "high": "مرتفع",
+    "medium": "متوسط",
+    "low": "منخفض"
+  }
+}
