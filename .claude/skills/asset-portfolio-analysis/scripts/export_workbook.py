@@ -4,18 +4,26 @@
 Usage:
   python3 scripts/export_workbook.py --run-dir RUN [--out RUN/supporting_workbook.xlsx]
 
-Reads 03_records.json and 05_metrics.json (required) plus 01, 02, 04, 06, 07 and analysis.json when present.
-Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «مشكلات البيانات»، «الفجوات والتوصيات»،
-«الخطة التشغيلية»، «الافتراضات والمصادر». Right-to-left, navy headers, filters on every table, gray = not
-available (never a zero), red = a proven problem only. No personal data: PII fields and phone/e-mail-like
-text are never written. Values only, except SUM totals in the calculation detail of «الحسابات».
-Exit 0 on success, 1 on unusable input.
+Reads 03_records.json and 05_metrics.json (required) plus 01, 02, 04, 06, 07, analysis.json and
+version_comparison.json when present.
+Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «المطابقة مع الإجماليات» (when excluded total rows kept their
+values)، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «متابعة التوصيات» and «مقارنة الإصدارات» (when
+06 has recommendation_followup / version_comparison)، «الافتراضات والمصادر». Right-to-left, navy headers, filters on
+every table, gray = not available (never a zero; the original text of a non-numeric cell is shown next to its
+status), red = a proven problem only. Values only, except SUM totals in the calculation detail of «الحسابات».
+
+Personal data: fields whose key, label or mapping kind is personal (assets/pii_patterns.json via apa_common) are
+dropped; block-level patterns (mobile, landline, e-mail, IBAN; Arabic-Indic digits included) are masked in every text
+cell; review-level hits (a 10-digit number that may be a national ID or a deed) are kept and reported. After saving,
+every cell is scanned again: a block-level hit deletes the file and exits 2.
+Exit 0 on success, 1 on unusable input, 2 when the privacy self-check fails. `--self-test` runs built-in cases.
 """
 from __future__ import annotations
 
 import os
 import sys
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import argparse  # noqa: E402
@@ -24,7 +32,7 @@ import re  # noqa: E402
 from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    EMAIL_RE, KNOWN_STATUSES, load_json, load_vocab,
+    KNOWN_STATUSES, PII_HEADER_RE, PII_KEY_RE, REDACTED, clean_text, load_json, load_vocab, mask_pii, pii_value_hits,
 )
 
 try:
@@ -48,12 +56,11 @@ FMT_INT = "#,##0"
 FMT_DEC = "#,##0.00"
 FMT_PCT_UNIT = '#,##0.00" %"'      # metric values already multiplied by 100
 FMT_SHARE = "0.0%"                 # shares stored in 0..1
-PLAN_STATUSES = ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]
+PLAN_STATUSES = ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]  # plan items and recommendation follow-up
 MAX_WIDTH, MIN_WIDTH = 60, 9
-PHONE_LOOSE_RE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?[\s\-]?5(?:[\s\-]?\d){8}(?!\d)")
-PII_KEY_RE = re.compile(
-    r"(?i)(^|[._\-])(phone|mobile|tel|telephone|email|e_mail|supervisor|supervisor_name|contact_phone|contact_no|"
-    r"contact_number|national_id|id_number|iban)($|[._\-])|جوال|هاتف|تواصل|المشرف|ايميل|إيميل|بريد|هوية")
+PII_KIND_AR = {"mobile": "رقم جوال", "landline": "رقم هاتف", "email": "بريد إلكتروني", "iban": "رقم حساب بنكي (IBAN)",
+               "national_id": "رقم من 10 خانات قد يكون رقم هوية"}
+_ORPHAN_BRACKET_RE = re.compile(r"\(\s*" + re.escape(REDACTED))
 TOKEN_RE = re.compile(r"\{\{\s*m:([A-Za-z0-9_\-]+)((?:\.[A-Za-z0-9_]+)*)\s*\}\}")
 MONEY_FIELDS = {"num", "den", "num_known_total", "prev_sum", "curr_sum", "abs_change", "total", "top_sum",
                 "a_sum", "b_sum", "value"}
@@ -73,6 +80,35 @@ KIND_AR = {"count": "عدّ", "sum": "مجموع", "ratio": "نسبة من مج�
            "concentration": "تركّز", "coverage": "تغطية بيانات"}
 SOURCE_TYPE_AR = {"file": "ملف", "web": "مصدر ويب", "user": "إفادة المستخدم"}
 LEVEL_AR = {"high": "مرتفع", "medium": "متوسط", "low": "منخفض", "strong": "قوي", "moderate": "متوسط", "weak": "ضعيف"}
+# Reconciliation of recorded totals (brief §4/§5.8) — same statuses and wording as validate_analysis.py (07.reconciliation)
+RECON_STATUS_AR = {
+    "match": "مطابق لمجموع السجلات ضمن النطاق",
+    "match_section": "مطابق لمجموع سجلات قسمه ضمن النطاق (إجمالي فرعي)",
+    "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
+    "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
+    "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
+    "mismatch": "فرق غير مفسَّر",
+    "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
+}
+# Version comparison (brief §12) — compare_versions.py output
+VC_CATEGORIES = [("new_period_performance", "أداء فترة جديدة"), ("scope_change", "تغير نطاق المحفظة"),
+                 ("valuation_change", "تغير التقييم"), ("data_correction", "تصحيح بيانات للفترة نفسها"),
+                 ("definition_change", "تغير تعريف أو تصنيف")]
+VC_SUBTYPE_AR = {
+    "new_period_value": "قيمة لفترة جديدة", "period_absent_in_new": "فترة غير موجودة في النسخة الجديدة",
+    "field_added": "قيمة أضيفت", "field_removed": "قيمة حُذفت", "status_changed": "تغيرت حالة القيمة",
+    "value_changed": "تغيرت القيمة", "name_changed": "تغير الاسم", "classification": "تغير التصنيف",
+    "absent_in_new": "غير موجود في النسخة الجديدة", "new_in_file": "جديد في الملف",
+    "new_valuation_year": "سنة تقييم جديدة", "valuation_added": "تقييم أضيف", "valuation_absent_in_new": "تقييم غير موجود",
+    "valuation_value_changed": "تغير تقييم السنة نفسها", "metric_added": "مؤشر جديد", "metric_removed": "مؤشر حُذف",
+    "metric_label": "تغير وصف مؤشر", "metric_definition": "تغير تعريف مؤشر", "config": "تغير إعداد عام",
+    "period_field": "تغير الحقل المعتمد للفترة", "period_comparability": "تغير حكم قابلية المقارنة",
+    "field_meta": "تغير وصف حقل",
+}
+VC_RELATION_AR = {"same_period": "الفترة نفسها — رفع نسخة أحدث ليس نموًا زمنيًا", "new_period": "فترة جديدة",
+                  "different": "فترتان افتراضيتان مختلفتان"}
+VC_CONF_AR = {"exact": "تامة", "deed": "بالصك", "probable": "محتملة"}
+FOLLOW_STYLE = {"منجز": (GREEN_FILL, GREEN_TXT), "قيد التنفيذ": (AMBER_FILL, AMBER_TXT), "متعثر": (AMBER_FILL, AMBER_TXT)}
 DIM_AR_DEFAULT = {"income_generation": "توليد الدخل", "income_stability": "استقرار الدخل",
                   "asset_utilization": "كفاءة استخدام الأصول", "data_quality": "جودة البيانات"}
 
@@ -93,18 +129,35 @@ def is_num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+class Privacy:
+    """Counters of what the export masked or dropped (printed after the build; values are never printed)."""
+    def __init__(self):
+        self.masked = 0
+        self.kinds = set()
+        self.fields_dropped = []
+
+    def reset(self):
+        self.__init__()
+
+
+PRIVACY = Privacy()
+
+
 def safe_text(x):
-    """Text for a cell; personal phone / e-mail patterns are masked."""
+    """Text for a cell. Block-level personal-data patterns (assets/pii_patterns.json: mobile and landline numbers in
+    any separator style, e-mail, IBAN; Arabic-Indic digits are matched after translation) are replaced by REDACTED.
+    Review-level hits (a 10-digit number that may be a deed) are kept; privacy_self_check reports them."""
     if x is None:
         return None
     if isinstance(x, (list, tuple)):
         x = "\n".join(str(i) for i in x if i is not None and str(i) != "")
     elif isinstance(x, dict):
         x = "؛ ".join(f"{k}: {v}" for k, v in x.items())
-    s = str(x)
-    if PHONE_LOOSE_RE.search(s.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))) or EMAIL_RE.search(s):
-        s = PHONE_LOOSE_RE.sub("[حُجب]", s)
-        s = EMAIL_RE.sub("[حُجب]", s)
+    s, kinds = mask_pii(str(x), ("block",))
+    if kinds:
+        PRIVACY.masked += 1
+        PRIVACY.kinds.update(kinds)
+        s = _ORPHAN_BRACKET_RE.sub(REDACTED, s)  # "(050) 123-4567" is matched from its first digit
     if s.startswith("="):
         s = "'" + s  # never let text become a formula
     return s
@@ -330,8 +383,21 @@ def status_cell(status, vocab):
     return C(lab, fill=fill, color=color)
 
 
+def unknown_text(tv, vocab):
+    """«غير متاح — نص في حقل رقمي: «6 محلات + 4 مكاتب»» — the status label plus the original cell text (brief §4: keep
+    the original value), so a reviewer sees what the file holds without opening it."""
+    s = tv.get("s")
+    lab = ((vocab.get("status") or {}).get(s) or {}).get("ar") or s or "غير متاح"
+    text = lab if s in ("not_available", "not_applicable") or lab == "غير متاح" else f"غير متاح — {lab}"
+    raw = tv.get("raw")
+    raw = clean_text(raw) if isinstance(raw, (str, int, float)) and not isinstance(raw, bool) else ""
+    if raw and s not in ("blank", "filler") and raw != lab:
+        text += f": «{raw if len(raw) <= 200 else raw[:200] + '…'}»"
+    return text
+
+
 def tv_cell(tv, vocab, fmt=None):
-    """Known -> number (or text); unknown -> gray text label, never a zero."""
+    """Known -> number (or text); unknown -> gray text label with the original text, never a zero."""
     if not isinstance(tv, dict):
         return C("غير موجود", fill=GRAY_FILL, color=GRAY_TXT)
     s, v = tv.get("s"), tv.get("v")
@@ -341,8 +407,7 @@ def tv_cell(tv, vocab, fmt=None):
         return C(v)
     if s == "value" and v is not None:
         return C(v)
-    lab = ((vocab.get("status") or {}).get(s) or {}).get("ar") or s or "غير متاح"
-    return C(f"غير متاح — {lab}", fill=GRAY_FILL, color=GRAY_TXT)
+    return C(unknown_text(tv, vocab), fill=GRAY_FILL, color=GRAY_TXT)
 
 
 def ar(vocab, dim, value):
@@ -390,18 +455,42 @@ class Export:
             self.vocab = load_vocab()
         except Exception:
             self.vocab = {}
-        self.pii_fields = set()
-        for src in self.mapping.get("sources") or []:
-            for col, spec in ((src or {}).get("columns") or {}).items():
-                if isinstance(spec, dict) and spec.get("kind") == "pii" and spec.get("field"):
-                    self.pii_fields.add(spec["field"])
+        self.pii_fields = self._pii_fields()
+        present = set(self.meta).union(*[set((r.get("fields") or {}).keys()) for r in self.records])
+        PRIVACY.fields_dropped = sorted(self.pii_fields & present)
         self.spec_by_id = {m.get("id"): m for m in self.config.get("metrics") or [] if isinstance(m, dict)}
+        self.vc_file = _opt(os.path.join(run_dir, "version_comparison.json"))
+
+    def _pii_fields(self) -> set:
+        """Fields never written: mapped as kind pii, a personal key (PII_KEY_RE), group/kind pii in field_meta, or a
+        text-like field whose label reads as personal (PII_HEADER_RE / PII_KEY_RE) unless its column says pii_ok."""
+        out, pii_ok = set(), set()
+        for src in self.mapping.get("sources") or []:
+            for spec in ((src or {}).get("columns") or {}).values():
+                if not isinstance(spec, dict) or not spec.get("field"):
+                    continue
+                if spec.get("kind") == "pii":
+                    out.add(spec["field"])
+                elif spec.get("pii_ok") is True:
+                    pii_ok.add(spec["field"])
+        fields = set(self.meta)
+        for r in self.records:
+            fields |= set((r.get("fields") or {}).keys())
+        for f in fields:
+            m = self.meta.get(f) or {}
+            label = str(m.get("label") or "")
+            if PII_KEY_RE.search(f) or m.get("group") == "pii" or m.get("kind") == "pii":
+                out.add(f)
+            elif f not in pii_ok and m.get("group") in (None, "text", "other", "pii") and \
+                    (PII_HEADER_RE.search(label) or PII_KEY_RE.search(label)):
+                out.add(f)
+        return out
 
     def r(self, x):
         return render_tokens(x, self.metrics)
 
     def allowed_field(self, f):
-        return f not in self.pii_fields and not PII_KEY_RE.search(f)
+        return f not in self.pii_fields
 
     # ----------------------------------------------------------------- sheets
     def build(self, out_path):
@@ -413,13 +502,17 @@ class Export:
         self.assets(wb)
         self.calculations(wb)
         self.exclusions(wb)
+        self.reconciliation(wb)
         self.issues(wb)
         self.gaps_recs(wb)
         self.plan(wb)
+        self.followup(wb)
+        self.versions(wb)
         self.assumptions_sources(wb)
         wb.active = 0
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         wb.save(out_path)
+        return [ws.title for ws in wb.worksheets]
 
     def _file_line(self):
         src = self.rec_doc.get("source") or {}
@@ -670,6 +763,118 @@ class Export:
         sh.table("tblExclusions", ["النوع", "البند", "الموضع", "السبب", "المؤشر المتأثر"], rows, freeze=True)
         sh.finish(fixed={2: 40, 4: 50, 5: 40})
 
+    def reconciliation_rows(self):
+        """Recorded totals (03 excluded_rows[].values) vs the sum of the records of the same source and field.
+
+        Same rules as validate_analysis.py: the full in-scope sum first, then the section above the total row (a
+        subtotal), then every record of the source (isolated/excluded included), then the sum without numbers that the
+        file stores as text (Excel's SUM skips them). Joined fields are not part of the source's own rows."""
+        entries = [e for e in self.rec_doc.get("excluded_rows") or []
+                   if isinstance(e, dict) and isinstance(e.get("values"), dict) and e["values"]]
+        if not entries:
+            return []
+        by_src = defaultdict(list)
+        for r in self.records:
+            by_src[(r.get("source") or {}).get("source_id")].append(r)
+        total_rows = defaultdict(list)
+        for e in entries:
+            if isinstance(e.get("row"), int):
+                total_rows[e.get("source_id")].append(e["row"])
+        out = []
+        for e in entries:
+            sid, sheet, row = e.get("source_id"), e.get("sheet"), e.get("row")
+            above = [x for x in total_rows.get(sid, []) if isinstance(row, int) and x < row]
+            lo = max(above) if above else None
+
+            def agg(field, in_scope_only, section):
+                s, n_known, n_unknown, s_text, ids = 0.0, 0, 0, 0.0, []
+                for r in by_src.get(sid, []):
+                    if in_scope_only and r.get("scope") != "in_scope":
+                        continue
+                    rr = (r.get("source") or {}).get("row")
+                    if section and not (isinstance(rr, int) and isinstance(row, int) and (lo is None or rr > lo) and rr < row):
+                        continue
+                    tv = (r.get("fields") or {}).get(field)
+                    tv = tv if isinstance(tv, dict) else {}
+                    if tv.get("joined_from"):
+                        continue
+                    if tv.get("s") in KNOWN_STATUSES and is_num(tv.get("v")):
+                        s += tv["v"]
+                        n_known += 1
+                        ids.append(r.get("id"))
+                        if isinstance(tv.get("raw"), str) and str(tv.get("note") or "").startswith("نص رقمي"):
+                            s_text += tv["v"]
+                    elif tv:
+                        n_unknown += 1
+                return round(s, 2), n_known, n_unknown, round(s_text, 2), ids
+            for field, tv in e["values"].items():
+                if not self.allowed_field(field):
+                    continue
+                tv = tv if isinstance(tv, dict) else {"v": tv, "s": "value" if is_num(tv) else "text", "raw": tv}
+                item = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row),
+                                    ("ref", tv.get("ref") or (f"{sheet}!{row}" if sheet else f"{sid}:{row}")),
+                                    ("field", field), ("reason", e.get("reason")), ("tv", tv)])
+                if tv.get("s") not in KNOWN_STATUSES or not is_num(tv.get("v")):
+                    item.update(recorded=None, status="recorded_unknown")
+                    out.append(item)
+                    continue
+                recorded = float(tv["v"])
+                tol = max(0.5, 1e-9 * abs(recorded))
+                full, sec = agg(field, True, False), agg(field, True, True)
+                all_rec, all_sec = agg(field, False, False), agg(field, False, True)
+                status, matched = "mismatch", None
+                for st, res in (("match", full), ("match_section", sec), ("match_all_records", all_rec),
+                                ("match_section_all_records", all_sec)):
+                    if res[1] and abs(recorded - res[0]) <= tol:
+                        status, matched = st, res[0]
+                        break
+                if status == "mismatch" and full[3] and abs(recorded - (full[0] - full[3])) <= tol:
+                    status, matched = "match_without_text_numbers", round(full[0] - full[3], 2)
+                item.update(recorded=recorded, sum_in_scope=full[0], n_known=full[1], n_unknown=full[2],
+                            ids=full[4], difference=round(recorded - full[0], 2), sum_all_records=all_rec[0],
+                            section_sum=sec[0] if lo is not None or sec[1] != full[1] else None,
+                            matched_sum=matched, status=status)
+                out.append(item)
+        return out
+
+    def reconciliation(self, wb):
+        items = self.reconciliation_rows()
+        if not items:
+            return
+        sh = Sheet(wb, "المطابقة مع الإجماليات", "مطابقة الإجماليات المدونة في الملف مع مجموع السجلات المؤهلة",
+                   "القيمة المدونة من صف الإجمالي المستبعد (03 excluded_rows)؛ المجموع من سجلات المصدر نفسه ضمن النطاق بقيم "
+                   "معروفة فقط (المجهول لا يُجمع صفرًا). الفرق = المدون − المجموع؛ الفرق غير المفسَّر يُذكر في مشكلات البيانات.")
+        rows = []
+        for it in items:
+            st = it["status"]
+            ok = st in ("match", "match_section", "match_all_records", "match_section_all_records")
+            fill, color = ((GREEN_FILL, GREEN_TXT) if ok else
+                           (GRAY_FILL, GRAY_TXT) if st == "recorded_unknown" else (AMBER_FILL, AMBER_TXT))
+            lab = (self.meta.get(it["field"]) or {}).get("label") or it["field"]
+            ids = it.get("ids") or []
+            known = it.get("recorded") is not None
+            rows.append([
+                it["source_id"], it["ref"], f"{lab} ({it['field']})",
+                C(it["recorded"], fmt=FMT_INT if float(it["recorded"]).is_integer() else FMT_DEC) if known
+                else C(unknown_text(it["tv"], self.vocab), fill=GRAY_FILL, color=GRAY_TXT),
+                C(it["sum_in_scope"], fmt=FMT_INT) if known else None,
+                it.get("n_known") if known else None, it.get("n_unknown") if known else None,
+                C(it["difference"], fmt=FMT_INT, fill=None if ok else AMBER_FILL, color=None if ok else AMBER_TXT)
+                if known else None,
+                C(it["section_sum"], fmt=FMT_INT) if known and it.get("section_sum") is not None else None,
+                C(it["sum_all_records"], fmt=FMT_INT) if known else None,
+                C(RECON_STATUS_AR[st], fill=fill, color=color),
+                "، ".join(ids[:40]) + ("…" if len(ids) > 40 else ""), it.get("reason"),
+            ])
+        sh.table("tblReconciliation", ["المصدر", "صف الإجمالي", "الحقل", "القيمة المدونة", "مجموع السجلات ضمن النطاق",
+                                       "قيم معروفة", "قيم غير معروفة", "الفرق (المدون − المجموع)", "مجموع سجلات القسم",
+                                       "مجموع كل سجلات المصدر", "النتيجة", "السجلات المجموعة", "سبب استبعاد الصف"],
+                 rows, freeze=True)
+        n_bad = sum(1 for it in items if it["status"] == "mismatch")
+        sh.note(f"بنود المطابقة: {len(items)}؛ فروق غير مفسَّرة: {n_bad}. «قيم غير معروفة» سجلات ضمن النطاق قيمتها في الحقل "
+                "غير متاحة، وقد تفسر جزءًا من الفرق.", ncols=8)
+        sh.finish(fixed={3: 34, 11: 40, 12: 30, 13: 40})
+
     def issues(self, wb):
         sh = Sheet(wb, "مشكلات البيانات", "سجل مشكلات البيانات (منفصل عن أداء المحفظة)",
                    "المصدر: فحص المصنف (01)، التطبيع (03)، أو ملاحظات المحلل (06). الخطورة تخص أثر المشكلة على الحساب، وليست حكمًا على الأصل.")
@@ -767,6 +972,182 @@ class Export:
         dv.add(f"H{first}:H{max(last, first) + 50}")
         sh.finish(fixed={4: 30, 5: 45, 6: 35, 10: 30})
 
+    # ------------------------------------------------- brief §12: versions and recommendation follow-up
+    def _cat_label(self, labels, key):
+        return (labels or {}).get(key) or dict(VC_CATEGORIES).get(key) or key
+
+    def _signal_lines(self, item, labels):
+        seen, out = set(), []
+        for sg in item.get("data_signals") or []:
+            if not isinstance(sg, dict):
+                continue
+            k = (sg.get("record_id"), sg.get("category"), sg.get("field"))
+            if k in seen:
+                continue
+            seen.add(k)
+            fld = sg.get("field")
+            fl = "الاسم" if fld == "name" else ((self.meta.get(fld) or {}).get("label") or fld) if fld else None
+            d = sg.get("delta")
+            out.append(f"{sg.get('record_id')}: {self._cat_label(labels, sg.get('category'))}" + (f" — {fl}" if fl else "") +
+                       (f" ({d:+,.0f})" if is_num(d) else ""))
+        return out
+
+    def followup(self, wb):
+        """«متابعة التوصيات»: one row per previous recommendation, status dropdown «لم يبدأ/قيد التنفيذ/منجز/متعثر»."""
+        items = [x for x in self.narrative.get("recommendation_followup") or [] if isinstance(x, dict)]
+        if not items:
+            return
+        sh = Sheet(wb, "متابعة التوصيات", "متابعة توصيات النسخة السابقة",
+                   "تُحدَّث الحالة («لم يبدأ» أو «قيد التنفيذ» أو «منجز» أو «متعثر») بما تثبته البيانات أو إفادة المستخدم فقط؛ "
+                   "تحسن رقم أو تغير في الملف لا يثبت تنفيذ التوصية. عمود «الحالة» قائمة منسدلة.")
+        recs = {x.get("id"): x for x in self.narrative.get("recommendations") or [] if isinstance(x, dict)}
+        labels = (self.narrative.get("version_comparison") or {}).get("category_labels") \
+            if isinstance(self.narrative.get("version_comparison"), dict) else None
+        rows = []
+        for it in items:
+            rec = recs.get(it.get("rec_id")) or {}
+            status = it.get("status")
+            ev = it.get("evidence")
+            has_ev = bool(ev) and not (isinstance(ev, str) and not ev.strip())
+            note = self.r(it.get("note")) or ""
+            if status in PLAN_STATUSES:
+                fill, color = FOLLOW_STYLE.get(status, (None, None))
+                if status == "منجز" and not has_ev:
+                    fill, color = AMBER_FILL, AMBER_TXT
+                    note = (note + "\n" if note else "") + "لا دليل مسجل — لا تُعد التوصية منجزة لمجرد تحسن رقم"
+                st_cell = C(status, fill=fill, color=color)
+            else:
+                st_cell = C(status or "—", fill=AMBER_FILL, color=AMBER_TXT)
+                note = (note + "\n" if note else "") + "الحالة خارج القائمة المعتمدة: " + "، ".join(PLAN_STATUSES)
+            title = it.get("title") or rec.get("title") or it.get("target") or rec.get("target")
+            rows.append([it.get("rec_id"), self.r(title), self.r(it.get("first_action") or rec.get("first_action")),
+                         st_cell, [self.r(x.get("ref") or x.get("text") or str(x)) if isinstance(x, dict) else self.r(x)
+                                   for x in ev] if isinstance(ev, list) and ev else
+                         (self.r(ev) if has_ev else C("لا يوجد دليل بعد", color=GRAY_TXT)),
+                         note, self._signal_lines(it, labels) or "—", None])
+        hr, first, last = sh.table("tblFollowup", ["التوصية", "العنوان أو الأصل", "الإجراء الأول", "الحالة", "الدليل",
+                                                   "ملاحظة", "إشارات من الملف (لا تثبت التنفيذ)", "تاريخ المتابعة"],
+                                   rows, freeze=True)
+        dv = DataValidation(type="list", formula1='"' + ",".join(PLAN_STATUSES) + '"', allow_blank=True,
+                            showErrorMessage=True, errorTitle="قيمة غير مسموحة",
+                            error="اختر: " + "، ".join(PLAN_STATUSES), promptTitle="الحالة", prompt="اختر حالة التوصية")
+        sh.ws.add_data_validation(dv)
+        dv.add(f"D{first}:D{max(last, first) + 50}")
+        sh.finish(fixed={2: 34, 3: 40, 5: 36, 6: 44, 7: 44})
+
+    def _vc_value(self, x, field=None):
+        if isinstance(x, dict) and ("s" in x or "v" in x):
+            return tv_cell(x, self.vocab)
+        if x is None:
+            return "—"
+        return x if is_num(x) else str(x)
+
+    def versions(self, wb):
+        """«مقارنة الإصدارات»: the five categories of compare_versions.py, matching notes and metric deltas."""
+        vc = self.narrative.get("version_comparison")
+        if not isinstance(vc, dict) or not vc:
+            return
+        lists_of = (lambda d: d.get("categories") if isinstance(d.get("categories"), dict)
+                    else d.get("changes") if isinstance(d.get("changes"), dict) else None)
+        full = self.vc_file if isinstance(self.vc_file, dict) else None
+        detail = vc if lists_of(vc) is not None else (full or vc)
+        from_file = detail is full and detail is not vc
+        labels = vc.get("category_labels") or (detail or {}).get("category_labels") or {}
+        sh = Sheet(wb, "مقارنة الإصدارات", "مقارنة بالنسخة السابقة (الموجّه §12)",
+                   "كل فرق في فئة واحدة. رفع نسخة أحدث من بيانات الفترة نفسها ليس نموًا، واختفاء سجل لا يعني بيعه."
+                   + (" التفاصيل من version_comparison.json في مجلد التشغيل." if from_file else ""))
+        get = (lambda k: vc.get(k) if vc.get(k) not in (None, "", [], {}) else (detail or {}).get(k))
+        pi, ci = get("prev") or {}, get("curr") or {}
+        mc = (get("matching") or {}).get("counts") or {}
+        ctx = []
+        if pi or ci:
+            ctx.append(("النسختان", f"{pi.get('source_file') or pi.get('data_period') or 'السابقة'} ← "
+                                     f"{ci.get('source_file') or ci.get('data_period') or 'الحالية'}"
+                        + (" (الملف نفسه بالبصمة)" if get("same_source_file") else "")))
+        if get("period_relation"):
+            ctx.append(("العلاقة بين الفترتين", VC_RELATION_AR.get(get("period_relation"), get("period_relation"))))
+        if get("new_periods"):
+            ctx.append(("فترات جديدة", "، ".join(map(str, get("new_periods")))))
+        if get("growth_note"):
+            ctx.append(("قراءة الفروق", get("growth_note")))
+        if mc:
+            ctx.append(("مطابقة السجلات", " · ".join(f"{VC_CONF_AR[k]} {mc[k]}" for k in VC_CONF_AR if is_num(mc.get(k))) +
+                        f" · في السابقة فقط {mc.get('only_prev', 0)} · في الجديدة فقط {mc.get('only_curr', 0)}"))
+        for k in ("summary", "summary_ar"):
+            if isinstance(vc.get(k), str) and vc[k].strip():
+                ctx.append(("ملخص المحلل", self.r(vc[k])))
+        if ctx:
+            sh.table("tblVersionContext", ["البند", "القيمة"], [[C(a, bold=True), b] for a, b in ctx], filters=False)
+        lists = lists_of(detail or {}) or {}
+        counts = get("counts") or {}
+        examples = [x for x in vc.get("examples") or [] if isinstance(x, dict)]
+        cat_rows = []
+        for key, _ in VC_CATEGORIES:
+            items = lists.get(key) if isinstance(lists.get(key), list) else None
+            n = counts.get(key) if is_num(counts.get(key)) else (len(items) if items is not None else
+                                                                   (sum(1 for x in examples if x.get("category") == key)
+                                                                    if examples else None))
+            cat_rows.append([self._cat_label(labels, key), n if n is not None else C("غير مذكور", color=GRAY_TXT), key])
+        sh.heading("الفئات الخمس")
+        sh.table("tblVersionCategories", ["الفئة", "عدد الفروق", "المفتاح"], cat_rows, filters=False)
+        rows = []
+        for key, _ in VC_CATEGORIES:
+            items = lists.get(key) if isinstance(lists.get(key), list) else [x for x in examples if x.get("category") == key]
+            for c in items:
+                if not isinstance(c, dict):
+                    continue
+                fld = c.get("field")
+                fl = ("الاسم" if fld == "name" else (self.meta.get(fld) or {}).get("label") or fld) if fld else c.get("key")
+                if fld == "name":
+                    pv, cv = c.get("prev_name") or "—", c.get("curr_name") or "—"
+                elif "prev_value" in c or "curr_value" in c:
+                    pv, cv = self._vc_value(c.get("prev_value")), self._vc_value(c.get("curr_value"))
+                else:
+                    pv, cv = self._vc_value(c.get("prev")), self._vc_value(c.get("curr"))
+                rows.append([self._cat_label(labels, key), VC_SUBTYPE_AR.get(c.get("subtype"), c.get("subtype")),
+                             c.get("record_id_prev") or "—", c.get("record_id_curr") or "—", c.get("name"), fl, pv, cv,
+                             C(c["delta"], fmt=FMT_INT if float(c["delta"]).is_integer() else FMT_DEC) if is_num(c.get("delta")) else None,
+                             VC_CONF_AR.get(c.get("match_confidence"), c.get("match_confidence")), self.r(c.get("note"))])
+        sh.heading("الفروق")
+        sh.table("tblVersionChanges", ["الفئة", "النوع", "المعرّف السابق", "المعرّف الحالي", "الاسم", "الحقل أو البند",
+                                       "السابق", "الحالي", "الفرق", "المطابقة", "ملاحظة"], rows, freeze=None)
+        m = get("matching") or {}
+        rows = []
+        for x in m.get("id_conflicts") or vc.get("id_conflicts") or []:
+            if isinstance(x, dict):
+                res = [f"السابق ← {x['prev_matched_to']}" if x.get("prev_matched_to") else None,
+                       f"الحالي ← {x['curr_matched_from']}" if x.get("curr_matched_from") else None]
+                rows.append(["تعارض معرّف", x.get("id"), "—", f"{x.get('prev_name') or '—'} ← {x.get('curr_name') or '—'}",
+                             x.get("note"), "؛ ".join(r for r in res if r) or "لم يُطابق"])
+        for x in m.get("ambiguous") or vc.get("ambiguous") or []:
+            if isinstance(x, dict):
+                rows.append(["حالة غامضة", "، ".join(x.get("prev_ids") or []), "، ".join(x.get("curr_ids") or []), None,
+                             x.get("note"), "تحتاج تحققًا يدويًا"])
+        if rows:
+            sh.heading("ما يحتاج مراجعة يدوية في المطابقة")
+            sh.table("tblVersionReview", ["النوع", "المعرّف السابق", "المعرّف الحالي", "الاسم", "ملاحظة", "النتيجة"], rows,
+                     filters=False)
+        rows = []
+        for x in get("metric_deltas") or []:
+            if not isinstance(x, dict):
+                continue
+            af = x.get("affected_by") or {}
+            unit = x.get("unit")
+
+            def mv(v, st):
+                return C(v, fmt=unit_fmt(unit)) if is_num(v) else status_cell(st, self.vocab)
+            rows.append([x.get("label") or x.get("id"), x.get("prev_period"), x.get("curr_period"),
+                         mv(x.get("prev_value"), x.get("prev_status")), mv(x.get("curr_value"), x.get("curr_status")),
+                         C(x["difference"], fmt=unit_fmt(unit)) if is_num(x.get("difference")) else None,
+                         UNIT_AR.get(unit, unit),
+                         "؛ ".join(f"{self._cat_label(labels, k)} ({len(v) if isinstance(v, list) else v})" for k, v in af.items()) or "—",
+                         x.get("definition_causes") or "—", x.get("note")])
+        if rows:
+            sh.heading("فروق المؤشرات بين النسختين")
+            sh.table("tblMetricDeltas", ["المؤشر", "الفترة السابقة", "الفترة الحالية", "السابق", "الحالي", "الفرق", "الوحدة",
+                                         "يتأثر بـ (عدد السجلات)", "تغير التعريف", "ملاحظة"], rows)
+        sh.finish(fixed={1: 24, 5: 30, 6: 30, 11: 44}, print_titles=False)
+
     def assumptions_sources(self, wb):
         sh = Sheet(wb, "الافتراضات والمصادر", "الافتراضات والمصادر والأسئلة وطلبات البيانات",
                    "يميّز المرفق بين المعلومة الواردة بالملف، والحساب المشتق، والاستنتاج التحليلي، وافتراض السيناريو.")
@@ -819,26 +1200,212 @@ class Export:
         sh.finish(fixed={2: 60, 3: 30, 4: 40}, print_titles=False)
 
 
+def privacy_self_check(path: str):
+    """Scan every cell of the saved workbook: text cells, and numbers under a personal-data header (a phone stored as a
+    number). Other numbers are amounts or deed numbers — a 9-digit amount would look like a mobile number.
+    Returns (block_hits, review_hits) as lists of (sheet, cell, kinds); values are never returned."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True)
+    block, review = [], []
+    try:
+        for ws in wb.worksheets:
+            above = {}
+            for row in ws.iter_rows():
+                for c in row:
+                    v = getattr(c, "value", None)
+                    if v is None or isinstance(v, bool):
+                        continue
+                    col = getattr(c, "column", None)
+                    if isinstance(v, (int, float)):
+                        if not PII_HEADER_RE.search(above.get(col, "")):
+                            continue
+                        t = str(int(v)) if float(v).is_integer() else str(v)
+                    elif isinstance(v, str):
+                        t = v
+                        above[col] = v
+                    else:
+                        continue
+                    kb = pii_value_hits(t, ("block",))
+                    if kb:
+                        block.append((ws.title, c.coordinate, kb))
+                    kr = pii_value_hits(t, ("review",))
+                    if kr:
+                        review.append((ws.title, c.coordinate, kr))
+    finally:
+        wb.close()
+    return block, review
+
+
+def _kinds_ar(hits):
+    return "، ".join(sorted({PII_KIND_AR.get(k, k) for _s, _c, ks in hits for k in ks}))
+
+
+def _refs(hits, n=10):
+    return "، ".join(f"«{s}»!{c}" for s, c, _k in hits[:n]) + ("…" if len(hits) > n else "")
+
+
+def export(run_dir: str, out: str) -> int:
+    """Build, save and privacy-check the workbook. 0 = written; 2 = personal data found after saving (file deleted)."""
+    PRIVACY.reset()
+    exp = Export(run_dir)
+    sheets = exp.build(out)
+    block, review = privacy_self_check(out)
+    if block:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+        print(f"خطأ خصوصية: بعد الحفظ وُجد ما يشبه {_kinds_ar(block)} في {len(block)} خلية ({_refs(block)})؛ حُذف الملف "
+              "ولم يُسلَّم. أزل مصدر هذه البيانات (عمود شخصي أو نص حر) ثم أعد التصدير.", file=sys.stderr)
+        return 2
+    n = exp.narrative
+    print(f"تم: {out}")
+    print(f"  الأوراق ({len(sheets)}): " + "، ".join(sheets))
+    print(f"  السجلات {len(exp.records)} · المؤشرات {len(exp.metrics)} · الفجوات/التوصيات "
+          f"{len(n.get('gaps') or [])}/{len(n.get('recommendations') or [])}")
+    if PRIVACY.fields_dropped:
+        print(f"  خصوصية: أُسقطت {len(PRIVACY.fields_dropped)} من الحقول الشخصية: " + "، ".join(PRIVACY.fields_dropped))
+    if PRIVACY.masked:
+        print(f"  خصوصية: حُجبت بيانات شخصية ({'، '.join(sorted(PII_KIND_AR.get(k, k) for k in PRIVACY.kinds))}) "
+              f"في {PRIVACY.masked} نصًا")
+    if review:
+        print(f"  تنبيه خصوصية: {len(review)} خلية تحوي {PII_KIND_AR['national_id']} أو صكًا ({_refs(review, 6)})؛ "
+              "راجعها واحذف أي رقم هوية شخصية", file=sys.stderr)
+    print("  فحص الخصوصية بعد الحفظ: لا بيانات اتصال أو حسابات بنكية في الخلايا")
+    if exp.narrative_missing:
+        print("  تنبيه: لا يوجد 06_narrative.json؛ أقسام السرد فارغة")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Self-test (fictional data only; run by tests/run_tests.sh or by hand)
+# ---------------------------------------------------------------------------
+def _st_tv(v, s="value", raw=None, ref=None):
+    return {"v": v, "s": s, "raw": raw if raw is not None else (None if v is None else str(v)), "ref": ref}
+
+
+def _st_write(d, name, data):
+    import json
+    with open(os.path.join(d, name), "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False)
+
+
+def _st_run(d):
+    contact = "للتواصل: (050) 123-4567 أو 011-4567890 أو ٠٥٠١٢٣٤٥٦٧ أو +966 11 456 7890 أو someone@example.com"
+    meta = {"rev.2025.excl_vat": {"label": "الإيراد 2025", "group": "revenue", "period": "2025", "vat": "excl"},
+            "units": {"label": "عدد الوحدات", "group": "other"}, "notes": {"label": "ملاحظات", "group": "text"},
+            "tenant_label": {"label": "اسم المستأجر", "group": "text"}, "supervisor_mobile": {"label": "جوال", "group": "text"}}
+
+    def rec(rid, row, rev, scope="in_scope", src="T", **f):
+        fields = {"rev.2025.excl_vat": _st_tv(rev, ref=f"S!C{row}")}
+        fields.update(f)
+        return {"id": rid, "name": f"عمارة تجريبية {rid}", "record_type": "asset", "scope": scope, "dims": {},
+                "source": {"source_id": src, "sheet": "S", "row": row}, "fields": fields}
+    records = [
+        rec("T-1", 2, 100000, units=_st_tv(None, "text", "6 محلات + 4 مكاتب"), notes=_st_tv(contact),
+            tenant_label=_st_tv("مستأجر وهمي"), supervisor_mobile=_st_tv("0509876543")),
+        rec("T-2", 3, 50000), rec("T-3", 4, 25000, scope="isolated"), rec("U-1", 2, 10, src="U"),
+    ]
+    excluded = [{"source_id": "T", "sheet": "S", "row": 5, "reason": "صف إجمالي",
+                 "values": {"rev.2025.excl_vat": _st_tv(150000, ref="S!C5")}},
+                {"source_id": "U", "sheet": "S2", "row": 3, "reason": "صف إجمالي",
+                 "values": {"rev.2025.excl_vat": _st_tv(12, ref="S2!C3")}}]
+    _st_write(d, "03_records.json", {"contract_version": "1.0", "source": {"file": "t.xlsx"}, "field_meta": meta,
+                                     "records": records, "excluded_rows": excluded, "issues": [],
+                                     "stats": {"records": 4}})
+    _st_write(d, "05_metrics.json", {"metrics": {}})
+    vc = {"prev": {"source_file": "old.xlsx"}, "curr": {"source_file": "t.xlsx"}, "period_relation": "same_period",
+          "counts": {"scope_change": 1, "data_correction": 1},
+          "category_labels": dict(VC_CATEGORIES),
+          "categories": {"scope_change": [{"category": "scope_change", "subtype": "absent_in_new", "record_id_prev": "T-9",
+                                           "record_id_curr": None, "name": "أرض تجريبية", "note": "غير موجود في النسخة الجديدة"}],
+                         "data_correction": [{"category": "data_correction", "subtype": "value_changed", "record_id_prev": "T-1",
+                                              "record_id_curr": "T-1", "name": "عمارة تجريبية", "field": "rev.2025.excl_vat",
+                                              "prev": _st_tv(90000), "curr": _st_tv(100000), "delta": 10000,
+                                              "match_confidence": "exact", "note": "تصحيح"}]},
+          "matching": {"counts": {"exact": 3, "deed": 0, "probable": 0, "only_prev": 1, "only_curr": 0},
+                       "id_conflicts": [], "ambiguous": []},
+          "metric_deltas": [{"id": "property_revenue", "label": "الإيرادات العقارية", "prev_value": 140000,
+                             "curr_value": 150000, "difference": 10000, "unit": "SAR",
+                             "affected_by": {"data_correction": ["T-1"]}, "definition_causes": [], "note": "ليس نموًا"}]}
+    _st_write(d, "06_narrative.json", {
+        "recommendations": [{"id": "R1", "target": "T-1", "first_action": "تحقق من العقد"}],
+        "recommendation_followup": [
+            {"rec_id": "R1", "status": "لم يبدأ", "evidence": [], "note": "حالة افتراضية",
+             "data_signals": [{"record_id": "T-1", "category": "data_correction", "field": "rev.2025.excl_vat", "delta": 10000},
+                              {"record_id": "T-1", "category": "data_correction", "field": "rev.2025.excl_vat", "delta": 10000}]},
+            {"rec_id": "R2", "status": "منجز", "evidence": None}],
+        "version_comparison": vc})
+
+
+def self_test() -> int:
+    import tempfile
+    import openpyxl
+    fails = []
+
+    def check(name, ok, detail=""):
+        print(("  PASS  " if ok else "  FAIL  ") + name + ("" if ok else f" — {detail}"))
+        if not ok:
+            fails.append(name)
+    with tempfile.TemporaryDirectory() as d:
+        _st_run(d)
+        out = os.path.join(d, "supporting_workbook.xlsx")
+        rc = export(d, out)
+        check("export exits 0", rc == 0 and os.path.isfile(out), rc)
+        if rc == 0:
+            wb = openpyxl.load_workbook(out)
+            texts = [str(c.value) for ws in wb.worksheets for row in ws.iter_rows() for c in row if c.value is not None]
+            blob = "\n".join(texts)
+            block, _review = privacy_self_check(out)
+            check("D1 no phone/landline/e-mail in any cell (separators, Arabic-Indic digits)", not block, block)
+            check("D1 personal columns dropped (key and label)",
+                  "مستأجر وهمي" not in blob and "0509876543" not in blob and "supervisor_mobile" not in blob, "")
+            check("D11 original text of a text-in-numeric cell shown", "«6 محلات + 4 مكاتب»" in blob, "")
+            for name in ("المطابقة مع الإجماليات", "متابعة التوصيات", "مقارنة الإصدارات"):
+                check(f"sheet «{name}» present", name in wb.sheetnames, wb.sheetnames)
+            if "المطابقة مع الإجماليات" in wb.sheetnames:
+                ws = wb["المطابقة مع الإجماليات"]
+                got = {(r[0], r[10]): r[7] for r in ws.iter_rows(min_row=5, values_only=True) if r[0] in ("T", "U")}
+                check("A14 reconciliation: T matches 150,000 in scope; U differs by 2",
+                      got == {("T", RECON_STATUS_AR["match"]): 0, ("U", RECON_STATUS_AR["mismatch"]): 2}, got)
+            if "متابعة التوصيات" in wb.sheetnames:
+                ws = wb["متابعة التوصيات"]
+                dvs = [dv.formula1 for dv in ws.data_validations.dataValidation]
+                check("§12 follow-up status dropdown uses «لم يبدأ/قيد التنفيذ/منجز/متعثر»",
+                      any(all(s in (f or "") for s in PLAN_STATUSES) for f in dvs), dvs)
+                cells = [str(c.value) for row in ws.iter_rows() for c in row if c.value is not None]
+                check("§12 «منجز» without evidence is flagged", any("لا دليل مسجل" in c for c in cells), "")
+                check("D7 follow-up data signals de-duplicated", sum(c.count("T-1:") for c in cells) == 1, cells)
+            wb.close()
+        # C24: anything that slips past the masking is caught after saving; the file is deleted and the exit is 2
+        global mask_pii
+        real = mask_pii
+        mask_pii = lambda v, levels=("block",): (str(v), [])  # noqa: E731
+        try:
+            rc = export(d, out)
+        finally:
+            mask_pii = real
+        check("C24 self-check: unmasked phone -> exit 2 and no file", rc == 2 and not os.path.exists(out), rc)
+    print("RESULT:", "FAIL" if fails else "PASS")
+    return 1 if fails else 0
+
+
 def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if "--self-test" in argv:
+        return self_test()
     ap = argparse.ArgumentParser(description="تصدير المرفق الداعم (supporting_workbook.xlsx) لمجلد تشغيل")
     ap.add_argument("--run-dir", required=True, help="مجلد التشغيل")
     ap.add_argument("--out", help="مسار الملف الناتج (الافتراضي RUN/supporting_workbook.xlsx)")
+    ap.add_argument("--self-test", action="store_true", help="تشغيل حالات الاختبار المضمنة (بيانات وهمية)")
     args = ap.parse_args(argv)
     for f in ("03_records.json", "05_metrics.json"):
         if not os.path.isfile(os.path.join(args.run_dir, f)):
             print(f"خطأ: الملف {f} غير موجود في {args.run_dir}", file=sys.stderr)
             return 1
     out = args.out or os.path.join(args.run_dir, "supporting_workbook.xlsx")
-    exp = Export(args.run_dir)
-    exp.build(out)
-    n = exp.narrative
-    print(f"تم: {out}")
-    print(f"  الأوراق: ملخص، الأصول ({len(exp.records)} سجل)، الحسابات ({len(exp.metrics)} مؤشر)، المستبعدات، "
-          f"مشكلات البيانات، الفجوات والتوصيات ({len(n.get('gaps') or [])}/{len(n.get('recommendations') or [])})، "
-          "الخطة التشغيلية، الافتراضات والمصادر")
-    if exp.narrative_missing:
-        print("  تنبيه: لا يوجد 06_narrative.json؛ أقسام السرد فارغة")
-    return 0
+    return export(args.run_dir, out)
 
 
 if __name__ == "__main__":
