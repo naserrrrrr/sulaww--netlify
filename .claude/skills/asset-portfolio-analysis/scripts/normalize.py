@@ -8,7 +8,19 @@ Implements data-contract.md §3–§4: typed values (TV) with source references,
 zero/blank/unknown statuses, derived fields, dimension rules, per-record overrides and
 automatic data-quality issues (DQ-xxx). The workbook is opened read-only and never
 modified. Personal-data columns are dropped (only counted).
-Exit codes: 0 ok, 2 invalid mapping / unreadable input.
+
+Row handling (every source):
+  * rows whose mapped cells are all blank/filler are skipped and counted (issue blank_rows_skipped);
+  * a row skipped by skip_if_blank that still holds mapped content is reported (row_skipped_with_content)
+    and listed in excluded_rows — never dropped silently;
+  * total/subtotal rows (label in any mapped text cell, SUBTOTAL/SUM-range formula, or row kind total* in
+    RUN/01_workbook_map.json) never become records unless 02_mapping.json/records overrides them; they are
+    listed in excluded_rows with their numeric values (excluded_rows[].values) for reconciliation;
+  * name/id cells inside a vertical merge read the merge anchor (source.merge_note).
+Sources with "join" merge their fields into the records of another source through a confirmed link;
+unmatched rows become isolated records. Controlled dimensions (use, income_nature, ownership, waqf,
+managed_for_others) only hold values from assets/vocab.json.
+Exit codes: 0 ok, 2 invalid mapping / unreadable input / a source that yields no rows.
 """
 from __future__ import annotations
 
@@ -20,24 +32,47 @@ import sys
 import warnings
 from collections import OrderedDict
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from apa_common import (  # noqa: E402
-    ALL_STATUSES, CONTRACT_VERSION, EMAIL_RE, KNOWN_STATUSES, PII_HEADER_RE, S_BLANK, S_DERIVED,
-    S_ERROR, S_FILLER, S_NOT_AVAILABLE, S_TEXT, S_VALUE, S_ZERO_AS_MISSING, S_ZERO_CONFIRMED,
-    S_ZERO_RECORDED, SKILL_DIR, clean_text, is_filler, load_json, looks_like_phone, name_key,
-    normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
+    ALL_STATUSES, CONTRACT_VERSION, EMAIL_RE, EXCEL_ERRORS, INCOME_NATURES, KNOWN_STATUSES, NA_TOKENS,
+    NOT_APPLICABLE_TOKENS, OWNERSHIP_KINDS, PII_HEADER_RE, S_BLANK, S_DERIVED, S_ERROR, S_FILLER,
+    S_NOT_APPLICABLE, S_NOT_AVAILABLE, S_TEXT, S_VALUE, S_ZERO_AS_MISSING, S_ZERO_CONFIRMED, S_ZERO_RECORDED,
+    SKILL_DIR, USES, WAQF_VALUES, clean_text, is_filler, is_total_label, load_json, load_vocab,
+    looks_like_phone, name_key, normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
 )
+import formula_eval  # noqa: E402
 
 NUMERIC_KINDS = ("money", "number", "area", "count", "percent")
+AMOUNT_KINDS = ("money", "area", "count")       # a '%' here is never an amount
 TEXT_KINDS = ("text", "url")
 LIST_DIMS = ("ownership",)
 DEFAULT_DIMS = OrderedDict([("use", "unknown"), ("income_nature", "unknown"),
                             ("ownership", ["unknown"]), ("waqf", "unknown")])
-TOTAL_RE = re.compile(r"(?<!\w)(المجموع|مجموع|الاجمالي|اجمالي|الاجماليات|total|subtotal|grand total)(?!\w)",
-                      re.IGNORECASE)
+CONTROLLED_DIMS = ("use", "income_nature", "ownership", "waqf", "managed_for_others")
+TOTAL_ROW_KINDS = ("total", "total_formula", "total_label")
+ROW_KIND_AR = {"total": "إجمالي", "total_formula": "إجمالي بصيغة", "total_label": "إجمالي مدوّن"}
+DECISION_SCOPE = {"primary": "in_scope", "supplementary": "in_scope", "isolated": "isolated", "excluded": "excluded"}
+SEV_RANK = {"high": 0, "medium": 1, "low": 2, "info": 3}
+TOTAL_WORD_RE = re.compile(r"(اجمالي|مجموع|جمله|المجمل|subtotal|total|(?<![a-z])sum(?![a-z]))", re.IGNORECASE)
 VAL_RE = re.compile(r"^val\.([^.]+)\.(total|land|building)$")
 MAX_REFS_IN_WHERE = 30
+_NA_NORM = frozenset(normalize_arabic(t) for t in NA_TOKENS)
+_NOT_APPL_NORM = frozenset(normalize_arabic(t) for t in NOT_APPLICABLE_TOKENS)
+
+
+def _vocab_keys() -> dict:
+    try:
+        v = load_vocab()
+        out = {d: tuple(v[d]) for d in ("use", "income_nature", "ownership", "waqf")}
+    except Exception:  # pragma: no cover - vocab.json ships with the skill
+        out = {"use": USES, "income_nature": INCOME_NATURES, "ownership": OWNERSHIP_KINDS, "waqf": WAQF_VALUES}
+    out["managed_for_others"] = (True, False)
+    return out
+
+
+VOCAB = _vocab_keys()
 
 
 def eprint(*a):
@@ -79,6 +114,8 @@ def _arabic_error(err) -> str:
         return f"القيمة {err.instance!r} أقل من الحد الأدنى {err.validator_value}"
     if v == "propertyNames":
         return f"اسم مفتاح غير صالح: {err.instance!r}"
+    if v in ("anyOf", "oneOf"):
+        return "القيمة لا تطابق أيًا من الصيغ المسموحة لهذا المفتاح"
     return f"لا يطابق المخطط ({v}): {err.message}"
 
 
@@ -87,11 +124,11 @@ def schema_errors(instance, schema_path: str) -> list:
         from jsonschema import Draft202012Validator
     except Exception:  # pragma: no cover - jsonschema is expected to be installed
         eprint("تحذير: مكتبة jsonschema غير مثبتة؛ تُجرى فحوص أساسية فقط.")
-        errs = []
-        for k in ("contract_version", "sources", "field_meta"):
-            if k not in instance:
-                errs.append(f"• المسار (الجذر): الحقل المطلوب «{k}» مفقود")
-        return errs
+        try:
+            required = load_json(schema_path).get("required") or []
+        except Exception:
+            required = []
+        return [f"• المسار (الجذر): الحقل المطلوب «{k}» مفقود" for k in required if k not in instance]
     schema = load_json(schema_path)
     validator = Draft202012Validator(schema)
     out = []
@@ -99,6 +136,80 @@ def schema_errors(instance, schema_path: str) -> list:
         path = "/".join(str(p) for p in e.absolute_path) or "(الجذر)"
         out.append(f"• المسار {path}: {_arabic_error(e)}")
     return out
+
+
+def _dim_literal_ok(dim: str, v, allow_null: bool = False) -> bool:
+    """A literal dimension value written in 02_mapping.json (dim_rules map/default, records dims)."""
+    if v is None:
+        return allow_null
+    allowed = VOCAB[dim]
+    if dim == "managed_for_others":
+        return isinstance(v, bool)
+    if dim in LIST_DIMS:
+        items = v if isinstance(v, list) else [v]
+        return bool(items) and all(isinstance(x, str) and x in allowed for x in items)
+    return isinstance(v, str) and v in allowed
+
+
+def _vocab_text(dim: str) -> str:
+    return "true، false" if dim == "managed_for_others" else "، ".join(VOCAB[dim])
+
+
+def semantic_errors(mapping: dict) -> list:
+    """Checks the schema cannot express. Each entry is an Arabic message line."""
+    errs = []
+    for i, rule in enumerate(mapping.get("dim_rules") or []):
+        dim = rule.get("dim")
+        if dim not in CONTROLLED_DIMS:
+            continue
+        for k, v in (rule.get("map") or {}).items():
+            if not _dim_literal_ok(dim, v):
+                errs.append(f"• dim_rules/{i}/map/«{k}»: القيمة {v!r} خارج مفردات البعد «{dim}» "
+                            f"(assets/vocab.json)؛ المسموح: {_vocab_text(dim)}")
+        if "default" in rule and not _dim_literal_ok(dim, rule["default"], allow_null=(dim == "managed_for_others")):
+            errs.append(f"• dim_rules/{i}/default: القيمة {rule['default']!r} خارج مفردات البعد «{dim}»؛ "
+                        f"المسموح: {_vocab_text(dim)} (استخدم \"unknown\" لغير المحدد)")
+    for rid, ov in (mapping.get("records") or {}).items():
+        for dim, v in ((ov or {}).get("dims") or {}).items():
+            if dim in CONTROLLED_DIMS and not _dim_literal_ok(dim, v, allow_null=(dim == "managed_for_others")):
+                errs.append(f"• records/{rid}/dims/{dim}: القيمة {v!r} خارج مفردات البعد؛ المسموح: {_vocab_text(dim)}")
+    sources = mapping.get("sources") or []
+    by_id = {s.get("id"): s for s in sources}
+    links = mapping.get("links") or []
+    for s in sources:
+        sid = s.get("id")
+        dr = s.get("data_rows") or {}
+        a, b = dr.get("from"), dr.get("to")
+        if isinstance(a, int) and isinstance(b, int) and a > b:
+            errs.append(f"• sources/{sid}/data_rows: بداية النطاق ({a}) بعد نهايته ({b})؛ صحّح from وto")
+        j = s.get("join")
+        if not j:
+            continue
+        into = by_id.get(j.get("into"))
+        if into is None or j.get("into") == sid:
+            errs.append(f"• sources/{sid}/join/into: المصدر الهدف «{j.get('into')}» غير موجود في sources (أو هو المصدر نفسه)")
+        elif into.get("join"):
+            errs.append(f"• sources/{sid}/join/into: المصدر الهدف «{j.get('into')}» مصدر ربط أيضًا؛ الربط يكون إلى مصدر سجلات فقط")
+        else:
+            on = j.get("on")
+            if on == "id" and not (into.get("id_rule") or {}).get("column"):
+                errs.append(f"• sources/{sid}/join/on: الربط بالمعرّف يتطلب id_rule.column في المصدر «{into['id']}»")
+            if on == "name_key" and not into.get("name_column"):
+                errs.append(f"• sources/{sid}/join/on: الربط بالاسم يتطلب name_column في المصدر «{into['id']}»")
+            if on == "deed" and not any((c.get("field") or "") == "deed_no" or (c.get("field") or "").startswith("deed_no.")
+                                        for c in (into.get("columns") or {}).values()):
+                errs.append(f"• sources/{sid}/join/on: الربط بالصك يتطلب حقل deed_no في المصدر «{into['id']}»")
+        if j.get("key_column") and j.get("key_column") in (s.get("columns") or {}) and \
+                (s["columns"][j["key_column"]] or {}).get("kind") == "pii":
+            errs.append(f"• sources/{sid}/join/key_column: عمود المفتاح «{j['key_column']}» معلَّم بيانات شخصية")
+        link = [lk for lk in links if lk.get("id") == j.get("link_id")]
+        if not link:
+            errs.append(f"• sources/{sid}/join/link_id: لا يوجد في links[] رابط بالمعرّف «{j.get('link_id')}»؛ "
+                        "لا تُنقل أرقام من ورقة أخرى إلا عبر رابط مؤكد")
+        elif not any(lk.get("status") == "confirmed" or lk.get("match") == "confirmed" for lk in link):
+            errs.append(f"• sources/{sid}/join/link_id: الرابط «{j.get('link_id')}» غير مؤكد؛ يلزم \"status\": \"confirmed\" "
+                        "بدليل مطابقة (معرّف أو صك) قبل دمج بيانات المصدر")
+    return errs
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +248,35 @@ def col_index(col: str) -> int:
     for ch in col:
         n = n * 26 + (ord(ch) - 64)
     return n
+
+
+def col_letter(n: int) -> str:
+    return formula_eval.idx_to_col(n)
+
+
+def cell_at(ws, r: int, c: int):
+    """The cell object at (r, c) without creating it (openpyxl creates cells on ws[...] access)."""
+    cells = getattr(ws, "_cells", None)
+    if cells is not None:
+        return cells.get((r, c))
+    return ws.cell(row=r, column=c)
+
+
+def cell_val(ws, r: int, c: int):
+    cell = cell_at(ws, r, c)
+    return None if cell is None else cell.value
+
+
+def is_na_token(v) -> bool:
+    return isinstance(v, str) and normalize_arabic(v) in _NA_NORM
+
+
+def is_not_applicable_token(v) -> bool:
+    return isinstance(v, str) and normalize_arabic(v) in _NOT_APPL_NORM
+
+
+def is_blankish(v) -> bool:
+    return v is None or is_filler(v)
 
 
 def group_of(field: str, meta: dict) -> str:
@@ -188,6 +328,43 @@ def join_refs(refs: list) -> str:
     return ", ".join(refs)
 
 
+def rows_text(rows: list) -> str:
+    """[3,4,5,9] -> '3–5، 9'"""
+    rows = sorted(set(rows))
+    out, i = [], 0
+    while i < len(rows):
+        j = i
+        while j + 1 < len(rows) and rows[j + 1] == rows[j] + 1:
+            j += 1
+        out.append(str(rows[i]) if i == j else f"{rows[i]}–{rows[j]}")
+        i = j + 1
+    if len(out) > 12:
+        return "، ".join(out[:12]) + f"، … (+{len(out) - 12})"
+    return "، ".join(out)
+
+
+_COUNT_FORMS = {  # one, two, 3–10, 11–99, hundreds (100, 101, 102 …)
+    "row": ("صف واحد", "صفّان", "صفوف", "صفًا", "صف"),
+    "record": ("سجل واحد", "سجلان", "سجلات", "سجلًا", "سجل"),
+    "value": ("قيمة واحدة", "قيمتان", "قيم", "قيمة", "قيمة"),
+}
+
+
+def count_ar(n: int, noun: str) -> str:
+    """Arabic number–noun agreement: 1 → «سجل واحد»، 2 → «سجلان»، 3–10 → «5 سجلات»، 11–99 → «12 سجلًا»، 100 → «100 سجل»."""
+    one, two, few, many, hundred = _COUNT_FORMS[noun]
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    r = n % 100
+    if 3 <= r <= 10:
+        return f"{n} {few}"
+    if r >= 11:
+        return f"{n} {many}"
+    return f"{n} {hundred}"
+
+
 def fmt(x) -> str:
     if x is None:
         return "—"
@@ -196,38 +373,99 @@ def fmt(x) -> str:
     return f"{int(x):,}"
 
 
+def unknown_of(dim: str):
+    if dim in LIST_DIMS:
+        return ["unknown"]
+    if dim == "managed_for_others":
+        return None
+    return "unknown"
+
+
+def is_unknown_dim(v) -> bool:
+    return v is None or v == "unknown" or v == ["unknown"] or v == []
+
+
+def coerce_dim(dim: str, v):
+    """Value read from a cell for a controlled dimension -> (vocab value, ok)."""
+    if dim == "managed_for_others":
+        if isinstance(v, bool):
+            return v, True
+        t = clean_text(raw_str(v)).lower()
+        if t in ("true", "false"):
+            return t == "true", True
+        return None, False
+    allowed = VOCAB[dim]
+    if dim in LIST_DIMS:
+        parts = [clean_text(p).lower() for p in re.split(r"\s*[,،;/]\s*", clean_text(raw_str(v))) if clean_text(p)]
+        if parts and all(p in allowed for p in parts):
+            return list(OrderedDict.fromkeys(parts)), True
+        return ["unknown"], False
+    t = clean_text(raw_str(v)).lower()
+    if t in allowed:
+        return t, True
+    return "unknown", False
+
+
+def label_like_total(text) -> bool:
+    """A short label such as «الإجمالي» / «Grand total (manual)» / «جملة القسم» in a non-name cell.
+    Longer notes («إجمالي المساحة 500 م2») or texts with digits do not count."""
+    if not isinstance(text, str) or not is_total_label(text):
+        return False
+    t = normalize_arabic(text)
+    return not re.search(r"\d", t) and len(t.split()) <= 4
+
+
 # ---------------------------------------------------------------------------
 # Typed values
 # ---------------------------------------------------------------------------
 def make_tv(val, kind: str, cspec: dict, field: str, cell_ref: str, number_format: str, formula, meta: dict) -> dict:
     if kind in NUMERIC_KINDS or kind == "count_mixed":
-        v, s, note = parse_number(val)
-        if kind == "percent" and isinstance(val, (int, float)) and not isinstance(val, bool) \
-                and number_format and "%" in number_format and v is not None:
-            v = v * 100
-            note = "خلية بتنسيق نسبة مئوية؛ خُزّنت القيمة بالنسبة المئوية (×100)"
-        if s == S_ZERO_RECORDED:
-            policy = cspec.get("zero_policy") or default_zero_policy(field, kind, meta)
-            if policy == "missing":
-                s, v = S_ZERO_AS_MISSING, None
-                note = "صفر في حقل لا يُعد الصفر فيه قيمة مقبولة؛ عومل كغير متاح"
-            else:
-                v = 0
-        if s == S_TEXT:
-            note = ("وصف نصي مختلط؛ لا يُجمع" if kind == "count_mixed" else "نص في حقل رقمي؛ لم يُحوَّل")
-        tv = {"v": tidy_num(v) if s in KNOWN_STATUSES else None, "s": s, "raw": raw_str(val),
-              "ref": cell_ref, "note": note}
+        pct_amount = kind in AMOUNT_KINDS and (
+            (isinstance(val, str) and ("%" in val or "٪" in val))
+            or (isinstance(val, (int, float)) and not isinstance(val, bool) and number_format and "%" in number_format))
+        if pct_amount:
+            tv = {"v": None, "s": S_TEXT, "raw": raw_str(val), "ref": cell_ref,
+                  "note": "نسبة مئوية في حقل مبلغ أو مساحة أو عدد؛ لم تُحوَّل إلى رقم", "percent_in_amount": True}
+            if isinstance(val, (int, float)):
+                tv["raw"] = f"{raw_str(val)} (تنسيق نسبة مئوية {number_format})"
+        else:
+            v, s, note = parse_number(val)
+            if kind == "percent" and isinstance(val, (int, float)) and not isinstance(val, bool) \
+                    and number_format and "%" in number_format and v is not None:
+                v = v * 100
+                note = "خلية بتنسيق نسبة مئوية؛ خُزّنت القيمة بالنسبة المئوية (×100)"
+            if s == S_ZERO_RECORDED:
+                policy = cspec.get("zero_policy") or default_zero_policy(field, kind, meta)
+                if policy == "missing":
+                    s, v = S_ZERO_AS_MISSING, None
+                    note = "صفر في حقل لا يُعد الصفر فيه قيمة مقبولة؛ عومل كغير متاح"
+                else:
+                    v = 0
+            if s == S_TEXT:
+                note = ("وصف نصي مختلط؛ لا يُجمع" if kind == "count_mixed" else "نص في حقل رقمي؛ لم يُحوَّل")
+            tv = {"v": tidy_num(v) if s in KNOWN_STATUSES else None, "s": s, "raw": raw_str(val),
+                  "ref": cell_ref, "note": note}
     elif kind == "date":
-        d = parse_date(val, cspec.get("calendar") or "auto")
-        tv = {"v": d.get("v"), "s": d.get("s"), "raw": raw_str(val), "ref": cell_ref,
-              "calendar": d.get("calendar"), "note": d.get("note")}
-        if d.get("hijri"):
-            tv["hijri"] = d["hijri"]
+        if is_na_token(val) or is_not_applicable_token(val):
+            tv = {"v": None, "s": S_NOT_APPLICABLE if is_not_applicable_token(val) else S_NOT_AVAILABLE,
+                  "raw": raw_str(val), "ref": cell_ref, "calendar": None, "note": "رمز «غير متاح» وليس تاريخًا"}
+        else:
+            d = parse_date(val, cspec.get("calendar") or "auto")
+            tv = {"v": d.get("v"), "s": d.get("s"), "raw": raw_str(val), "ref": cell_ref,
+                  "calendar": d.get("calendar"), "note": d.get("note")}
+            if d.get("hijri"):
+                tv["hijri"] = d["hijri"]
     else:  # text, url
         if val is None:
             tv = {"v": None, "s": S_BLANK, "raw": None, "ref": cell_ref, "note": None}
         elif is_filler(val):
             tv = {"v": None, "s": S_FILLER, "raw": raw_str(val), "ref": cell_ref, "note": None}
+        elif is_not_applicable_token(val):
+            tv = {"v": None, "s": S_NOT_APPLICABLE, "raw": raw_str(val), "ref": cell_ref,
+                  "note": "رمز «لا ينطبق» وليس قيمة أو فئة"}
+        elif is_na_token(val):
+            tv = {"v": None, "s": S_NOT_AVAILABLE, "raw": raw_str(val), "ref": cell_ref,
+                  "note": "رمز «غير متاح» وليس قيمة أو فئة"}
         else:
             tv = {"v": clean_text(raw_str(val)), "s": S_VALUE, "raw": raw_str(val), "ref": cell_ref, "note": None}
     if isinstance(formula, str) and formula.startswith("="):
@@ -250,6 +488,146 @@ def redact_if_contact(tv: dict, kind: str) -> bool:
         tv.update(v=None, s=S_NOT_AVAILABLE, raw=None, note="حُجبت قيمة تشبه بيانات اتصال شخصية")
         return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Formula precedents: is a cached 0 just the result of blank inputs?
+# ---------------------------------------------------------------------------
+def _has_name_node(node) -> bool:
+    if not isinstance(node, tuple) or not node:
+        return False
+    if node[0] == "name":
+        return True
+    return any(_has_name_node(x) for x in node[1:] if isinstance(x, tuple)) or \
+        any(_has_name_node(a) for x in node[1:] if isinstance(x, list) for a in x)
+
+
+class FormulaInputs:
+    """Resolves the cells a formula reads (formula_eval parser; nothing is evaluated or written)."""
+    MAX_CELLS = 5000
+    MAX_DEPTH = 4
+
+    def __init__(self, wb_v, wb_f):
+        self.wb_v, self.wb_f = wb_v, wb_f
+        self._tables = None
+        self._memo = {}
+
+    def _sheet(self, name):
+        if name in self.wb_v.sheetnames:
+            return name
+        cands = [s for s in self.wb_v.sheetnames if clean_text(s).lower() == clean_text(name).lower()]
+        return cands[0] if len(cands) == 1 else None
+
+    def _table_list(self):
+        if self._tables is None:
+            from openpyxl.utils import range_boundaries
+            self._tables = []
+            for ws in self.wb_f.worksheets:
+                for t in ws.tables.values():
+                    try:
+                        c1, r1, c2, r2 = range_boundaries(t.ref)
+                    except Exception:
+                        continue
+                    hdr = 1 if t.headerRowCount is None else int(t.headerRowCount)
+                    tot = int(t.totalsRowCount or 0)
+                    self._tables.append({"name": t.name, "sheet": ws.title, "r1": r1, "c1": c1, "r2": r2, "c2": c2,
+                                         "hdr": hdr, "tot": tot, "cols": [c.name for c in t.tableColumns]})
+        return self._tables
+
+    def _struct_cells(self, spec, sheet, row, col):
+        tname = spec.get("table")
+        tabs = self._table_list()
+        if tname:
+            t = next((x for x in tabs if (x["name"] or "").lower() == tname.lower()), None)
+        else:
+            t = next((x for x in tabs if x["sheet"] == sheet and x["r1"] <= row <= x["r2"] and x["c1"] <= col <= x["c2"]), None)
+        if t is None:
+            return None
+        area, cols, is_span = formula_eval.parse_struct_spec(spec.get("spec") or "")
+        if area == "this_row":
+            if not t["r1"] <= row <= t["r2"]:
+                return None
+            rows = [row]
+        elif area == "data":
+            rows = list(range(t["r1"] + t["hdr"], t["r2"] - t["tot"] + 1))
+        else:
+            return None
+        squeeze = lambda x: re.sub(r"\s+", " ", str(x or "")).strip().lower()  # noqa: E731
+        names = [squeeze(c) for c in t["cols"]]
+        if cols is None:
+            cidx = list(range(t["c1"], t["c2"] + 1))
+        else:
+            try:
+                idx = [t["c1"] + names.index(squeeze(c)) for c in cols]
+            except ValueError:
+                return None
+            cidx = list(range(min(idx), max(idx) + 1)) if is_span else idx
+        return [(t["sheet"], r, c) for r in rows for c in cidx]
+
+    def cells(self, formula: str, sheet: str, row: int, col: int):
+        """[(sheet, r, c)] read by the formula, or None when they cannot be resolved safely."""
+        try:
+            ast = formula_eval.parse(formula)
+        except Exception:
+            return None
+        if _has_name_node(ast):
+            return None
+        out = []
+        for kind, spec in formula_eval.iter_ref_nodes(ast):
+            if kind == "ref":
+                sh = self._sheet(spec["sheet"]) if spec.get("sheet") else sheet
+                if sh is None:
+                    return None
+                ws = self.wb_v[sh]
+                r1, r2, c1, c2 = spec["r1"], spec["r2"], spec["c1"], spec["c2"]
+                if r1 is None:
+                    r1, r2 = 1, max(1, ws.max_row)
+                if c1 is None:
+                    c1, c2 = 1, max(1, ws.max_column)
+                if len(out) + (r2 - r1 + 1) * (c2 - c1 + 1) > self.MAX_CELLS:
+                    return None
+                out.extend((sh, r, c) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1))
+            else:
+                try:
+                    res = self._struct_cells(spec, sheet, row, col)
+                except Exception:
+                    res = None
+                if res is None or len(out) + len(res) > self.MAX_CELLS:
+                    return None
+                out.extend(res)
+        return out
+
+    def all_blank(self, formula: str, sheet: str, row: int, col: int, depth: int = 0) -> bool:
+        """True when every cell the formula reads is blank, filler, a «غير متاح» token, an error or a formula
+        without a cached value (recursively: a precedent formula whose own inputs are all blank)."""
+        key = (sheet, row, col)
+        if key in self._memo:
+            return self._memo[key]
+        self._memo[key] = False  # guards against circular references
+        cells = self.cells(formula, sheet, row, col)
+        ok = bool(cells)
+        for sh, r, c in cells or []:
+            v = cell_val(self.wb_v[sh], r, c)
+            if is_blankish(v) or is_na_token(v) or is_not_applicable_token(v):
+                continue
+            if isinstance(v, str) and (clean_text(v).upper() in EXCEL_ERRORS or clean_text(v).upper().startswith("#REF")):
+                continue
+            f = cell_val(self.wb_f[sh], r, c)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0 and isinstance(f, str) \
+                    and f.startswith("=") and depth < self.MAX_DEPTH and self.all_blank(f, sh, r, c, depth + 1):
+                continue
+            ok = False
+            break
+        self._memo[key] = ok
+        return ok
+
+    def zero_from_blank(self, ws_name: str, row: int, col: int) -> bool:
+        """The cell holds a formula whose cached result is 0 and whose inputs are all blank/unknown."""
+        v = cell_val(self.wb_v[ws_name], row, col)
+        if not (isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0):
+            return False
+        f = cell_val(self.wb_f[ws_name], row, col)
+        return isinstance(f, str) and f.startswith("=") and self.all_blank(f, ws_name, row, col)
 
 
 # ---------------------------------------------------------------------------
@@ -361,14 +739,35 @@ class Issues:
         self.items.append(it)
         return it
 
-    def finalize(self):
+    def finalize(self, by_id: dict):
+        """Issues that touch only isolated/excluded records say so in `impact` and sort after the issues that touch
+        in-scope records (or no record); severity orders each group. Ids are assigned in that order (DQ-001…)."""
+        groups = []
+        for it in self.items:
+            rids = [r for r in it["record_ids"] if r in by_id]
+            scopes = {by_id[r]["scope"] for r in rids}
+            if not rids or "in_scope" in scopes:
+                groups.append(0)
+                continue
+            groups.append(1)
+            n = len(rids)
+            if scopes == {"isolated"}:
+                what = "سجل معزول" if n == 1 else "سجلات معزولة"
+            elif scopes == {"excluded"}:
+                what = "سجل مستبعد" if n == 1 else "سجلات مستبعدة"
+            else:
+                what = "سجلات معزولة أو مستبعدة"
+            it["impact"] = f"لا أثر على المؤشرات ({what})"
+        order = sorted(range(len(self.items)),
+                       key=lambda i: (groups[i], SEV_RANK.get(self.items[i]["severity"], 9), i))
+        self.items = [self.items[i] for i in order]
         for i, it in enumerate(self.items, 1):
             it["id"] = f"DQ-{i:03d}"
         return self.items
 
 
 # ---------------------------------------------------------------------------
-# Main normalisation
+# Workbook helpers
 # ---------------------------------------------------------------------------
 def open_workbook(path: str):
     import openpyxl
@@ -406,162 +805,599 @@ def is_total_formula(formula) -> bool:
     return False
 
 
-def normalize(xlsx: str, mapping: dict) -> dict:
-    issues = Issues()
-    meta = mapping.get("field_meta") or {}
-    wb_v, wb_f = open_workbook(xlsx)
-    records = []
-    excluded_rows = []
-    pii_columns = 0
-    pii_values = 0
-    rows_skipped = 0
-    rows_excluded = 0
-    seen_ids = {}
-    field_kinds = {}
-    overrides = mapping.get("records") or {}
+def vertical_merges(ws) -> dict:
+    """(row, col) of every non-anchor cell of a merge spanning several rows -> (anchor_row, anchor_col, 'B2:B3')."""
+    out = {}
+    for mr in ws.merged_cells.ranges:
+        if mr.max_row <= mr.min_row:
+            continue
+        for r in range(mr.min_row, mr.max_row + 1):
+            for c in range(mr.min_col, mr.max_col + 1):
+                if (r, c) != (mr.min_row, mr.min_col):
+                    out[(r, c)] = (mr.min_row, mr.min_col, mr.coord)
+    return out
 
-    # per-record raw info kept for checks
-    total_like = []  # (rec, reason)
 
-    for src in mapping["sources"]:
-        sid = src["id"]
-        sheet = resolve_sheet(wb_v, src["sheet"], issues)
-        ws, wsf = wb_v[sheet], wb_f[sheet]
-        header_row = src.get("header_row")
-        cols = sorted(src["columns"].items(), key=lambda kv: col_index(kv[0]))
-        # PII by header (safety net)
-        pii_auto = set()
+def row_kinds_by_sheet(wb_map) -> dict:
+    """{sheet name: {row: kind}} from 01_workbook_map.json row_kinds ({"3-17": "data", "18": "total_formula"})."""
+    out = {}
+    for sh in (wb_map or {}).get("sheets") or []:
+        kinds = {}
+        for span, kind in (sh.get("row_kinds") or {}).items():
+            m = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+))?\s*", str(span))
+            if not m:
+                continue
+            a = int(m.group(1))
+            b = int(m.group(2) or a)
+            if kind in TOTAL_ROW_KINDS:
+                for r in range(a, b + 1):
+                    kinds[r] = kind
+        out[sh.get("name")] = kinds
+    return out
+
+
+def find_sheet_decl(decls: list, sheet: str):
+    exact = [d for d in decls if d.get("sheet") == sheet]
+    if exact:
+        return exact[0]
+    loose = [d for d in decls if clean_text(d.get("sheet")) == clean_text(sheet)]
+    return loose[0] if loose else None
+
+
+# ---------------------------------------------------------------------------
+# Main normalisation
+# ---------------------------------------------------------------------------
+class Ctx:
+    def __init__(self, xlsx: str, mapping: dict, wb_map):
+        self.mapping = mapping
+        self.meta = mapping.get("field_meta") or {}
+        self.issues = Issues()
+        self.wb_v, self.wb_f = open_workbook(xlsx)
+        self.finputs = FormulaInputs(self.wb_v, self.wb_f)
+        self.row_kinds = row_kinds_by_sheet(wb_map)
+        self.overrides = mapping.get("records") or {}
+        self.decls = mapping.get("sheets") or []
+        self.records = []
+        self.excluded_rows = []
+        self.seen_ids = {}
+        self.id_texts = {}
+        self.field_kinds = {}
+        self.row_owner = OrderedDict()   # (sheet, row) -> [record ids] of non-join sources
+        self.scope_problems = []         # (source_id, sheet, [Arabic problems])
+        self.managed_sources = []        # (source_id, sheet) on managed_properties sheets
+        self.stats = OrderedDict([("pii_columns", 0), ("pii_values", 0), ("rows_skipped", 0), ("rows_excluded", 0),
+                                  ("rows_skipped_with_content", 0), ("rows_total_excluded", 0), ("rows_joined", 0)])
+
+
+def _candidate_id(prefix: str, id_text, row: int) -> str:
+    return prefix + id_text if id_text else f"{prefix}r{row}"
+
+
+def _overridden_as_record(ctx: Ctx, rid: str) -> bool:
+    ov = ctx.overrides.get(rid) or {}
+    return "record_type" in ov or "scope" in ov
+
+
+def source_scope(ctx: Ctx, src: dict, sheet: str) -> tuple:
+    """Effective default scope of a source + the Arabic problems found (A9)."""
+    ws = ctx.wb_f[sheet]
+    state = getattr(ws, "sheet_state", "visible") or "visible"
+    hidden = state in ("hidden", "veryHidden")
+    decl = find_sheet_decl(ctx.decls, sheet)
+    stated = src.get("default_scope")
+    problems = []
+    expected = DECISION_SCOPE.get((decl or {}).get("decision")) if decl else None
+    if decl is None:
+        problems.append(f"الورقة «{sheet}» غير مدرجة في sheets[] في 02_mapping.json؛ لا يوجد قرار نطاق موثق لها")
+    if stated is None:
+        eff = expected or ("isolated" if hidden else "in_scope")
+    else:
+        eff = stated
+    if hidden and (stated is None or not clean_text(src.get("scope_reason"))):
+        problems.append(f"المصدر يقرأ ورقة مخفية ({state}) دون default_scope وscope_reason صريحين"
+                        + (f"؛ طُبّق «{eff}» احتياطًا" if stated is None else ""))
+    if expected and eff != expected:
+        problems.append(f"default_scope = «{eff}» لا يوافق قرار الورقة «{decl['decision']}» في sheets[] "
+                        f"(المتوقع «{expected}»)")
+    if src.get("join") and decl and decl.get("decision") not in ("primary", "supplementary"):
+        problems.append(f"مصدر ربط يدمج بياناته في سجلات المصدر «{src['join'].get('into')}» بينما قرار ورقته "
+                        f"«{decl.get('decision')}»؛ الدمج يتطلب قرار primary أو supplementary")
+    if problems:
+        ctx.scope_problems.append((src["id"], sheet, problems))
+    if decl and decl.get("role") == "managed_properties":
+        ctx.managed_sources.append((src["id"], sheet))
+    reason = src.get("scope_reason")
+    if reason is None and stated is None and eff != "in_scope" and decl:
+        reason = decl.get("reason")
+    return eff, reason
+
+
+def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
+    """Read the data rows of one source (row dicts); exclusions, blank and total rows are handled here."""
+    sid = src["id"]
+    issues, meta = ctx.issues, ctx.meta
+    ws, wsf = ctx.wb_v[sheet], ctx.wb_f[sheet]
+    last_row = ws.max_row
+    header_row = src.get("header_row")
+    cols = sorted(src["columns"].items(), key=lambda kv: col_index(kv[0]))
+    pii_auto = set()
+    for col, cspec in cols:
+        if cspec["kind"] == "pii":
+            ctx.stats["pii_columns"] += 1
+            continue
+        if header_row and not cspec.get("pii_ok"):
+            header = cell_val(ws, header_row, col_index(col))
+            if header is not None and PII_HEADER_RE.search(clean_text(header)) and cspec["kind"] != "ignore":
+                pii_auto.add(col)
+                ctx.stats["pii_columns"] += 1
+                issues.add("pii_header_not_marked", "high", ref(sheet, f"{col}{header_row}"), [],
+                           f"عنوان العمود {col} يدل على بيانات شخصية لكنه لم يُعلَّم pii في mapping.",
+                           "لا أثر على المؤشرات",
+                           "عومل العمود كبيانات شخصية ولم تُخزَّن قيمه؛ إن لم يكن شخصيًا فأضف \"pii_ok\": true")
+        if cspec["kind"] != "ignore":
+            ctx.field_kinds.setdefault(cspec.get("field"), cspec["kind"])
+    data_cols = [(col, cspec, col_index(col)) for col, cspec in cols
+                 if cspec["kind"] not in ("ignore", "pii") and col not in pii_auto]
+    numeric_cols = [(col, cspec, ci) for col, cspec, ci in data_cols if cspec["kind"] in NUMERIC_KINDS]
+    dr = src["data_rows"]
+    start, end = dr["from"], dr["to"]
+    excl = {}
+    for ex in src.get("exclude_rows") or []:
+        for r in parse_rows(ex.get("rows")):
+            excl[r] = ex.get("reason")
+    id_rule = src.get("id_rule") or {}
+    prefix = id_rule.get("prefix")
+    if prefix is None:
+        prefix = sid + "-"
+    id_col = id_rule.get("column")
+    name_col = src.get("name_column")
+    skip_col = src.get("skip_if_blank")
+    join = src.get("join") or {}
+    key_col = join.get("key_column")
+    pii_label_cols = []   # name/id columns dropped as personal data: still scanned for total labels, never stored
+    # Safety net: a name/id column whose header (or column spec) marks personal data never becomes a record name/id.
+    for role, col in (("name_column", name_col), ("id_rule.column", id_col)):
+        if not col:
+            continue
+        cs = src["columns"].get(col) or {}
+        header = cell_val(ws, header_row, col_index(col)) if header_row else None
+        if cs.get("kind") == "pii" or col in pii_auto or (not cs.get("pii_ok") and header is not None
+                                                          and PII_HEADER_RE.search(clean_text(header))):
+            issues.add("pii_header_not_marked", "high", ref(sheet, f"{col}{header_row or start}"), [],
+                       f"العمود {col} المستخدم في {role} للمصدر {sid} يحمل بيانات شخصية"
+                       + (f" (العنوان «{clean_text(header)}»)" if header is not None else "") + ".",
+                       "لا أثر على المؤشرات",
+                       "لم تُخزَّن قيمه اسمًا أو معرّفًا للسجلات (السجلات بلا اسم أو بمعرّف الصف)؛ اختر عمود اسم الأصل أو "
+                       "معرّفه، أو أضف \"pii_ok\": true في columns إن لم يكن شخصيًا")
+            pii_label_cols.append(col)
+            if col == name_col:
+                name_col = None
+            if col == id_col:
+                id_col = None
+    merges = vertical_merges(ws)
+    kinds01 = ctx.row_kinds.get(sheet) or {}
+    # a row is blank when its data cells and name cell are empty: an id/key alone (pre-numbered template rows) is not content
+    content_cols = [(col, ci) for col, _cs, ci in data_cols if col not in (id_col, key_col)]
+    if name_col and name_col not in [c for c, _ in content_cols] and name_col not in pii_auto and \
+            (src["columns"].get(name_col) or {}).get("kind") != "pii":
+        content_cols.append((name_col, col_index(name_col)))
+
+    def resolved(col, row):
+        """Value of an id/name/key/skip cell; a cell inside a vertical merge reads the merge anchor."""
+        ci = col_index(col)
+        v = cell_val(ws, row, ci)
+        if is_blankish(v) and (row, ci) in merges:
+            ar, ac, coord = merges[(row, ci)]
+            av = cell_val(ws, ar, ac)
+            if not is_blankish(av):
+                return av, f"«{col}{row}» داخل خلية مدمجة رأسيًا {coord}؛ قُرئت قيمتها من {col_letter(ac)}{ar}"
+        return v, None
+
+    def has_content(ci, row):
+        v = cell_val(ws, row, ci)
+        if is_blankish(v):
+            return False
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v == 0 and ctx.finputs.zero_from_blank(sheet, row, ci):
+            return False
+        return True
+
+    def total_reasons(row, id_text, name):
+        reasons = []
+        for lab, txt, col in (("الاسم", name, name_col), ("المعرّف", id_text, id_col)):
+            if txt and is_total_label(txt):
+                reasons.append(f"{lab} «{txt}» ({col}{row}) يدل على إجمالي")
+        for col in pii_label_cols:
+            if is_total_label(cell_val(ws, row, col_index(col))):
+                reasons.append(f"الخلية {col}{row} تدل على إجمالي")
+        for col, cspec, ci in data_cols:
+            if col in (name_col, id_col):
+                continue
+            v = cell_val(ws, row, ci)
+            if label_like_total(v):
+                reasons.append(f"الخلية {col}{row} «{clean_text(v)}» تدل على إجمالي")
+            if cspec["kind"] in NUMERIC_KINDS and is_total_formula(cell_val(wsf, row, ci)):
+                reasons.append(f"صيغة تجميع في {col}{row} (SUBTOTAL/SUM لنطاق)")
+        k = kinds01.get(row)
+        if k:
+            reasons.append(f"خريطة المصنف (01) صنّفت الصف «{ROW_KIND_AR.get(k, k)}»")
+        # one formula reason is enough
+        out, seen_formula = [], False
+        for x in reasons:
+            if x.startswith("صيغة تجميع"):
+                if seen_formula:
+                    continue
+                seen_formula = True
+            out.append(x)
+        return out
+
+    def row_values(row):
+        vals = OrderedDict()
+        for col, cspec, ci in numeric_cols:
+            cell = cell_at(ws, row, ci)
+            v = None if cell is None else cell.value
+            f = cell_val(wsf, row, ci)
+            if is_blankish(v) and not (isinstance(f, str) and f.startswith("=")):
+                continue
+            vals[cspec["field"]] = make_tv(v, cspec["kind"], cspec, cspec["field"], ref(sheet, f"{col}{row}"),
+                                           cell.number_format if cell is not None else "General", f, meta)
+        return vals
+
+    rows_out = []
+    blank_rows, beyond = [], 0
+    skipped_content = []   # (row, [refs])
+    total_rows = []        # (row, reasons, where)
+    for row in range(start, end + 1):
+        if row in excl:
+            ctx.stats["rows_excluded"] += 1
+            entry = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row), ("reason", excl[row])])
+            if row <= last_row:
+                iv = resolved(id_col, row)[0] if id_col else None
+                nv = resolved(name_col, row)[0] if name_col else None
+                is_tot = bool(total_reasons(row, clean_text(raw_str(iv)) or None, clean_text(raw_str(nv)) or None)) \
+                    or bool(TOTAL_WORD_RE.search(normalize_arabic(excl[row] or "")))
+                if is_tot:
+                    vals = row_values(row)
+                    if vals:
+                        entry["values"] = vals
+            ctx.excluded_rows.append(entry)
+            continue
+        if row > last_row:
+            beyond += 1
+            continue
+        content = [col for col, ci in content_cols if has_content(ci, row)]
+        if not content:
+            blank_rows.append(row)
+            continue
+        if skip_col:
+            sv, _note = resolved(skip_col, row)
+            if is_blankish(sv):
+                others = [c for c in content if c != skip_col]
+                if not others:
+                    blank_rows.append(row)
+                    continue
+                refs = [ref(sheet, f"{c}{row}") for c in others]
+                skipped_content.append((row, refs))
+                ctx.stats["rows_skipped_with_content"] += 1
+                ctx.excluded_rows.append(OrderedDict([
+                    ("source_id", sid), ("sheet", sheet), ("row", row),
+                    ("reason", f"تُخطّي الصف لأن خانة {skip_col}{row} (skip_if_blank) فارغة رغم وجود بيانات في: "
+                               + "، ".join(f"{c}{row}" for c in others))]))
+                continue
+        merge_notes = []
+        id_text = None
+        if id_col:
+            iv, note = resolved(id_col, row)
+            if not is_blankish(iv):
+                id_text = clean_text(raw_str(iv))
+                if note:
+                    merge_notes.append(note)
+        name = None
+        if name_col:
+            nv, note = resolved(name_col, row)
+            name = clean_text(raw_str(nv)) or None
+            if name and note:
+                merge_notes.append(note)
+        reasons = total_reasons(row, id_text, name)
+        cand = _candidate_id(prefix, id_text, row)
+        if reasons and not (not join and _overridden_as_record(ctx, cand)):
+            where = ref(sheet, f"{name_col or id_col or (data_cols[0][0] if data_cols else 'A')}{row}")
+            total_rows.append((row, reasons, where, cand))
+            ctx.stats["rows_total_excluded"] += 1
+            entry = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row),
+                                 ("reason", "صف إجمالي مكتشف آليًا: " + "؛ ".join(reasons)), ("auto", True)])
+            vals = row_values(row)
+            if vals:
+                entry["values"] = vals
+            ctx.excluded_rows.append(entry)
+            continue
+        rr = {"row": row, "id_text": id_text, "name": name, "merge_notes": merge_notes, "total_reasons": reasons,
+              "prefix": prefix, "id_col": id_col, "name_col": name_col, "sheet": sheet, "source_id": sid}
+        if key_col:
+            kv, note = resolved(key_col, row)
+            rr["key_raw"] = None if is_blankish(kv) else kv
+            rr["key_ref"] = ref(sheet, f"{key_col}{row}")
+        dims = OrderedDict((k, copy.deepcopy(v)) for k, v in DEFAULT_DIMS.items())
+        dims_ev = OrderedDict()
+        fields = OrderedDict()
+        oov = OrderedDict()
         for col, cspec in cols:
-            if cspec["kind"] == "pii":
-                pii_columns += 1
+            kind = cspec["kind"]
+            if kind == "ignore":
                 continue
-            if header_row and not cspec.get("pii_ok"):
-                header = ws[f"{col}{header_row}"].value
-                if header is not None and PII_HEADER_RE.search(clean_text(header)) and cspec["kind"] != "ignore":
-                    pii_auto.add(col)
-                    pii_columns += 1
-                    issues.add("pii_header_not_marked", "high", ref(sheet, f"{col}{header_row}"), [],
-                               f"عنوان العمود {col} يدل على بيانات شخصية لكنه لم يُعلَّم pii في mapping.",
-                               "لا أثر على المؤشرات",
-                               "عومل العمود كبيانات شخصية ولم تُخزَّن قيمه؛ إن لم يكن شخصيًا فأضف \"pii_ok\": true")
-            if cspec["kind"] != "ignore":
-                field_kinds.setdefault(cspec.get("field"), cspec["kind"])
-        dr = src["data_rows"]
-        start = dr["from"]
-        end = dr.get("to") or ws.max_row
-        excl = {}
-        for ex in src.get("exclude_rows") or []:
-            for r in parse_rows(ex.get("rows")):
-                excl[r] = ex.get("reason")
-        for r, reason in sorted(excl.items()):
-            if start <= r <= end:
-                excluded_rows.append({"source_id": sid, "sheet": sheet, "row": r, "reason": reason})
-        id_rule = src.get("id_rule") or {}
-        prefix = id_rule.get("prefix")
-        if prefix is None:
-            prefix = sid + "-"
-        id_col = id_rule.get("column")
-        name_col = src.get("name_column")
-        skip_col = src.get("skip_if_blank")
-        for row in range(start, end + 1):
-            if row in excl:
-                rows_excluded += 1
+            ci = col_index(col)
+            cell = cell_at(ws, row, ci)
+            val = None if cell is None else cell.value
+            if kind == "pii" or col in pii_auto:
+                if not is_blankish(val):
+                    ctx.stats["pii_values"] += 1
                 continue
-            if skip_col:
-                sv = ws[f"{skip_col}{row}"].value
-                if sv is None or is_filler(sv):
-                    rows_skipped += 1
-                    continue
-            # id
-            base_id = None
-            id_text = None
-            if id_col:
-                iv = ws[f"{id_col}{row}"].value
-                if iv is not None and not is_filler(iv):
-                    id_text = clean_text(raw_str(iv))
-                    base_id = prefix + id_text
-            if not base_id:
-                base_id = f"{prefix}r{row}"
-            rid = base_id
-            if rid in seen_ids:
-                rid = f"{base_id}-r{row}"
-                n = 2
-                while rid in seen_ids:
-                    rid = f"{base_id}-r{row}-{n}"
-                    n += 1
-                first = seen_ids[base_id]
-                issues.add("duplicate_id", "high",
-                           join_refs([first["source"].get("ref_id"), ref(sheet, f"{id_col}{row}") if id_col else None]),
-                           [first["id"], rid],
-                           f"المعرّف «{base_id}» مكرر؛ أُعطي السجل في الصف {row} المعرّف «{rid}».",
-                           "قد يؤدي إلى ازدواج الأصل في العدد والقيمة والإيراد إن كانا السجل نفسه",
-                           "لم يُدمج السجلان؛ يلزم التحقق من المعرف والصك والموقع وتصحيح الترقيم أو استبعاد المكرر في mapping")
-            name = None
-            if name_col:
-                nv = ws[f"{name_col}{row}"].value
-                name = clean_text(raw_str(nv)) or None
-            rec = OrderedDict()
-            rec["id"] = rid
-            rec["name"] = name
-            rec["source"] = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row),
-                                         ("ref_name", ref(sheet, f"{name_col}{row}") if name_col else None)])
-            if id_col:
-                rec["source"]["ref_id"] = ref(sheet, f"{id_col}{row}")
-            rec["record_type"] = src.get("default_record_type") or "asset"
-            rec["scope"] = src.get("default_scope") or "in_scope"
-            rec["scope_reason"] = src.get("scope_reason")
-            dims = OrderedDict((k, copy.deepcopy(v)) for k, v in DEFAULT_DIMS.items())
-            dims_ev = OrderedDict()
-            fields = OrderedDict()
-            row_total_formula = False
-            for col, cspec in cols:
-                kind = cspec["kind"]
-                cell_ref = ref(sheet, f"{col}{row}")
-                if kind == "ignore":
-                    continue
-                cell = ws[f"{col}{row}"]
-                val = cell.value
-                if kind == "pii" or col in pii_auto:
-                    if val is not None and not is_filler(val):
-                        pii_values += 1
-                    continue
-                formula = wsf[f"{col}{row}"].value
-                if kind in NUMERIC_KINDS and is_total_formula(formula):
-                    row_total_formula = True
-                field = cspec["field"]
-                tv = make_tv(val, kind, cspec, field, cell_ref, cell.number_format, formula, meta)
-                if redact_if_contact(tv, kind):
-                    pii_values += 1
-                    tv["redacted"] = True
-                fields[field] = tv
-                dim = cspec.get("dim")
-                if dim:
-                    dv = tv.get("v") if tv.get("s") in KNOWN_STATUSES else None
-                    if dim in LIST_DIMS:
-                        if dv is not None:
-                            dims[dim] = [dv]
+            cell_ref = ref(sheet, f"{col}{row}")
+            formula = cell_val(wsf, row, ci)
+            field = cspec["field"]
+            tv = make_tv(val, kind, cspec, field, cell_ref, cell.number_format if cell is not None else "General",
+                         formula, meta)
+            if kind in NUMERIC_KINDS and tv.get("s") in (S_ZERO_RECORDED, S_ZERO_AS_MISSING) and \
+                    ctx.finputs.zero_from_blank(sheet, row, ci):
+                tv.update(v=None, s=S_NOT_AVAILABLE, zero_from_blank_inputs=True,
+                          note="صيغة ناتجها المخزن 0 لأن كل الخلايا التي تعتمد عليها فارغة أو غير متاحة؛ "
+                               "عوملت كغير متاحة لا كصفر")
+            if redact_if_contact(tv, kind):
+                ctx.stats["pii_values"] += 1
+                tv["redacted"] = True
+            fields[field] = tv
+            dim = cspec.get("dim")
+            if dim:
+                dv = tv.get("v") if tv.get("s") in KNOWN_STATUSES else None
+                if dim in CONTROLLED_DIMS:
+                    if dv is None:
+                        dims[dim] = unknown_of(dim)
                     else:
-                        dims[dim] = dv
-                    dims_ev[dim] = cell_ref
-            rec["dims"] = dims
-            rec["dims_evidence"] = dims_ev
-            rec["fields"] = fields
-            rec["issue_ids"] = []
-            seen_ids[rid] = rec
-            records.append(rec)
-            reasons = []
-            for txt in (name, id_text):
-                if txt and TOTAL_RE.search(normalize_arabic(txt)):
-                    reasons.append(f"النص «{txt}» يدل على إجمالي")
-            if row_total_formula:
-                reasons.append("الصف يحتوي صيغة تجميع (SUBTOTAL/SUM لنطاق)")
-            if reasons:
-                total_like.append((rec, "؛ ".join(reasons)))
+                        val2, ok = coerce_dim(dim, dv)
+                        dims[dim] = val2
+                        if not ok:
+                            oov[dim] = (cell_ref, raw_str(tv.get("raw") if tv.get("raw") is not None else dv), field)
+                elif dim in LIST_DIMS:
+                    if dv is not None:
+                        dims[dim] = [dv]
+                else:
+                    dims[dim] = dv
+                dims_ev[dim] = cell_ref
+        rr.update(dims=dims, dims_ev=dims_ev, fields=fields, oov=oov)
+        rows_out.append(rr)
 
+    if blank_rows or beyond:
+        n = len(blank_rows) + beyond
+        ctx.stats["rows_skipped"] += n
+        wcol = skip_col or name_col or (content_cols[0][0] if content_cols else "A")
+        lo = min(blank_rows) if blank_rows else last_row + 1
+        hi = max(blank_rows) if blank_rows else end
+        if beyond:
+            hi = end
+        empty = "فارغ" if n == 1 else ("فارغان" if n == 2 else "فارغة")
+        detail = f"{count_ar(n, 'row')} {empty} ضمن نطاق البيانات ({start}–{end}) في المصدر {sid}"
+        if blank_rows:
+            detail += f": الصفوف {rows_text(blank_rows)}"
+        if beyond:
+            detail += f"؛ منها {count_ar(beyond, 'row')} بعد آخر صف مستخدم في الورقة ({last_row})"
+        issues.add("blank_rows_skipped", "low", ref(sheet, f"{wcol}{lo}:{wcol}{hi}"), [],
+                   detail + " — كل خاناتها المربوطة فارغة أو مسافات.",
+                   "لا أثر على المؤشرات؛ لم تُنشأ منها سجلات",
+                   "تُجووزت الصفوف وعُدّت فقط؛ ضيّق data_rows إن كانت خارج السجل", source_id=sid, count=n)
+    if skipped_content:
+        refs = [r for _, rs in skipped_content for r in rs]
+        issues.add("row_skipped_with_content", "medium", join_refs(refs), [],
+                   f"تُخطّي في المصدر {sid} {count_ar(len(skipped_content), 'row')} لأن خانة {skip_col} (skip_if_blank) "
+                   f"فارغة رغم وجود بيانات مربوطة: الصفوف {rows_text([r for r, _ in skipped_content])}.",
+                   "بيانات هذه الصفوف لا تدخل أي مؤشر؛ قد يكون الإجمالي ناقصًا إن كانت سطورًا تابعة لأصل",
+                   "لم تُنشأ منها سجلات وأُدرجت في excluded_rows؛ صنّفها في mapping (عمود اسم آخر، أو مصدر ربط، أو "
+                   "استبعاد صريح بسبب)", source_id=sid, rows=[r for r, _ in skipped_content])
+    for row, reasons, where, cand in total_rows:
+        issues.add("total_like_row", "high", where, [],
+                   f"الصف {row} في المصدر {sid} يبدو صف إجمالي: " + "؛ ".join(reasons) + ".",
+                   "لا أثر على المؤشرات بعد استبعاده؛ لو دخل النطاق لضاعف العدد والقيمة والإيراد",
+                   "لم يُنشأ منه سجل؛ أُدرج في excluded_rows مع قيمه للمطابقة مع مجموع السجلات. إن لم يكن إجماليًا "
+                   f"فأضف records/{cand} بنوعه ونطاقه الصحيحين مع الدليل", source_id=sid, row=row)
+    return rows_out
+
+
+def new_record(ctx: Ctx, src: dict, rr: dict, scope: str, scope_reason, record_type=None) -> OrderedDict:
+    sid, sheet, row = rr["source_id"], rr["sheet"], rr["row"]
+    prefix, id_col, name_col, id_text = rr["prefix"], rr["id_col"], rr["name_col"], rr["id_text"]
+    base_id = _candidate_id(prefix, id_text, row)
+    rid = base_id
+    if rid in ctx.seen_ids:
+        rid = f"{base_id}-r{row}"
+        n = 2
+        while rid in ctx.seen_ids:
+            rid = f"{base_id}-r{row}-{n}"
+            n += 1
+        first = ctx.seen_ids[base_id]
+        ctx.issues.add("duplicate_id", "high",
+                       join_refs([first["source"].get("ref_id"), ref(sheet, f"{id_col}{row}") if id_col else None]),
+                       [first["id"], rid],
+                       f"المعرّف «{base_id}» مكرر؛ أُعطي السجل في الصف {row} المعرّف «{rid}».",
+                       "قد يؤدي إلى ازدواج الأصل في العدد والقيمة والإيراد إن كانا السجل نفسه",
+                       "لم يُدمج السجلان؛ يلزم التحقق من المعرف والصك والموقع وتصحيح الترقيم أو استبعاد المكرر في mapping")
+    rec = OrderedDict()
+    rec["id"] = rid
+    rec["name"] = rr["name"]
+    rec["source"] = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row),
+                                 ("ref_name", ref(sheet, f"{name_col}{row}") if name_col else None)])
+    if id_col:
+        rec["source"]["ref_id"] = ref(sheet, f"{id_col}{row}")
+    if rr.get("merge_notes"):
+        rec["source"]["merge_note"] = "؛ ".join(rr["merge_notes"])
+    rec["record_type"] = record_type or src.get("default_record_type") or "asset"
+    rec["scope"] = scope
+    rec["scope_reason"] = scope_reason
+    rec["dims"] = rr["dims"]
+    rec["dims_evidence"] = rr["dims_ev"]
+    rec["fields"] = rr["fields"]
+    rec["issue_ids"] = []
+    if rr.get("oov"):
+        rec["_oov"] = OrderedDict(rr["oov"])
+    if rr.get("total_reasons"):
+        rec["_total"] = rr["total_reasons"]
+    ctx.seen_ids[rid] = rec
+    ctx.id_texts[rid] = id_text
+    ctx.records.append(rec)
+    return rec
+
+
+def _join_norm(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    t = normalize_arabic(raw_str(v))
+    if re.fullmatch(r"\d+\.0+", t):
+        t = t.split(".")[0]
+    return t
+
+
+def _deed_key(v) -> str:
+    k = re.sub(r"[\s()\[\]{}]", "", normalize_arabic(raw_str(v)))
+    return k if k and re.search(r"\d", k) and not re.fullmatch(r"0+", k) else ""
+
+
+def _join_keys(ctx: Ctx, rec: dict, on: str) -> list:
+    if on == "id":
+        k = _join_norm(ctx.id_texts.get(rec["id"]))
+        return [k] if k else []
+    if on == "name_key":
+        k = name_key(rec.get("name")) if rec.get("name") else ""
+        return [k] if k else []
+    keys = []
+    for f, tv in rec["fields"].items():
+        if (f == "deed_no" or f.startswith("deed_no.")) and _known(tv):
+            k = _deed_key(tv.get("v"))
+            if k and k not in keys:
+                keys.append(k)
+    return keys
+
+
+def _row_key(rr: dict, on: str) -> str:
+    raw = rr.get("key_raw")
+    if raw is None:
+        return ""
+    if on == "id":
+        return _join_norm(clean_text(raw_str(raw)))
+    if on == "name_key":
+        return name_key(raw)
+    return _deed_key(raw)
+
+
+def merge_join_source(ctx: Ctx, src: dict, sheet: str, rows: list) -> None:
+    """Merge a join source's mapped fields into the records of `join.into` (A7). Never creates in-scope records."""
+    sid, j = src["id"], src["join"]
+    into, on, link_id = j["into"], j["on"], j["link_id"]
+    key_field = ((src["columns"].get(j["key_column"]) or {}).get("field"))
+    targets = [r for r in ctx.records if r["source"]["source_id"] == into]
+    index = {}
+    for t in targets:
+        for k in _join_keys(ctx, t, on):
+            index.setdefault(k, []).append(t)
+    unmatched, ambiguous, conflicts = [], [], []
+    on_ar = {"id": "المعرّف", "deed": "رقم الصك", "name_key": "الاسم"}[on]
+    for rr in rows:
+        k = _row_key(rr, on)
+        cands = index.get(k, []) if k else []
+        if len(cands) == 1:
+            tgt = cands[0]
+            ctx.stats["rows_joined"] += 1
+            tgt["source"].setdefault("joined", []).append(
+                OrderedDict([("source_id", sid), ("sheet", sheet), ("row", rr["row"]), ("link_id", link_id)]))
+            for f, tv in rr["fields"].items():
+                if f == key_field:
+                    continue
+                tv = dict(tv)
+                tv["joined_from"] = sid
+                cur = tgt["fields"].get(f)
+                if cur is not None and cur.get("s") not in (S_BLANK, S_FILLER):
+                    same = _known(cur) and _known(tv) and cur.get("v") == tv.get("v")
+                    if not same and tv.get("s") not in (S_BLANK, S_FILLER):
+                        conflicts.append((tgt["id"], f, cur.get("ref"), tv.get("ref")))
+                    continue
+                if tv.get("s") in (S_BLANK, S_FILLER) and cur is not None:
+                    continue
+                if cur is not None:
+                    tv["note"] = ((tv.get("note") or "") + f" (حلّت محل خانة فارغة في {cur.get('ref')})").strip()
+                tgt["fields"][f] = tv
+            for dim, ev in rr["dims_ev"].items():
+                val = rr["dims"].get(dim)
+                if dim in rr.get("oov", {}):
+                    if is_unknown_dim(tgt["dims"].get(dim)):
+                        tgt.setdefault("_oov", OrderedDict())[dim] = rr["oov"][dim]
+                    continue
+                if is_unknown_dim(val):
+                    continue
+                cur = tgt["dims"].get(dim)
+                if is_unknown_dim(cur):
+                    tgt["dims"][dim] = copy.deepcopy(val)
+                    tgt["dims_evidence"][dim] = f"{ev} (مدمج من المصدر {sid})"
+                elif cur != val:
+                    conflicts.append((tgt["id"], f"dims.{dim}", tgt["dims_evidence"].get(dim), ev))
+            continue
+        if len(cands) > 1:
+            reason = (f"صف من مصدر الربط {sid}: {on_ar} «{clean_text(raw_str(rr.get('key_raw')))}» يطابق أكثر من سجل في "
+                      f"{into} ({'، '.join(c['id'] for c in cands)})؛ لم يُدمج")
+            rec = new_record(ctx, src, rr, "isolated", reason, record_type=src.get("default_record_type") or "other")
+            ambiguous.append((rec, cands, rr))
+        else:
+            reason = (f"صف من مصدر الربط {sid} لم يطابق أي سجل في {into} ({on_ar} "
+                      f"«{clean_text(raw_str(rr.get('key_raw'))) or 'فارغ'}»)؛ عُزل ولم يُدمج")
+            rec = new_record(ctx, src, rr, "isolated", reason, record_type=src.get("default_record_type") or "other")
+            unmatched.append((rec, rr))
+    if unmatched:
+        ctx.issues.add("join_unmatched", "medium", join_refs([rr.get("key_ref") for _, rr in unmatched]),
+                       [r["id"] for r, _ in unmatched],
+                       f"في مصدر الربط {sid} {count_ar(len(unmatched), 'row')} بلا سجل مطابق ب{on_ar} في المصدر {into}.",
+                       "لا تدخل أرقامها أي مؤشر؛ قد تكون بيانات أصل غير مسجل أو مفتاحًا مكتوبًا بصيغة مختلفة",
+                       "حُفظت الصفوف سجلاتٍ معزولة (isolated) ولم تُدمج؛ تحقق من المفتاح قبل أي استخدام", source_id=sid)
+    for rec, cands, rr in ambiguous:
+        ctx.issues.add("join_ambiguous", "high", join_refs([rr.get("key_ref")] + [c["source"].get("ref_name") for c in cands]),
+                       [rec["id"]] + [c["id"] for c in cands],
+                       f"مفتاح الربط في {rr.get('key_ref')} ({on_ar} «{clean_text(raw_str(rr.get('key_raw')))}») يطابق "
+                       f"{count_ar(len(cands), 'record')} في {into}: {'، '.join(c['id'] for c in cands)}.",
+                       "لم تُدمج البيانات في أي منها؛ لو دُمجت بالتخمين لنُسبت لأصل خاطئ",
+                       "عُزل الصف سجلًا مستقلًا؛ صحّح المفتاح أو استخدم مفتاحًا أدق (المعرّف أو الصك)", source_id=sid)
+    if conflicts:
+        ctx.issues.add("join_conflict", "medium", join_refs([c[3] for c in conflicts] + [c[2] for c in conflicts]),
+                       sorted({c[0] for c in conflicts}),
+                       f"في مصدر الربط {sid} {count_ar(len(conflicts), 'value')} لحقول موجودة أصلًا بقيم أخرى في سجلات {into}: "
+                       + "؛ ".join(f"{c[0]}.{c[1]}" for c in conflicts[:8]) + ("…" if len(conflicts) > 8 else "") + ".",
+                       "بقيت قيم السجل الهدف كما هي؛ إن كانت قيمة المصدر المربوط هي الصحيحة فالمؤشرات تستخدم حاليًا القيمة الأخرى",
+                       "أُبقيت قيمة السجل الهدف ولم تُستبدل؛ وثّق أي تصحيح عبر field_overrides بدليل", source_id=sid)
+
+
+def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
+    ctx = Ctx(xlsx, mapping, wb_map)
+    issues, meta = ctx.issues, ctx.meta
+    sources = mapping["sources"]
+    plain = [s for s in sources if not s.get("join")]
+    joins = [s for s in sources if s.get("join")]
+    for src in plain + joins:
+        sid = src["id"]
+        sheet = resolve_sheet(ctx.wb_v, src["sheet"], issues)
+        scope, scope_reason = source_scope(ctx, src, sheet)
+        rows = read_source(ctx, src, sheet)
+        dr = src["data_rows"]
+        if not rows:
+            raise SystemExit(f"خطأ: المصدر «{sid}» لم يُنتج أي سجل من الصفوف {dr['from']}–{dr['to']} في الورقة «{sheet}» "
+                             "(كل الصفوف فارغة أو مستبعدة أو إجماليات). صحّح data_rows أو exclude_rows أو skip_if_blank "
+                             "في 02_mapping.json.")
+        if src.get("join"):
+            merge_join_source(ctx, src, sheet, rows)
+            continue
+        for rr in rows:
+            rec = new_record(ctx, src, rr, scope, scope_reason)
+            ctx.row_owner.setdefault((sheet, rr["row"]), []).append(rec["id"])
+
+    records = ctx.records
     by_id = {r["id"]: r for r in records}
     apply_derived(records, mapping.get("derived_fields") or [], issues, meta)
     apply_dim_rules(records, mapping.get("dim_rules") or [])
-    apply_overrides(records, by_id, overrides, issues, meta)
+    apply_overrides(records, by_id, ctx.overrides, issues, meta)
     for r in records:
         d = r["dims"]
         if "managed_for_others" not in d or d.get("managed_for_others") is None:
@@ -574,33 +1410,45 @@ def normalize(xlsx: str, mapping: dict) -> dict:
                 d["managed_for_others"] = False
 
     # ---- automatic checks -------------------------------------------------
-    for rec, why in total_like:
-        issues.add("total_like_row", "high", rec["source"]["ref_name"] or ref(rec["source"]["sheet"], f"A{rec['source']['row']}"),
-                   [rec["id"]], f"صف داخل نطاق البيانات يبدو صف إجمالي: {why}.",
-                   "إن كان إجماليًا فسيُضاعف العدد والقيمة والإيراد",
-                   "لم يُستبعد تلقائيًا؛ إن ثبت أنه إجمالي فأضفه إلى exclude_rows أو اجعل record_type = total في mapping")
+    for rec in records:
+        why = rec.pop("_total", None)
+        if why:
+            issues.add("total_like_row", "high", rec["source"]["ref_name"] or ref(rec["source"]["sheet"], f"A{rec['source']['row']}"),
+                       [rec["id"]], f"صف داخل نطاق البيانات يبدو صف إجمالي: {'؛ '.join(why)}. أبقاه تجاوز صريح في "
+                       f"02_mapping.json/records/{rec['id']} (النوع «{rec['record_type']}»، النطاق «{rec['scope']}»).",
+                       "إن كان إجماليًا فسيُضاعف العدد والقيمة والإيراد",
+                       "طُبّق تجاوز mapping كما ورد؛ يلزم دليل صريح على أنه ليس إجماليًا", mapping_override=True)
+    check_scope_decisions(ctx)
+    check_overlaps(ctx)
+    check_out_of_vocabulary(records, issues)
     check_valuation_totals(records, issues, meta)
     check_vat(records, issues, meta)
-    check_field_statuses(records, issues, meta, field_kinds)
+    check_field_statuses(records, issues, meta, ctx.field_kinds)
     check_names(records, issues)
     check_deeds(records, issues)
     check_classification(records, issues)
 
-    items = issues.finalize()
+    items = issues.finalize(by_id)
     for it in items:
         for rid in it["record_ids"]:
             if rid in by_id:
                 by_id[rid]["issue_ids"].append(it["id"])
+    for r in records:
+        r.pop("_oov", None)
 
+    st = ctx.stats
     stats = OrderedDict()
     stats["records"] = len(records)
     stats["by_type"] = dict(sorted(_count(r["record_type"] for r in records).items()))
     stats["by_scope"] = dict(sorted(_count(r["scope"] for r in records).items()))
     stats["by_source"] = dict(sorted(_count(r["source"]["source_id"] for r in records).items()))
-    stats["pii_columns_dropped"] = pii_columns
-    stats["pii_values_dropped"] = pii_values
-    stats["rows_skipped_blank"] = rows_skipped
-    stats["rows_excluded"] = rows_excluded
+    stats["pii_columns_dropped"] = st["pii_columns"]
+    stats["pii_values_dropped"] = st["pii_values"]
+    stats["rows_skipped_blank"] = st["rows_skipped"]
+    stats["rows_skipped_with_content"] = st["rows_skipped_with_content"]
+    stats["rows_excluded"] = st["rows_excluded"]
+    stats["rows_total_excluded"] = st["rows_total_excluded"]
+    stats["rows_joined"] = st["rows_joined"]
     stats["issues"] = len(items)
     stats["issues_by_severity"] = dict(sorted(_count(i["severity"] for i in items).items()))
 
@@ -608,10 +1456,13 @@ def normalize(xlsx: str, mapping: dict) -> dict:
     out["contract_version"] = CONTRACT_VERSION
     out["source"] = OrderedDict([("file", xlsx), ("name", os.path.basename(xlsx)), ("sha256", sha256_file(xlsx)),
                                  ("mapping_source_file", mapping.get("source_file"))])
+    out["context"] = OrderedDict((k, copy.deepcopy(mapping.get(k))) for k in
+                                 ("entity", "data_period", "study_date", "analysis_date", "currency", "valuation_dates",
+                                  "sheets"))
     out["currency"] = mapping.get("currency")
     out["field_meta"] = copy.deepcopy(meta)
     out["records"] = records
-    out["excluded_rows"] = excluded_rows
+    out["excluded_rows"] = ctx.excluded_rows
     out["issues"] = items
     out["stats"] = stats
     return out
@@ -722,6 +1573,7 @@ def apply_dim_rules(records: list, rules: list) -> None:
                 else:
                     dims[dim] = matched
                 r["dims_evidence"][dim] = f"{tv.get('ref')} («{text}»)"
+                (r.get("_oov") or {}).pop(dim, None)
             elif "default" in rule:
                 cur = dims.get(dim)
                 unset = cur is None or cur == "unknown" or cur == ["unknown"] or cur == []
@@ -752,6 +1604,7 @@ def apply_overrides(records: list, by_id: dict, overrides: dict, issues: Issues,
             r["notes"] = ov["notes"]
         for k, v in (ov.get("dims") or {}).items():
             r["dims"][k] = copy.deepcopy(v)
+            (r.get("_oov") or {}).pop(k, None)
         for k, v in (ov.get("dims_evidence") or {}).items():
             r["dims_evidence"][k] = v
         for field, fo in sorted((ov.get("field_overrides") or {}).items()):
@@ -788,6 +1641,67 @@ def apply_overrides(records: list, by_id: dict, overrides: dict, issues: Issues,
 # ---------------------------------------------------------------------------
 def _known(tv):
     return tv is not None and tv.get("s") in KNOWN_STATUSES
+
+
+def check_scope_decisions(ctx: Ctx) -> None:
+    """A9: source scope vs sheets[] decision, hidden sheets, managed-properties sheets."""
+    issues = ctx.issues
+    for sid, sheet, problems in ctx.scope_problems:
+        rids = [r["id"] for r in ctx.records if r["source"]["source_id"] == sid]
+        issues.add("sheet_scope_mismatch", "high", f"02_mapping.json/sources/{sid} ({sheet})", rids,
+                   f"قرار نطاق المصدر {sid} (الورقة «{sheet}») غير متسق: " + "؛ ".join(problems) + ".",
+                   "قد تدخل المؤشرات بيانات ورقة لم يتحقق انتماؤها للمحفظة، أو تُستبعد بيانات معتمدة",
+                   "لم يُغيَّر نطاق السجلات المذكور صراحة؛ اجعل default_scope وscope_reason للمصدر موافقين لقرار الورقة "
+                   "في sheets[]", source_id=sid)
+    for sid, sheet in ctx.managed_sources:
+        bad = [r for r in ctx.records if r["source"]["source_id"] == sid and r["scope"] == "in_scope"
+               and r["dims"].get("managed_for_others") is not True]
+        if bad:
+            issues.add("managed_unflagged", "high", join_refs([r["source"].get("ref_name") for r in bad]),
+                       [r["id"] for r in bad],
+                       f"{count_ar(len(bad), 'record')} ضمن النطاق من ورقة «{sheet}» (دورها managed_properties) بلا "
+                       "dims.managed_for_others = true.",
+                       "تدخل قيمة عقارات الغير وكامل إيراداتها في قيمة الجمعية وإيراداتها وعوائدها",
+                       "صنّف كل سجل من الورقة بـ managed_for_others: true (وownership يتضمن managed_for_others)، أو اعزل "
+                       "المصدر", source_id=sid)
+
+
+def check_overlaps(ctx: Ctx) -> None:
+    """A10: the same sheet row read into more than one record (join sources excluded)."""
+    groups = OrderedDict()
+    for (sheet, row), rids in ctx.row_owner.items():
+        if len(rids) < 2:
+            continue
+        srcs = tuple(sorted({ctx.seen_ids[r]["source"]["source_id"] for r in rids}))
+        g = groups.setdefault((sheet, srcs), {"rows": [], "ids": []})
+        g["rows"].append(row)
+        g["ids"].extend(rids)
+    for (sheet, srcs), g in groups.items():
+        ctx.issues.add("overlapping_source_rows", "high", f"{sheet}!{rows_text(g['rows'])}", g["ids"],
+                       f"المصادر {'، '.join(srcs)} تقرأ الصفوف نفسها من الورقة «{sheet}» ({rows_text(g['rows'])})؛ "
+                       f"كل صف صار أكثر من سجل: {'، '.join(g['ids'][:12])}" + ("…" if len(g["ids"]) > 12 else "") + ".",
+                       "يتضاعف عدد الأصول وقيمتها وإيرادها لهذه الصفوف",
+                       "لم تُدمج السجلات؛ اجعل نطاقات data_rows للمصادر غير متداخلة أو استبعد الصفوف المكررة من أحدها",
+                       rows=g["rows"])
+
+
+def check_out_of_vocabulary(records: list, issues: Issues) -> None:
+    """A6: cell values of controlled dimensions outside assets/vocab.json are stored as unknown."""
+    groups = OrderedDict()
+    for r in records:
+        for dim, (cref, raw, field) in (r.get("_oov") or {}).items():
+            g = groups.setdefault((dim, field), {"ids": [], "refs": [], "examples": []})
+            g["ids"].append(r["id"])
+            g["refs"].append(cref)
+            if raw is not None and raw not in g["examples"] and len(g["examples"]) < 4:
+                g["examples"].append(raw)
+    for (dim, field), g in groups.items():
+        issues.add("dim_out_of_vocabulary", "high", join_refs(g["refs"]), g["ids"],
+                   f"قيم البعد «{dim}» من الحقل {field} خارج المفردات المعتمدة في {count_ar(len(g['ids']), 'record')}: "
+                   + "؛ ".join(f"«{x}»" for x in g["examples"]) + f". المسموح: {_vocab_text(dim)}.",
+                   "خُزّن البعد «غير محدد» فتُستبعد هذه السجلات من المؤشرات المقيدة بهذا البعد",
+                   f"لم يُخمَّن التصنيف؛ حوّل النصوص إلى الرموز عبر dim_rules (dim: {dim}) أو records بدليل",
+                   field=field, dim=dim)
 
 
 def check_valuation_totals(records: list, issues: Issues, meta: dict) -> None:
@@ -900,8 +1814,13 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
                 continue
             if tv.get("no_cache"):
                 add(("formula_no_cache", f), r["id"], tv)
+            if tv.get("zero_from_blank_inputs"):
+                add(("zero_from_blank_inputs", f), r["id"], tv, f"{(tv.get('ref') or '').split('!')[-1]}: {tv.get('formula')}")
+                continue
             if kind in NUMERIC_KINDS:
-                if s == S_TEXT:
+                if tv.get("percent_in_amount"):
+                    add(("percent_in_amount", f), r["id"], tv, tv.get("raw"))
+                elif s == S_TEXT:
                     add(("text_in_numeric", f), r["id"], tv, tv.get("raw"))
                 elif s == S_ERROR:
                     add(("excel_error", f), r["id"], tv, tv.get("raw"))
@@ -919,12 +1838,18 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
                     add(("hijri_conversion", f), r["id"], tv, f"{tv.get('raw')} → {tv.get('v')}")
                 if s == S_TEXT:
                     add(("date_unparsed", f), r["id"], tv, f"{tv.get('raw')}: {tv.get('note')}")
-                elif tv.get("note"):
+                elif tv.get("note") and s not in (S_NOT_AVAILABLE, S_NOT_APPLICABLE):
                     add(("date_note", f), r["id"], tv, f"{tv.get('raw')}: {tv.get('note')}")
 
     texts = {
         "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {n} سجل",
                             "لم يُحوَّل النص إلى رقم ولم يُعامل كصفر؛ القيمة غير معروفة مع حفظ النص الأصلي"),
+        "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {n} سجل",
+                              "لم تُحوَّل إلى رقم ولم تُجمع؛ القيمة غير معروفة مع حفظ النص الأصلي، ويلزم التحقق من "
+                              "المبلغ الفعلي في المصدر"),
+        "zero_from_blank_inputs": ("medium", "صيغ ناتجها المخزن 0 لأن مدخلاتها فارغة في الحقل {f} ({n} سجل)",
+                                   "عوملت القيمة كغير متاحة (not_available) لا كصفر مسجل؛ الصفر هنا نتيجة خانات فارغة "
+                                   "وليس رقمًا مدونًا"),
         "excel_error": ("high", "خطأ صيغة Excel في الحقل {f} في {n} سجل",
                         "عوملت القيمة كغير معروفة (error)؛ يلزم تصحيح الصيغة في المصدر"),
         "zero_as_missing": ("medium", "قيمة صفرية في الحقل {f} ({n} سجل) حيث لا يُعد الصفر قيمة مقبولة",
@@ -1015,11 +1940,29 @@ def check_classification(records: list, issues: Issues) -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def load_workbook_map(out_path: str, xlsx: str):
+    """RUN/01_workbook_map.json next to --out, when it belongs to the same workbook (or its converted copy)."""
+    p = os.path.join(os.path.dirname(os.path.abspath(out_path)), "01_workbook_map.json")
+    if not os.path.isfile(p):
+        return None
+    try:
+        wm = load_json(p)
+    except Exception as exc:
+        eprint(f"تحذير: تعذر قراءة {p} ({exc})؛ لن تُستخدم أنواع الصفوف منه.")
+        return None
+    f = wm.get("file") or {}
+    sha = sha256_file(xlsx)
+    if sha not in (f.get("sha256"), (f.get("converted") or {}).get("sha256")):
+        eprint("تحذير: 01_workbook_map.json في مجلد التشغيل لا يخص الملف المعطى (بصمة مختلفة)؛ لن تُستخدم أنواع الصفوف منه.")
+        return None
+    return wm
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="بناء 03_records.json من المصنف و02_mapping.json")
     ap.add_argument("--xlsx", required=True, help="مسار ملف Excel المصدر (لا يُعدَّل)")
     ap.add_argument("--mapping", required=True, help="مسار 02_mapping.json")
-    ap.add_argument("--out", required=True, help="مسار 03_records.json")
+    ap.add_argument("--out", required=True, help="مسار 03_records.json (يُقرأ 01_workbook_map.json من المجلد نفسه إن وُجد)")
     ap.add_argument("--schema", default=os.path.join(SKILL_DIR, "schemas", "mapping.schema.json"))
     args = ap.parse_args(argv)
 
@@ -1037,6 +1980,12 @@ def main(argv=None) -> int:
         for e in errs:
             eprint(e)
         return 2
+    errs = semantic_errors(mapping)
+    if errs:
+        eprint(f"ملف mapping غير متسق ({len(errs)} خطأ):")
+        for e in errs:
+            eprint(e)
+        return 2
     meta = mapping.get("field_meta") or {}
     used = set()
     for src in mapping["sources"]:
@@ -1050,8 +1999,9 @@ def main(argv=None) -> int:
     if src_file and os.path.basename(src_file) != os.path.basename(args.xlsx):
         eprint(f"تحذير: source_file في mapping ({os.path.basename(src_file)}) لا يطابق الملف المعطى "
                f"({os.path.basename(args.xlsx)}).")
+    wb_map = load_workbook_map(args.out, args.xlsx)
     try:
-        out = normalize(args.xlsx, mapping)
+        out = normalize(args.xlsx, mapping, wb_map)
     except SystemExit as exc:
         eprint(str(exc))
         return 2
@@ -1062,6 +2012,9 @@ def main(argv=None) -> int:
     print(f"  حسب النوع: {st['by_type']} | حسب النطاق: {st['by_scope']}")
     print(f"  مشكلات البيانات: {st['issues']} (مرتفع {sev.get('high', 0)}، متوسط {sev.get('medium', 0)}، "
           f"منخفض {sev.get('low', 0)}) | أعمدة شخصية محذوفة: {st['pii_columns_dropped']}")
+    print(f"  صفوف فارغة متجاوزة: {st['rows_skipped_blank']} | مستبعدة: {st['rows_excluded']} | إجماليات مستبعدة آليًا: "
+          f"{st['rows_total_excluded']} | متخطاة رغم وجود بيانات: {st['rows_skipped_with_content']} | مدمجة بالربط: "
+          f"{st['rows_joined']}")
     return 0
 
 

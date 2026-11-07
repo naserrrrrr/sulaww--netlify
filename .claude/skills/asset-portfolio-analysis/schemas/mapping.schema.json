@@ -5,6 +5,12 @@
   "type": "object",
   "required": [
     "contract_version",
+    "entity",
+    "data_period",
+    "study_date",
+    "currency",
+    "valuation_dates",
+    "sheets",
     "sources",
     "field_meta"
   ],
@@ -26,15 +32,21 @@
           ]
         },
         "evidence": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the value comes from (cell ref, file property) or why it is unknown."
         }
-      }
+      },
+      "required": [
+        "name",
+        "evidence"
+      ]
     },
     "currency": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "minLength": 1
     },
     "data_period": {
@@ -47,12 +59,15 @@
           ]
         },
         "evidence": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the value comes from (cell ref, file property) or why it is unknown."
         }
-      }
+      },
+      "required": [
+        "label",
+        "evidence"
+      ]
     },
     "study_date": {
       "type": "object",
@@ -70,12 +85,15 @@
           ]
         },
         "evidence": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the value comes from (cell ref, file property) or why it is unknown."
         }
-      }
+      },
+      "required": [
+        "value",
+        "evidence"
+      ]
     },
     "analysis_date": {
       "type": "string"
@@ -85,13 +103,15 @@
       "items": {
         "type": "object",
         "required": [
-          "year"
+          "year",
+          "evidence"
         ],
         "properties": {
           "year": {
             "type": [
               "string",
-              "integer"
+              "integer",
+              "null"
             ]
           },
           "basis": {
@@ -101,10 +121,9 @@
             ]
           },
           "evidence": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "minLength": 1,
+            "description": "Where the value comes from (cell ref, file property) or why it is unknown."
           }
         }
       }
@@ -168,7 +187,9 @@
             ]
           }
         }
-      }
+      },
+      "minItems": 1,
+      "description": "One entry per sheet of the workbook, hidden and veryHidden included. normalize.py compares every source's default_scope with its sheet's decision (primary/supplementary -> in_scope, isolated -> isolated, excluded -> excluded)."
     },
     "sources": {
       "type": "array",
@@ -202,11 +223,12 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "record",
-          "match"
-        ],
         "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Referenced by sources[].join.link_id."
+          },
           "record": {
             "type": "string"
           },
@@ -237,8 +259,30 @@
               "string",
               "null"
             ]
+          },
+          "status": {
+            "enum": [
+              "probable",
+              "confirmed",
+              "rejected"
+            ],
+            "description": "Same meaning as match; a join requires status (or match) = confirmed."
           }
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "record",
+              "match"
+            ]
+          },
+          {
+            "required": [
+              "id",
+              "status"
+            ]
+          }
+        ]
       }
     },
     "derived_fields": {
@@ -375,7 +419,8 @@
         "data_rows": {
           "type": "object",
           "required": [
-            "from"
+            "from",
+            "to"
           ],
           "additionalProperties": false,
           "properties": {
@@ -384,11 +429,9 @@
               "minimum": 1
             },
             "to": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 1
+              "type": "integer",
+              "minimum": 1,
+              "description": "Last data row (inclusive); must be >= from."
             }
           }
         },
@@ -466,6 +509,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/columnSpec"
+          }
+        },
+        "join": {
+          "type": "object",
+          "description": "Merge this source's mapped fields into the records of another source (no new in-scope records). Requires links[] {id: link_id, status: confirmed}. Unmatched rows become isolated records; a field already present on the target is kept (join_conflict).",
+          "required": [
+            "into",
+            "on",
+            "key_column",
+            "link_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "into": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "on": {
+              "enum": [
+                "id",
+                "deed",
+                "name_key"
+              ]
+            },
+            "key_column": {
+              "$ref": "#/$defs/col"
+            },
+            "link_id": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "note": {
@@ -659,7 +733,215 @@
             "null"
           ]
         }
-      }
+      },
+      "description": "Controlled dimensions (use, income_nature, ownership, waqf, managed_for_others) map only to the codes of assets/vocab.json.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "dim": {
+                "const": "use"
+              }
+            },
+            "required": [
+              "dim"
+            ]
+          },
+          "then": {
+            "properties": {
+              "map": {
+                "additionalProperties": {
+                  "enum": [
+                    "investment",
+                    "service",
+                    "admin",
+                    "development",
+                    "unknown"
+                  ]
+                }
+              },
+              "default": {
+                "enum": [
+                  "investment",
+                  "service",
+                  "admin",
+                  "development",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dim": {
+                "const": "income_nature"
+              }
+            },
+            "required": [
+              "dim"
+            ]
+          },
+          "then": {
+            "properties": {
+              "map": {
+                "additionalProperties": {
+                  "enum": [
+                    "rent",
+                    "operating",
+                    "other",
+                    "none",
+                    "unknown"
+                  ]
+                }
+              },
+              "default": {
+                "enum": [
+                  "rent",
+                  "operating",
+                  "other",
+                  "none",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dim": {
+                "const": "waqf"
+              }
+            },
+            "required": [
+              "dim"
+            ]
+          },
+          "then": {
+            "properties": {
+              "map": {
+                "additionalProperties": {
+                  "enum": [
+                    "yes",
+                    "no",
+                    "unknown"
+                  ]
+                }
+              },
+              "default": {
+                "enum": [
+                  "yes",
+                  "no",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dim": {
+                "const": "ownership"
+              }
+            },
+            "required": [
+              "dim"
+            ]
+          },
+          "then": {
+            "properties": {
+              "map": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "owned",
+                        "partial",
+                        "usufruct",
+                        "leased_land_project",
+                        "managed_for_others",
+                        "unknown"
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "enum": [
+                          "owned",
+                          "partial",
+                          "usufruct",
+                          "leased_land_project",
+                          "managed_for_others",
+                          "unknown"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "default": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "owned",
+                      "partial",
+                      "usufruct",
+                      "leased_land_project",
+                      "managed_for_others",
+                      "unknown"
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "enum": [
+                        "owned",
+                        "partial",
+                        "usufruct",
+                        "leased_land_project",
+                        "managed_for_others",
+                        "unknown"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "dim": {
+                "const": "managed_for_others"
+              }
+            },
+            "required": [
+              "dim"
+            ]
+          },
+          "then": {
+            "properties": {
+              "map": {
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              "default": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      ]
     },
     "dims": {
       "type": "object",
