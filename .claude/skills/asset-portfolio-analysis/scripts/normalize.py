@@ -37,9 +37,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from apa_common import (  # noqa: E402
     ALL_STATUSES, CONTRACT_VERSION, EMAIL_RE, EXCEL_ERRORS, INCOME_NATURES, KNOWN_STATUSES, NA_TOKENS,
-    NOT_APPLICABLE_TOKENS, OWNERSHIP_KINDS, PII_HEADER_RE, S_BLANK, S_DERIVED, S_ERROR, S_FILLER,
+    NOT_APPLICABLE_TOKENS, OWNERSHIP_KINDS, S_BLANK, S_DERIVED, S_ERROR, S_FILLER,
     S_NOT_APPLICABLE, S_NOT_AVAILABLE, S_TEXT, S_VALUE, S_ZERO_AS_MISSING, S_ZERO_CONFIRMED, S_ZERO_RECORDED,
-    SKILL_DIR, USES, WAQF_VALUES, clean_text, is_filler, is_total_label, load_json, load_vocab,
+    SKILL_DIR, USES, WAQF_VALUES, clean_text, is_filler, is_pii_header, is_total_label, load_json, load_vocab,
     looks_like_phone, name_key, normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
 )
 import formula_eval  # noqa: E402
@@ -927,7 +927,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
             continue
         if header_row and not cspec.get("pii_ok"):
             header = cell_val(ws, header_row, col_index(col))
-            if header is not None and PII_HEADER_RE.search(clean_text(header)) and cspec["kind"] != "ignore":
+            if header is not None and is_pii_header(header) and cspec["kind"] != "ignore":
                 pii_auto.add(col)
                 ctx.stats["pii_columns"] += 1
                 issues.add("pii_header_not_marked", "high", ref(sheet, f"{col}{header_row}"), [],
@@ -962,7 +962,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
         cs = src["columns"].get(col) or {}
         header = cell_val(ws, header_row, col_index(col)) if header_row else None
         if cs.get("kind") == "pii" or col in pii_auto or (not cs.get("pii_ok") and header is not None
-                                                          and PII_HEADER_RE.search(clean_text(header))):
+                                                          and is_pii_header(header)):
             issues.add("pii_header_not_marked", "high", ref(sheet, f"{col}{header_row or start}"), [],
                        f"العمود {col} المستخدم في {role} للمصدر {sid} يحمل بيانات شخصية"
                        + (f" (العنوان «{clean_text(header)}»)" if header is not None else "") + ".",

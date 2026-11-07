@@ -25,6 +25,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_DIR = os.path.dirname(HERE)
+sys.dont_write_bytecode = True  # C23: importing metric_engine must not leave scripts/__pycache__
 sys.path.insert(0, os.path.join(SKILL_DIR, "scripts"))
 
 TOL = 1e-6

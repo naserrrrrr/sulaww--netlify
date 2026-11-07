@@ -1,11 +1,11 @@
 {
-  "_comment": "Single source of truth for personal-data detection. Loaded by scripts/apa_common.py (Python re) and scripts/check_dashboard.mjs (JS RegExp). Patterns must be valid in both engines: ASCII digits only (callers translate Arabic-Indic digits first), fixed-width lookbehind only. Value 'level': block = must never appear in outputs; review = flagged for the analyst (e.g. a 10-digit number may be a deed or a national ID).",
-  "version": 2,
+  "_comment": "Single source of truth for personal-data detection. Loaded by scripts/apa_common.py (Python re) and scripts/check_dashboard.mjs (JS RegExp). Patterns must be valid in both engines: ASCII digits only (callers translate Arabic-Indic digits first), fixed-width lookbehind only. Value 'level': block = must never appear in outputs; review = flagged for the analyst (e.g. a 10-digit number may be a deed or a national ID). header_tests are checked with apa_common.is_pii_header (raw and hamza/tatweel-folded pattern): plural person nouns are personal; counts («عدد الأيتام») and property words («أملاك») are not.",
+  "version": 3,
   "redaction": "<محجوب>",
   "digit_separators": "[\\s\\u00A0\\-.()/]",
   "header": {
     "flags": "i",
-    "pattern": "جوال|هاتف|تلفون|تليفون|تواصل|اتصال|موبايل|واتس|ايميل|إيميل|بريد|mobile|phone|\\btel\\b|whatsapp|e-?mail|contact|اسم\\s*المشرف|المشرف|المسؤول\\s*عن|هوي[ةه]|(?:ال)?سجل\\s*(?:ال)?مدني|إقامة|اقامة|iqama|national\\s*id|\\bid\\s*(?:no|number)\\b|passport|جواز|\\biban\\b|ايبان|آيبان|حساب\\s*بنكي|(?:اسم\\s*)?(?:ال)?(?:مستأجر|مؤجر|مالك|مستفيد|يتيم|وكيل|مندوب|عميل|موظف)(?=\\s|$)|tenant|landlord|owner'?s?\\s*name|beneficiar|orphan"
+    "pattern": "جوال|هاتف|تلفون|تليفون|تواصل|اتصال|موبايل|واتس|ايميل|إيميل|بريد|mobile|phone|\\btel\\b|whatsapp|e-?mail|contact|اسم\\s*المشرف|المشرف|المسؤول\\s*عن|هوي[ةه]|(?:ال)?سجل\\s*(?:ال)?مدني|إقامة|اقامة|iqama|national\\s*id|\\bid\\s*(?:no|number)\\b|passport|جواز|\\biban\\b|ايبان|آيبان|حساب\\s*بنكي|(?:اسم\\s*)?(?:ال)?(?:مستأجر|مؤجر|مالك|مستفيد|يتيم|وكيل|مندوب|عميل|موظف)(?=\\s|$)|(?<![ء-ي])(?<!عدد\\s)(?:ال)?(?:مستأجرين|مستأجرون|ملاك|مستفيدين|مستفيدون|أيتام|موظفين|موظفون|عملاء|وكلاء|مندوبين)(?=\\s|$)|tenant|landlord|owner'?s?\\s*name|beneficiar|orphan"
   },
   "field_key": {
     "flags": "i",
@@ -26,5 +26,9 @@
   "tests": {
     "must_match": ["0501234567", "050 123 4567", "(050) 123-4567", "050.123.4567", "+966 50 123 4567", "00966501234567", "011-4567890", "+966 11 456 7890", "٠٥٠١٢٣٤٥٦٧", "someone@example.com", "SA0380000000608010167519", "1012345678"],
     "must_not_match": ["5,000,000", "1,446,500", "921281", "1403/2/29", "2025-12-02", "REG-5", "15.68%", "144450.5", "مشمول 8 من 11"]
+  },
+  "header_tests": {
+    "must_match": ["اسم المستأجر", "اسم المستاجر", "اســم المستــأجر", "أسماء المستأجرين", "الملاك", "المستفيدين", "المستفيدون من الوقف", "الأيتام", "الموظفين", "العملاء", "رقم الجوال", "Tenant name", "IBAN"],
+    "must_not_match": ["إدارة أملاك", "الأملاك الوقفية", "عدد الأيتام", "عدد المستفيدين", "اسم العقار", "الإيراد 2024", "نوع الأصل", "المساحة"]
   }
 }

@@ -32,7 +32,7 @@ import re  # noqa: E402
 from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    KNOWN_STATUSES, PII_HEADER_RE, PII_KEY_RE, REDACTED, clean_text, load_json, load_vocab, mask_pii, pii_value_hits,
+    KNOWN_STATUSES, PII_KEY_RE, REDACTED, clean_text, is_pii_header, load_json, load_vocab, mask_pii, pii_value_hits,
 )
 
 try:
@@ -75,7 +75,42 @@ EXCL_REASON_AR = {
     "prev_unknown": "إيراد الفترة السابقة غير متاح", "curr_unknown": "إيراد الفترة الحالية غير متاح",
     "both_unknown": "الإيراد غير متاح في الفترتين", "nonpositive": "قيمة صفرية أو سالبة (لا تدخل في التركز)",
     "absent": "الحقل غير موجود لهذا السجل",
+    "revenue_start": "بدء إيراد (الإيراد السابق صفر)؛ خارج نسبة النمو",
 }
+EMPTY_FILTERS_AR = "لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر"
+EMPTY_SCOPE_AR = "لا توجد سجلات مؤهلة لهذا المؤشر في الملف"
+
+
+def empty_text(res: dict) -> str:
+    """Wording of an empty result by its cause (engine empty_cause / reason), never a fixed «no records»."""
+    if res.get("reason"):
+        return res["reason"]
+    return EMPTY_FILTERS_AR if res.get("empty_cause") == "filters" else (res.get("empty_text") or EMPTY_SCOPE_AR)
+
+
+def result_notes(res: dict) -> str:
+    """Reason, engine note (e.g. empty_as_zero), coverage per field (not-applicable outside the denominator) and
+    revenue starts kept outside the growth %."""
+    parts = [res.get("reason"), res.get("note")]
+    if res.get("kind") == "coverage":
+        pf = [p for p in res.get("per_field") or [] if isinstance(p, dict)]
+        if pf:
+            parts.append("التغطية لكل حقل: " + "؛ ".join(
+                f"{p.get('field')}: {p.get('n_known', 0)} من {p.get('n', 0)}"
+                + (f" (لا ينطبق على {p['n_not_applicable']} خارج المقام)" if p.get("n_not_applicable") else "")
+                for p in pf))
+    if res.get("kind") == "growth" and res.get("revenue_start_ids"):
+        sc = res.get("start_change")
+        parts.append(f"بدء إيراد (إيراد سابق صفر) خارج نسبة النمو: {'، '.join(res['revenue_start_ids'][:20])}"
+                     + (f" — التغير {sc:,.0f}" if is_num(sc) else ""))
+    out, seen = [], set()
+    for x in parts:
+        if isinstance(x, str) and x.strip() and x not in seen:
+            seen.add(x)
+            out.append(x.strip())
+    return "؛ ".join(out)
+
+
 KIND_AR = {"count": "عدّ", "sum": "مجموع", "ratio": "نسبة من مجاميع متطابقة", "diff": "فرق", "growth": "تغير بين فترتين",
            "concentration": "تركّز", "coverage": "تغطية بيانات"}
 SOURCE_TYPE_AR = {"file": "ملف", "web": "مصدر ويب", "user": "إفادة المستخدم"}
@@ -463,7 +498,7 @@ class Export:
 
     def _pii_fields(self) -> set:
         """Fields never written: mapped as kind pii, a personal key (PII_KEY_RE), group/kind pii in field_meta, or a
-        text-like field whose label reads as personal (PII_HEADER_RE / PII_KEY_RE) unless its column says pii_ok."""
+        text-like field whose label reads as personal (is_pii_header / PII_KEY_RE) unless its column says pii_ok."""
         out, pii_ok = set(), set()
         for src in self.mapping.get("sources") or []:
             for spec in ((src or {}).get("columns") or {}).values():
@@ -482,7 +517,7 @@ class Export:
             if PII_KEY_RE.search(f) or m.get("group") == "pii" or m.get("kind") == "pii":
                 out.add(f)
             elif f not in pii_ok and m.get("group") in (None, "text", "other", "pii") and \
-                    (PII_HEADER_RE.search(label) or PII_KEY_RE.search(label)):
+                    (is_pii_header(label) or PII_KEY_RE.search(label)):
                 out.add(f)
         return out
 
@@ -554,13 +589,13 @@ class Export:
             res = self.metrics[mid] or {}
             unit = res.get("unit")
             val_cell = (C(res.get("value"), fmt=unit_fmt(unit)) if is_num(res.get("value"))
-                        else C("غير قابل للاحتساب بالبيانات الحالية" if res.get("status") != "empty" else "لا توجد سجلات",
+                        else C("غير قابل للاحتساب بالبيانات الحالية" if res.get("status") != "empty" else empty_text(res),
                                fill=GRAY_FILL, color=GRAY_TXT))
             rows.append([C(res.get("label") or mid, bold=bool(res.get("card"))), val_cell, UNIT_AR.get(unit, unit or "—"),
                          status_cell(res.get("status"), self.vocab),
                          f"{res.get('n_included', 0)} من {res.get('n_scope', 0)}",
                          res.get("scope_text"), res.get("basis"), res.get("valuation_date"),
-                         res.get("reason") or ("بطاقة في الداشبورد" if res.get("card") else "")])
+                         result_notes(res) or ("بطاقة في الداشبورد" if res.get("card") else "")])
         sh.table("tblKpis", ["المؤشر", "القيمة", "الوحدة", "الحالة", "المشمول من النطاق", "النطاق", "الأساس",
                              "تاريخ التقييم", "السبب أو الملاحظة"], rows)
         gaps = {g.get("id"): g for g in self.narrative.get("gaps") or [] if isinstance(g, dict)}
@@ -653,7 +688,8 @@ class Export:
             rf = res.get("resolved_fields") or {}
             excl = res.get("excluded") or []
             val_cell = (C(res.get("value"), fmt=unit_fmt(unit)) if is_num(res.get("value"))
-                        else C("غير متاح", fill=GRAY_FILL, color=GRAY_TXT))
+                        else C(empty_text(res) if res.get("status") == "empty" else "غير متاح",
+                               fill=GRAY_FILL, color=GRAY_TXT))
             share = res.get("coverage_num_share")
             rows.append([
                 mid, res.get("label"), KIND_AR.get(res.get("kind"), res.get("kind")), val_cell, UNIT_AR.get(unit, unit),
@@ -663,7 +699,7 @@ class Export:
                 C(res.get("den"), fmt=FMT_INT) if is_num(res.get("den")) else None,
                 C(share, fmt=FMT_SHARE) if is_num(share) else None,
                 res.get("definition"), res.get("scope_text"), res.get("basis"), res.get("valuation_date"),
-                res.get("period_text"), res.get("source_text"), res.get("reason"),
+                res.get("period_text"), res.get("source_text"), result_notes(res) or None,
                 "، ".join(res.get("included_ids") or []),
                 "، ".join(f"{e.get('id')} ({EXCL_REASON_AR.get(e.get('reason'), e.get('reason'))})" for e in excl[:60]),
                 ("نعم" if spec.get("card") else "لا"),
@@ -1217,7 +1253,7 @@ def privacy_self_check(path: str):
                         continue
                     col = getattr(c, "column", None)
                     if isinstance(v, (int, float)):
-                        if not PII_HEADER_RE.search(above.get(col, "")):
+                        if not is_pii_header(above.get(col, "")):
                             continue
                         t = str(int(v)) if float(v).is_integer() else str(v)
                     elif isinstance(v, str):

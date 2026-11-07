@@ -72,7 +72,7 @@
      "success_kpi": "اعتماد خيار موثق للأرض خلال 90 يومًا",
      "approval_required": "مجلس الإدارة عند اختيار الشراكة",
      "ranking": {"impact": "high", "urgency": "high", "evidence_strength": "moderate", "feasibility": "medium", "cost_level": "low"},
-     "priority": 1},
+     "priority": 2},
     {"id": "R2", "gap_ids": ["G2"], "target": "REG-8 فيلا الروضة وREG-15 مجمع الواحة",
      "problem": "أصلان مدران بلا تقييم 2024 فيُستبعد إيرادهما من نسبة الإيراد إلى التقييم.",
      "evidence": ["REG-8", "REG-15", "m:gross_yield_investment"],
@@ -86,7 +86,7 @@
      "success_kpi": "توافر تقييم 2024 أو أحدث لكل أصل مدر",
      "approval_required": null,
      "ranking": {"impact": "medium", "urgency": "medium", "evidence_strength": "strong", "feasibility": "high", "cost_level": "low"},
-     "priority": 2},
+     "priority": 3},
     {"id": "R3", "gap_ids": ["G3"], "target": "المحفظة",
      "problem": "المصروفات متاحة لثلاثة أصول فقط ولا توجد عقود أو بيانات تحصيل.",
      "evidence": ["m:noi", "سجل الأصول!O2"],
@@ -114,10 +114,10 @@
      "success_kpi": "مطابقة كل بند في ورقة التخصيص أو استبعاده بسبب موثق",
      "approval_required": null,
      "ranking": {"impact": "medium", "urgency": "medium", "evidence_strength": "strong", "feasibility": "high", "cost_level": "low"},
-     "priority": 3}
+     "priority": 4}
   ],
   "top_gaps": ["G1", "G3", "G2"],
-  "top_actions": ["R1", "R3", "R2"],
+  "top_actions": ["R3", "R1", "R2"],
   "plan": {
     "d30": [
       {"rec_id": "R1", "action": "حصر حالة أرض النرجس وقيودها", "deliverable": "مذكرة حالة الأرض", "owner_role": "مدير الاستثمار والأوقاف", "status": "لم يبدأ"},

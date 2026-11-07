@@ -42,6 +42,7 @@
       "hardcoded_total",
       "hidden_sheet",
       "hijri_date_text",
+      "mixed_calendar",
       "mixed_types",
       "numeric_text",
       "partial_period_header",
@@ -152,6 +153,11 @@
       {
         "type": "hidden_sheet",
         "sheet": "المنسدلات",
+        "cell": null
+      },
+      {
+        "type": "mixed_calendar",
+        "sheet": "سجل الأصول",
         "cell": null
       }
     ],
@@ -1097,6 +1103,7 @@
     }
   },
   "issue_types": [
+    "blank_rows_skipped",
     "count_mixed_text",
     "derived_field",
     "field_override",
@@ -1870,7 +1877,8 @@
   "validation": {
     "blocking_count": 0,
     "expected_warnings": [
-      "growth_comparability"
+      "growth_comparability",
+      "hidden_sheet_in_scope"
     ]
   },
   "version_comparison_self": {

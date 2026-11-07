@@ -860,7 +860,7 @@ def expected_document(truth: list) -> OrderedDict:
             "hidden_sheet", "filler_block", "text_in_numeric", "mixed_types", "duplicate_name", "shared_deed",
             "pii_column", "partial_period_header", "row_total_mismatch", "total_mismatch", "cached_missing",
             "count_mismatch", "hardcoded_total", "serial_gap", "garbled_header", "zero_valuation",
-            "hijri_date_text", "numeric_text"])),
+            "hijri_date_text", "numeric_text", "mixed_calendar"])),
         ("anomalies_at", [
             {"type": "row_total_mismatch", "sheet": REG, "cell": f"R{REG_FIRST + 1}"},
             {"type": "row_total_mismatch", "sheet": MAN, "cell": "K4"},
@@ -882,6 +882,7 @@ def expected_document(truth: list) -> OrderedDict:
             {"type": "hidden_sheet", "sheet": MAN, "cell": None},
             {"type": "hidden_sheet", "sheet": EXP, "cell": None},
             {"type": "hidden_sheet", "sheet": LKP, "cell": None},
+            {"type": "mixed_calendar", "sheet": REG, "cell": None},   # column V: Hijri text plus one Gregorian date
         ]),
         ("pii_columns", [{"sheet": REG, "col": COL_OF["sup"]}, {"sheet": REG, "col": COL_OF["phone"]},
                          {"sheet": MAN, "col": "M"}, {"sheet": MAN, "col": "N"}]),
@@ -899,7 +900,7 @@ def expected_document(truth: list) -> OrderedDict:
     doc["issue_types"] = sorted([
         "valuation_total_mismatch", "vat_equal", "text_in_numeric", "zero_as_missing", "count_mixed_text",
         "hijri_conversion", "possible_duplicate_name", "shared_deed", "derived_field", "formula_no_cache",
-        "field_override", "numeric_text_converted"])
+        "field_override", "numeric_text_converted", "blank_rows_skipped"])
     doc["issues_absent"] = ["duplicate_id", "total_like_row", "missing_classification", "pii_header_not_marked",
                             "pii_redacted", "vat_incl_lt_excl", "mapping_unknown_record", "mapping_sheet_name"]
     doc["config"] = OrderedDict([
@@ -915,7 +916,8 @@ def expected_document(truth: list) -> OrderedDict:
     doc["trend"] = trend
     doc["filtered_cases"] = cases
     doc["validation"] = OrderedDict([("blocking_count", 0),
-                                     ("expected_warnings", ["growth_comparability"])])
+                                     # MAN-1/2 come from the hidden managed sheet, kept in scope with a reason
+                                     ("expected_warnings", ["growth_comparability", "hidden_sheet_in_scope"])])
     doc["version_comparison_self"] = OrderedDict([("total_changes", 0), ("only_prev", 0), ("only_curr", 0)])
     return doc
 

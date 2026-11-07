@@ -378,6 +378,11 @@ def _self_test_pii() -> None:
         assert pii_value_hits(x), f"PII pattern miss: {x!r}"
     for x in tests.get("must_not_match", []):
         assert not pii_value_hits(x), f"PII false positive: {x!r} -> {pii_value_hits(x)}"
+    htests = PII_PATTERNS.get("header_tests") or {}
+    for x in htests.get("must_match", []):
+        assert is_pii_header(x), f"PII header miss: {x!r}"
+    for x in htests.get("must_not_match", []):
+        assert not is_pii_header(x), f"PII header false positive: {x!r}"
 
 
 # Header test that tolerates spelling variants the raw pattern misses: tatweel («اســم المستــأجر»), hamza/taa-marbuta

@@ -335,7 +335,7 @@ def pii_fields(field_meta: dict) -> set:
     for f, m in (field_meta or {}).items():
         m = m or {}
         label = str(m.get("label") or "")
-        label_hit = bool(PII_KEY_RE.search(label) or ac.PII_HEADER_RE.search(label)) \
+        label_hit = bool(PII_KEY_RE.search(label) or ac.is_pii_header(label)) \
             and m.get("group") in (None, "text", "other", "pii")
         if m.get("group") == "pii" or m.get("kind") == "pii" or PII_KEY_RE.search(f) or label_hit:
             out.add(f)
@@ -527,6 +527,10 @@ def self_test() -> int:
     eq("fact count", tr.render("{{f:records.isolated}}"), "7")
     eq("fact money", tr.render("{{f:wb.WB-1.recorded}}"), "2,500 ر.س")
     eq("unknown", (tr.render("{{m:nope}} {{f:nope}}"), tr.unknown[-1:], tr.unknown_facts), ("غير متاح غير متاح", ["nope"], ["nope"]))
+    try:
+        ac._self_test_pii()  # value and header cases of assets/pii_patterns.json
+    except AssertionError as exc:
+        fails.append(f"pii_patterns.json: {exc}")
     sc = Scrubber()
     for x in (ac.PII_PATTERNS.get("tests") or {}).get("must_match", []):
         out = sc.text("قبل " + x + " بعد")

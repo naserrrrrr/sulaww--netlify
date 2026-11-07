@@ -16,13 +16,16 @@ APA_SKIP_BROWSER=1 bash tests/run_tests.sh   # دون فحص المتصفح (ي�
 ## ما يفعله `run_tests.sh`
 
 1. يولّد المصنف: `tests/make_synthetic_fixture.py --out tests/_build/synthetic_portfolio.xlsx` (ناتج ثابت بايتًا ببايت)، ويتحقق أن `tests/synthetic/expected.json` المحفوظ مطابق لبيانات المولّد.
-2. يشغّل السلسلة الكاملة: `inspect_workbook` ← نسخ `02_mapping.json` ← `normalize` ← `compute_metrics --init-config` ← `compute_metrics` (ومعاينة بمرشح) ← نسخ `06_narrative.json` ← `validate_analysis` ← `build_dashboard` ← `validate_analysis --html --xlsx` ← `check_dashboard.mjs` ← `export_workbook` ← `compare_versions` للتشغيل مع نفسه.
+2. يشغّل السلسلة الكاملة: `inspect_workbook` ← نسخ `02_mapping.json` ← `normalize` ← `compute_metrics --init-config` ← `compute_metrics` (ومعاينة بمرشح) ← نسخ `06_narrative.json` ← `validate_analysis` ← `build_dashboard` ← `validate_analysis --html --xlsx` ← `check_dashboard.mjs` ← `export_workbook` ← `validate_analysis` مرة أخرى (يفحص `supporting_workbook.xlsx` خلية خلية: `pii_export_patterns`) ← `compare_versions` للتشغيل مع نفسه.
 3. يطابق النتائج بـ `tests/assert_expected.py` مع `tests/synthetic/expected.json` (سماحية 1e-6): خريطة المصنف (01)، كل سجل ونوعه ونطاقه وأبعاده وقيمه وحالاتها (03)، أنواع مشكلات البيانات، إعداد المؤشرات (04)، كل مؤشر قياسي بقيمته وحالته ومجموعاته المشمولة والمستبعدة (05)، أربع حالات تصفية تُعاد بمحرك بايثون وتُقارن بحالات التطابق في 05، عدم وجود أخطاء مانعة (07)، نجاح فحص المتصفح (08)، صفر فروق في مقارنة النسخة بنفسها، وعدم ظهور أي اسم مشرف أو رقم جوال وهمي في أي مخرج (json/md/html/xlsx).
 4. اختبارات سلبية:
    - (أ) خلاصة تنفيذية من 60 كلمة ← `validate_analysis` يخرج بـ 2 والخطأ المانع هو `exec_summary_length`.
    - (ب) ربط عمود «صافي الأصول» كمبلغ (`money`) ← `normalize` يسجل `text_in_numeric` ولا يخزن أي رقم من العمود.
-   - (ج) البناء دون `--draft` مع أخطاء مانعة ← `build_dashboard` يخرج بـ 2 ولا يكتب `dashboard.html`؛ ومع `--draft` تُبنى مسودة.
+   - (ج) البناء دون `--draft` مع أخطاء مانعة ← `build_dashboard` يخرج بـ 2 ولا يكتب `dashboard.html`؛ ومع `--draft` تُبنى مسودة، و`check_dashboard` يفشلها (خروج 1) ما لم يُمرَّر `--allow-draft`.
+   - (د) جعل قابلية مقارنة النمو «confirmed» دون دليل في `field_meta` ← خطأ مانع `growth_comparability_basis`.
+   - (هـ) درجة رقمية («82 من 100») في الخلاصة ← خطأ مانع `narrative_scores`.
 5. اختبارات الوحدة للمحرك إن وُجدت: `tests/test_metric_engine.py` و`tests/test_metric_engine_js.mjs`. تغطي بسجلات وهمية في الذاكرة: بدء الإيراد خارج نسبة النمو، ومجموع سابق صفري أو سالب، و«لا ينطبق» خارج مقام التغطية، وسلسلة السجلات نفسها في التطور الزمني، و`valid_periods`، وسبب الخلو (`empty_cause`) و`empty_as_zero`، وقواعد بناء الإعداد في `compute_metrics.py` (استبعاد الوحدات والعقود من الإيراد، مصادر المؤشر، قابلية المقارنة، الإيراد الشامل للضريبة، التوزيعات ذات القيمة الواحدة، الحقول المعروفة على سجلات معزولة فقط). وتقارن نسخة JS بنسخة بايثون قيمةً بقيمة مطابقةً تامة (bit-identical) على عدة تصفيات.
+   ثم اختبارات الانحدار: `tests/test_normalize.py` (مصنفات وهمية صغيرة لقواعد التطبيع: الإجماليات، والصفوف الفارغة، وأصفار المدخلات الفارغة، والمفردات، والربط `join`، والدمج، وقرارات الأوراق، والتداخل، والسياق)، و`tests/robustness/test_inspect_robustness.py` (حالات الفحص: صف العناوين في النطاقات العادية، وصفوف الإجمالي، والبيانات الشخصية، والتقويم، والتطابق بين الأوراق)، والاختبارات الذاتية `--self-test` في `compare_versions.py` و`export_workbook.py` و`build_dashboard.py` (ومنها أنماط `assets/pii_patterns.json` للقيم والعناوين) و`check_dashboard.mjs`.
 
 ## ما يغطيه المصنف (فخاخ الموجّه الأصلي)
 
@@ -45,6 +48,8 @@ APA_SKIP_BROWSER=1 bash tests/run_tests.sh   # دون فحص المتصفح (ي�
 | `synthetic/06_narrative.json` | سرد صالح: خلاصة 154 كلمة برموز `{{m:…}}`، تقييم بأربعة أبعاد دون درجات، 4 فجوات و4 توصيات كاملة الحقول، خطة 30/60/90، سيناريوهات «غير معدة» مع مدخلاتها، 3 أسئلة |
 | `synthetic/expected.json` | النتائج المتوقعة (مولّدة ثم مراجعة يدويًا) |
 | `assert_expected.py` | يطابق مجلد التشغيل مع `expected.json` |
+| `test_normalize.py` | اختبار انحدار `normalize.py` على مصنفات وهمية يبنيها في مجلد مؤقت (خروج 0/1) |
+| `robustness/test_inspect_robustness.py` | اختبار متانة `inspect_workbook.py` على حالات وهمية (يكتب في `$APA_BUILD_DIR/robustness` أو مجلد مؤقت) |
 | `run_tests.sh` | المشغّل الكامل |
 
 ## الحساب اليدوي للمؤشرات (الفترة 2025، التقييم 2024)

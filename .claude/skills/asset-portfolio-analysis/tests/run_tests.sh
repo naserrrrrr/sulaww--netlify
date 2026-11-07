@@ -129,6 +129,18 @@ fi
 if have_script "$S/export_workbook.py" "export_workbook" && have_files "export_workbook" "$RUN/05_metrics.json"; then
   run_step "export_workbook" 0 "${PY[@]}" "$S/export_workbook.py" --run-dir "$RUN" || true
 fi
+# re-validate once the supporting workbook exists: pii_export_patterns scans every cell of it (C24)
+if have_script "$S/validate_analysis.py" "validate_analysis (after export)" && have_files "validate after export" \
+    "$RUN/supporting_workbook.xlsx" "$RUN/dashboard.html"; then
+  run_step "validate_analysis (after export: supporting workbook scanned)" 0 "${PY[@]}" "$S/validate_analysis.py" \
+    --run-dir "$RUN" --xlsx "$XLSX" --html "$RUN/dashboard.html" || true
+  run_step "validate after export: pii_export_patterns ran and passed" 0 "${PY[@]}" -c '
+import json, sys
+v = json.load(open(sys.argv[1], encoding="utf-8"))
+c = [x for x in v["checks"] if x["id"] == "pii_export_patterns"]
+print(c)
+sys.exit(0 if c and all(x["passed"] and not x.get("skipped") for x in c) else 1)' "$RUN/07_validation.json" || true
+fi
 if have_script "$S/compare_versions.py" "compare_versions" && have_files "compare_versions" "$RUN/03_records.json"; then
   run_step "compare_versions (run vs itself)" 0 "${PY[@]}" "$S/compare_versions.py" --prev "$RUN" --curr "$RUN" \
     --out "$RUN/version_comparison.json" || true
@@ -173,7 +185,48 @@ sys.exit(0 if "exec_summary_length" in bad else 1)' "$NEG_A/07_validation.json" 
     if [[ -f "$NEG_A/dashboard.html" ]]; then fail "neg (c): dashboard.html written despite blocking errors"
     else pass "neg (c): no dashboard.html written"; fi
     run_step "neg (c): build --draft still produces a draft" 0 "${PY[@]}" "$S/build_dashboard.py" --run-dir "$NEG_A" --draft || true
+    # D18: the browser check fails a draft unless --allow-draft is passed
+    if [[ "${APA_SKIP_BROWSER:-0}" != "1" ]] && command -v node >/dev/null 2>&1 && [[ -f "$NEG_A/dashboard.html" ]]; then
+      run_step "neg (c): check_dashboard on a draft -> exit 1" 1 node "$S/check_dashboard.mjs" --html "$NEG_A/dashboard.html" \
+        --out "$NEG_A/check_draft" || true
+      run_step "neg (c): check_dashboard --allow-draft -> exit 0" 0 node "$S/check_dashboard.mjs" --html "$NEG_A/dashboard.html" \
+        --out "$NEG_A/check_draft_allowed" --allow-draft || true
+    fi
   fi
+fi
+# (d) growth marked «confirmed» while field_meta does not prove equal VAT/basis/completeness -> blocking (B1)
+# (e) a numeric score («82 من 100») in the summary -> blocking (B6)
+if have_files "neg (d)/(e)" "$RUN/05_metrics.json" "$RUN/01_workbook_map.json" && have_script "$S/validate_analysis.py" "neg (d)/(e)"; then
+  for case in d e; do
+    NEG_X="$BUILD/neg_$case"
+    mkdir -p "$NEG_X"
+    for f in 01_workbook_map.json 02_mapping.json 03_records.json 04_metrics_config.json 05_metrics.json 06_narrative.json; do
+      cp "$RUN/$f" "$NEG_X/$f"
+    done
+  done
+  "${PY[@]}" - "$BUILD/neg_d/04_metrics_config.json" <<'PYEOF'
+import json, sys
+c = json.load(open(sys.argv[1], encoding="utf-8"))
+p = next(p for p in c["periods"] if p.get("prev_rev_field"))
+p["comparable_with_prev"] = {"status": "confirmed", "reason": "تأكيد يدوي دون دليل"}
+json.dump(c, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PYEOF
+  "${PY[@]}" - "$BUILD/neg_e/06_narrative.json" <<'PYEOF'
+import json, sys
+n = json.load(open(sys.argv[1], encoding="utf-8"))
+n["executive_summary"] += " وتحصل المحفظة على تقييم عام 82 من 100."
+json.dump(n, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PYEOF
+  for pair in "d:growth_comparability_basis:growth marked confirmed without evidence" "e:narrative_scores:numeric score in the summary"; do
+    case="${pair%%:*}"; rest="${pair#*:}"; cid="${rest%%:*}"; what="${rest#*:}"
+    run_step "neg ($case): $what -> validate exits 2" 2 "${PY[@]}" "$S/validate_analysis.py" --run-dir "$BUILD/neg_$case" || true
+    run_step "neg ($case): $cid is a blocking finding" 0 "${PY[@]}" -c '
+import json, sys
+v = json.load(open(sys.argv[1], encoding="utf-8"))
+bad = [c["id"] for c in v["checks"] if not c["passed"] and c["level"] == "blocking"]
+print("blocking:", bad)
+sys.exit(0 if sys.argv[2] in bad else 1)' "$BUILD/neg_$case/07_validation.json" "$cid" || true
+  done
 fi
 # (b) mapping «صافي الأصول» (text labels) as money -> text_in_numeric issue and no number
 if have_script "$S/normalize.py" "neg (b)" && have_files "neg (b)" "$XLSX"; then
@@ -202,7 +255,7 @@ sys.exit(0 if iss and tvs and not nums else 1)' "$NEG_B/03_records.json" || true
 fi
 
 # --- 5. unit tests ---------------------------------------------------------------------------------------
-say "[5] اختبارات الوحدة للمحرك"
+say "[5] اختبارات الوحدة والانحدار"
 if [[ -f "$TESTS_DIR/test_metric_engine.py" ]]; then
   run_step "tests/test_metric_engine.py" 0 "${PY[@]}" "$TESTS_DIR/test_metric_engine.py" || true
 else skip "tests/test_metric_engine.py (غير موجود)"; fi
@@ -211,6 +264,24 @@ if [[ -f "$TESTS_DIR/test_metric_engine_js.mjs" ]]; then
     run_step "tests/test_metric_engine_js.mjs" 0 node "$TESTS_DIR/test_metric_engine_js.mjs" || true
   else fail "tests/test_metric_engine_js.mjs — node غير مثبت"; fi
 else skip "tests/test_metric_engine_js.mjs (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_normalize.py" ]]; then
+  run_step "tests/test_normalize.py" 0 "${PY[@]}" "$TESTS_DIR/test_normalize.py" || true
+else skip "tests/test_normalize.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/robustness/test_inspect_robustness.py" ]]; then
+  # honours APA_BUILD_DIR (writes to $APA_BUILD_DIR/robustness), else a temp dir removed afterwards
+  run_step "tests/robustness/test_inspect_robustness.py" 0 env APA_BUILD_DIR="$BUILD" "${PY[@]}" \
+    "$TESTS_DIR/robustness/test_inspect_robustness.py" || true
+else skip "tests/robustness/test_inspect_robustness.py (غير موجود)"; fi
+for st in compare_versions export_workbook build_dashboard; do
+  if have_script "$S/$st.py" "$st --self-test"; then
+    run_step "$st --self-test" 0 "${PY[@]}" "$S/$st.py" --self-test || true
+  fi
+done
+if command -v node >/dev/null 2>&1; then
+  if have_script "$S/check_dashboard.mjs" "check_dashboard --self-test"; then
+    run_step "check_dashboard --self-test" 0 node "$S/check_dashboard.mjs" --self-test || true
+  fi
+else fail "check_dashboard --self-test — node غير مثبت"; fi
 
 # --- summary -------------------------------------------------------------------------------------------------
 say ""

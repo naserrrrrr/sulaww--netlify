@@ -33,8 +33,8 @@ import re  # noqa: E402
 from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    ALL_STATUSES, CONTRACT_VERSION, EMAIL_RE, KNOWN_STATUSES, NA_TOKENS, NOT_APPLICABLE_TOKENS,
-    PII_HEADER_RE, SKILL_DIR, clean_text, load_json, normalize_arabic, save_json, sha256_file, word_count_ar,
+    ALL_STATUSES, CONTRACT_VERSION, KNOWN_STATUSES, NA_TOKENS, NOT_APPLICABLE_TOKENS,
+    PII_HEADER_RE, SKILL_DIR, clean_text, is_pii_header, load_json, normalize_arabic, save_json, sha256_file, word_count_ar,
 )
 
 RUN_FILES = OrderedDict([
@@ -61,7 +61,6 @@ _AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "012345678
 TOKEN_RE = re.compile(r"\{\{\s*m:\s*([A-Za-z0-9_\-]+)((?:\.[A-Za-z0-9_]+){0,2})\s*\}\}")
 LOOSE_TOKEN_RE = re.compile(r"\{\{|\}\}")
 # Saudi mobile, tolerant to one space/dash between digits (visible text and strings only — never raw numbers)
-PHONE_LOOSE_RE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?[\s\-]?5(?:[\s\-]?\d){8}(?!\d)")
 HEX_RE = re.compile(r"^[0-9a-fA-F]{16,}$")
 PII_KEY_RE = re.compile(
     r"(?i)(^|[._\-])(phone|mobile|tel|telephone|email|e_mail|supervisor|supervisor_name|contact_phone|contact_no|"
@@ -79,12 +78,9 @@ NET_RE = re.compile(_AR_PFX + r"صاف(?:يا|يه|ي)?(?![\w])(?!\s+(?:من\s+)
 TOTAL_RETURN_RE = re.compile(_AR_PFX + r"عايدا?\s+(?:(?:ال)?استثماريا?\s+)?(?:ال)?كليا?(?![\w])")
 NET_YIELD_RE = re.compile(_AR_PFX + r"عايدا?\s+(?:ال)?صاف(?:يا|ي)?(?![\w])|" + _AR_PFX + r"صافي\s+(?:ال)?عايد(?![\w])")
 BEFORE_EXP_RE = re.compile(r"قبل\s+(?:\S+\s+)?(?:ال)?(?:مصروفات|مصاريف|نفقات)")  # «قبل خصم المصروفات» (B11)
-SCORE_RE = re.compile(r"من\s*100|/\s*100(?!\d)|(?<!\d)\d{1,2}\s*/\s*10(?!\d)|درجه\s*\d|\d+\s*نقاط?(?![\w])|(?<![\w])علامه\s*\d")
 PCT_RE = re.compile(r"\d+(?:[.,]\d+)?\s*[%٪]|بالمايه|في المايه")
 JUDGE_RE = re.compile(r"ممتاز|جيد|ضعيف|سيي|مقبول|متميز|رايع|مرتفع|منخفض|متدن|عالي|قوي|ممتازه|ضعيفه")
 SUPERLATIVE_RE = re.compile(r"ممتاز|متميز|رايع|مثالي|ضعيفه?\s+جدا|سييه?\s+جدا|سيي\s+للغايه|كارثي")
-_AR_LETTER = "\u0621-\u064a"
-DRASTIC_RE = re.compile(rf"(?<![{_AR_LETTER}])(?:و|ف)?(?:ب|ل)?(?:ال)?(?:بيع|هدم)(?:ه|ها|هم|هما)?(?![{_AR_LETTER}])|تغيير\s+(?:ال)?استخدام")
 STUDY_RE = re.compile(r"دراس|تحقق|التحقق|تقييم|مراجع|جدوي|استشار|فحص|مقارن|عروض|نظامي|موافق|اعتماد|حصر|قيود|متطلبات|تثبت")
 IMPLEMENTED_RE = re.compile(r"منفذ|نفذت|تم التنفيذ|مكتمل|منجز")
 ELEMENTS = OrderedDict([
@@ -223,11 +219,6 @@ def walk_keys(obj, path=""):
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
             yield from walk_keys(v, f"{path}[{i}]")
-
-
-def negated(norm_text: str, start: int, window: int = 3) -> bool:
-    before = norm_text[:start].split()[-window:]
-    return any(w in NEGATIONS for w in before)
 
 
 def affirmative_hits(regex, text: str) -> list:
@@ -728,6 +719,8 @@ def c_pairwise_sets(ctx: Ctx):
             s1 += v1
             s2 += v2
             sd += v1 - v2
+        exc_reason = {e.get("id"): e.get("reason") for e in as_list(res.get("excluded")) if isinstance(e, dict)}
+        starts, bad_start, start_sum = set(as_list(res.get("revenue_start_ids"))), [], 0.0
         for rid in exc:
             r = recs.get(rid)
             if r is None:
@@ -736,8 +729,26 @@ def c_pairwise_sets(ctx: Ctx):
             ok = _known(r, f1) and _known(r, f2)
             if ok and res["kind"] == "ratio":
                 ok = _fv(r, f2)[1] > 0
+            if ok and res["kind"] == "growth" and exc_reason.get(rid) == "revenue_start":
+                # a revenue start (prev 0, curr > 0) is known on both sides by design: it sits outside the %,
+                # listed in revenue_start_ids, its current revenue summed into start_change
+                if rid in starts and _fv(r, f1)[1] == 0 and _fv(r, f2)[1] > 0:
+                    start_sum += _fv(r, f2)[1]
+                else:
+                    bad_start.append(rid)
+                continue
             if ok:
                 bad_exc.append(rid)
+        if bad_start:
+            out.append((f"سجلات مستبعدة بسبب «بدء إيراد» دون أن يكون إيرادها السابق صفرًا والحالي موجبًا أو دون إدراجها في "
+                        f"revenue_start_ids: {short_list(bad_start)}", where))
+        if res["kind"] == "growth" and starts:
+            not_listed = sorted(x for x in starts if exc_reason.get(x) != "revenue_start")
+            if not_listed:
+                out.append((f"revenue_start_ids تذكر سجلات غير مستبعدة بسبب بدء الإيراد: {short_list(not_listed)}", where))
+            elif not bad_start and not close(res.get("start_change"), start_sum, 1e-7):
+                out.append((f"start_change = {fmt_num(res.get('start_change'))} لا يساوي مجموع الإيراد الحالي لسجلات بدء "
+                            f"الإيراد ({fmt_num(start_sum)})", where))
         if missing:
             out.append((f"معرّفات غير موجودة في 03: {short_list(missing)}", where))
         if bad_inc:
@@ -1014,10 +1025,6 @@ def c_top_lists(ctx: Ctx):
         if len(set(map(str, lst))) != len(lst):
             out.append(("عناصر مكررة", f"06_narrative.json:{key}"))
     return out
-
-
-def _scenario_type(item):
-    return normalize_arabic(item.get("opportunity_type") or item.get("opportunity") or "")
 
 
 def scenario_findings(ctx: Ctx):
@@ -2048,7 +2055,7 @@ def _export_hits(exp: dict, levels, advice: str) -> list:
     deed numbers: a 9-digit amount would look like a mobile number."""
     by_sheet = OrderedDict()
     for sheet, coord, text, is_number, header in exp["cells"]:
-        if is_number and not PII_HEADER_RE.search(header or ""):
+        if is_number and not is_pii_header(header or ""):
             continue
         kinds = pii_value_hits(text, levels)
         if kinds:
@@ -2295,28 +2302,6 @@ def c_superlatives(ctx: Ctx):
     return out
 
 
-def _metric_numbers(ctx):
-    """value -> list of metric ids (numeric facts computed by the scripts)."""
-    out = defaultdict(set)
-
-    def add(v, mid):
-        if is_num(v) and math.isfinite(v):
-            out[float(v)].add(mid)
-    for mid, res in ctx.metrics.items():
-        res = as_dict(res)
-        for k in NUM_KEYS_IN_RESULT:
-            add(res.get(k), f"{mid}" if k == "value" else f"{mid}.{k}")
-        for t in as_list(res.get("top_shares")):
-            add(as_dict(t).get("value"), f"{mid}.top_shares")
-    for bid, b in as_dict(ctx.met_doc.get("breakdowns")).items():
-        for row in as_list(as_dict(b).get("rows")):
-            add(as_dict(row).get("value"), f"breakdown:{bid}")
-        add(as_dict(b).get("total"), f"breakdown:{bid}.total")
-    for p in as_list(as_dict(ctx.met_doc.get("trend")).get("points")):
-        add(as_dict(p).get("value"), "trend")
-    return out
-
-
 def _parse_num(s: str):
     t = s.translate(_AR_INDIC).replace("٬", ",").replace("٫", ".").replace(",", "")
     try:
@@ -2368,14 +2353,6 @@ def _file_numbers(ctx):
                 except ValueError:
                     pass
     return nums
-
-
-def _matches(x, dec, candidates):
-    tol = 0.5 * (10 ** -dec) + 1e-9
-    for c in candidates:
-        if abs(x - c) <= tol or abs(x - c) <= 1e-9 * max(abs(c), 1):
-            return c
-    return None
 
 
 def number_findings(ctx: Ctx):
@@ -2652,6 +2629,8 @@ NQ_VAT_AR = {"excl": "بدون ضريبة", "incl": "شامل الضريبة", "
              "unknown": "غير موضح"}
 NQ_BASIS_AR = {"actual": "فعلي", "expected": "متوقع", "recorded": "مسجل", "contract": "تعاقدي", "unknown": "غير موضح"}
 NQ_COMPL_AR = {"full_year": "سنة كاملة", "partial": "فترة جزئية", "unknown": "غير موضح"}
+NQ_CASH_CLASS = {"collected": "collected", "accrued": "accrued"}  # same classes as compute_metrics.CASH_CLASS
+NQ_CASH_AR = {"collected": "محصّل", "accrued": "مستحق", "unknown": "غير موضح"}
 NQ_EXCL_CLAIM_RE = re.compile(r"(?:بدون|دون|غير\s+شامله?|قبل|باستثناء|بعد\s+استبعاد)\s+(?:ال)?ضريب"
                               r"|صافي\s+(?:من\s+)?(?:ال)?ضريب")
 NQ_INCL_CLAIM_RE = re.compile(r"(?<!غير )(?:شامله?|متضمنه?|يشمل|تشمل|مع|بما\s+فيها?)\s+(?:ال)?ضريب")
@@ -2981,7 +2960,8 @@ def nq_rendered_word_count(ctx, text: str) -> int:
 # ---- B1: growth comparability recomputed from field_meta -------------------------
 def nq_comparability(prev_meta: dict, curr_meta: dict):
     """Mirror of compute_metrics.comparability: (status, reasons). Known-and-different VAT basis (excl/none vs
-    incl), revenue basis (actual/recorded vs expected/contract) or any partial period ⇒ not_comparable; all of
+    incl), revenue basis (actual/recorded vs expected/contract), accrual (collected vs accrued) or any partial
+    period ⇒ not_comparable; all of
     VAT, basis and completeness known and equal ⇒ confirmed; otherwise unverified."""
     pv, cv = prev_meta.get("vat") or "unknown", curr_meta.get("vat") or "unknown"
     pb, cb = prev_meta.get("basis") or "unknown", curr_meta.get("basis") or "unknown"
@@ -2993,6 +2973,9 @@ def nq_comparability(prev_meta: dict, curr_meta: dict):
         diffs.append(f"الضريبة: {NQ_VAT_AR.get(pv, pv)} (السابقة) مقابل {NQ_VAT_AR.get(cv, cv)} (الحالية)")
     if pb in NQ_BASIS_CLASS and cb in NQ_BASIS_CLASS and NQ_BASIS_CLASS[pb] != NQ_BASIS_CLASS[cb]:
         diffs.append(f"أساس الإيراد: {NQ_BASIS_AR.get(pb, pb)} (السابقة) مقابل {NQ_BASIS_AR.get(cb, cb)} (الحالية)")
+    pk, ck = prev_meta.get("cash_basis") or "unknown", curr_meta.get("cash_basis") or "unknown"
+    if pk in NQ_CASH_CLASS and ck in NQ_CASH_CLASS and NQ_CASH_CLASS[pk] != NQ_CASH_CLASS[ck]:
+        diffs.append(f"الاستحقاق والتحصيل: {NQ_CASH_AR.get(pk, pk)} (السابقة) مقابل {NQ_CASH_AR.get(ck, ck)} (الحالية)")
     if diffs:
         return "not_comparable", diffs
     same = pv == cv != "unknown" and pb == cb != "unknown" and pc == cc != "unknown"
@@ -3057,7 +3040,8 @@ def c_nq_growth_comparability_basis(ctx: Ctx):
     if tr.get("enabled", True) and len(fields) >= 2:
         cfg = as_dict(tr.get("comparable")).get("status")
         worst, notes = "confirmed", []
-        for a, b in zip(fields, fields[1:]):
+        # every pair of trend periods, as compute_metrics.trend_comparability (not only neighbours)
+        for a, b in ((a, b) for i, a in enumerate(fields) for b in fields[i + 1:]):
             st, rs = nq_comparability(as_dict(meta.get(a["field"])), as_dict(meta.get(b["field"])))
             if st == "not_comparable":
                 worst = "not_comparable"

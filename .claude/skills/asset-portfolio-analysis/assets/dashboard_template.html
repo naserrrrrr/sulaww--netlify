@@ -2039,6 +2039,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (rec.scope_reason) add(body, h('p', { class: 'small muted', style: 'margin-top:6px' }, 'سبب النطاق: ' + str(rec.scope_reason)));
     var src = rec.source || {};
     add(body, h('p', { class: 'small', style: 'margin-top:6px' }, 'المصدر: ', src.ref_name ? refc(src.ref_name) : bdi((src.sheet || '') + (src.row ? ' — الصف ' + src.row : ''))));
+    if (src.merge_note) add(body, h('p', { class: 'small muted', style: 'margin-top:4px' }, 'خلية مدمجة: ' + str(src.merge_note)));
+    var joined = list(src.joined).filter(function (j) { return j && typeof j === 'object'; });
+    if (joined.length) add(body, h('p', { class: 'small muted', style: 'margin-top:4px' }, 'بيانات مضافة بربط مؤكد من: ',
+      joined.map(function (j, k) {
+        return [k ? '، ' : null, bdi(j.sheet !== undefined ? str(j.sheet).trim() + (j.row ? ' — الصف ' + j.row : '') : str(j.source_id)),
+          j.link_id ? [' (الرابط ', idc(j.link_id), ')'] : null];
+      })));
     if (isManaged(rec)) add(body, h('p', { class: 'small', style: 'margin-top:6px' }, h('span', { class: 'flag managed' }, MANAGED_TAG), ' إيراده يُعرض للتوثيق ولا يدخل دخل الجمعية أو عوائدها.'));
 
     var dsec = h('div', { class: 'detail-sec' }, h('h4', null, 'التصنيف'));
@@ -2332,7 +2339,15 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
 
   function renderIssues() {
     var b = clear(SEC.issues.body);
-    var rows = ISSUES.slice().sort(function (a, c) { return (SEV_ORDER[a.severity] === undefined ? 3 : SEV_ORDER[a.severity]) - (SEV_ORDER[c.severity] === undefined ? 3 : SEV_ORDER[c.severity]); });
+    // issues touching in-scope records (or none) first, then those on isolated/excluded records only; by severity within each
+    var outOnly = function (x) {
+      var ids = list(x.record_ids).filter(function (i) { return hasOwn.call(REC, i); });
+      return ids.length > 0 && ids.every(function (i) { return REC[i].scope !== 'in_scope'; }) ? 1 : 0;
+    };
+    var sev = function (x) { return SEV_ORDER[x.severity] === undefined ? 3 : SEV_ORDER[x.severity]; };
+    var rows = ISSUES.map(function (x, k) { return [x, k]; }).sort(function (a, c) {
+      return (outOnly(a[0]) - outOnly(c[0])) || (sev(a[0]) - sev(c[0])) || (a[1] - c[1]);
+    }).map(function (p) { return p[0]; });
     add(b, h('p', { class: 'small muted' }, 'جودة البيانات منفصلة عن أداء المحفظة: هذه مشكلات في الملف وأثرها على المؤشرات وطريقة معالجتها.'));
     if (!rows.length) add(b, h('p', { class: 'muted' }, 'لا توجد مشكلات بيانات مسجلة.'));
     else add(b, simpleTable([
@@ -2571,7 +2586,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (conf.length) {
       add(b, h('h5', null, 'تعارض معرّفات لم يُطابق تلقائيًا (' + conf.length + ')'));
       add(b, simpleTable([{ label: 'المعرّف', cell: function (x) { return idc(x.id); } }, { label: 'الاسم السابق', cell: function (x) { return str(x.prev_name) || '—'; } },
-        { label: 'الاسم الحالي', cell: function (x) { return str(x.curr_name) || '—'; } }, { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }], conf, 'mini-table'));
+        { label: 'الاسم الحالي', cell: function (x) { return str(x.curr_name) || '—'; } },
+        { label: 'المطابقة بالصك', cell: function (x) {
+          var parts = [];
+          if (x.prev_matched_to) parts.push(['السابق ← ', idc(x.prev_matched_to)]);
+          if (x.curr_matched_from) parts.push([parts.length ? '؛ ' : null, 'الحالي ← ', idc(x.curr_matched_from)]);
+          return parts.length ? parts : '—';
+        } },
+        { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }], conf, 'mini-table'));
     }
     var amb = list(vc.ambiguous || (vc.matching && vc.matching.ambiguous)).filter(function (x) { return x && typeof x === 'object'; });
     if (amb.length) {
@@ -2592,7 +2614,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
           var af = x.affected_by && typeof x.affected_by === 'object' ? x.affected_by : {};
           return Object.keys(af).map(function (k) { return vcCatLabel(labels, k) + ' (' + list(af[k]).length + ')'; }).join('؛ ') || '—';
         } },
-        { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }
+        { label: 'ملاحظة', cell: function (x) {
+          var dc = list(x.definition_causes).map(str).filter(Boolean);
+          if (!dc.length) return str(x.note) || '—';
+          return [str(x.note) || null, h('ul', { class: 'small' }, dc.map(function (c) { return h('li', null, 'تغير تعريف: ', c); }))];
+        } }
       ], md, 'mini-table'));
     }
     var sum = list(vc.summary_ar || vc.summary).filter(function (x) { return typeof x === 'string' && x.trim(); });
@@ -2636,7 +2662,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
           var t = x.title || x.target || (r && (r.title || r.target));
           return [idc(x.rec_id), t ? ' — ' : null, t ? linkIds(t) : null];
         } },
-        { label: 'الحالة', cell: function (x) { return pill(str(x.status) || 'لم يُتحقق', FOLLOW_TONE[str(x.status)] || 'neutral'); } },
+        { label: 'الحالة', cell: function (x) { return pill(str(x.status) || 'لم يبدأ', FOLLOW_TONE[str(x.status)] || 'neutral'); } },
         { label: 'الدليل', cell: function (x) {
           var ev = x.evidence;
           if (ev === null || ev === undefined || ev === '' || (Array.isArray(ev) && !ev.length)) return h('span', { class: 'muted' }, 'لا يوجد دليل بعد');
