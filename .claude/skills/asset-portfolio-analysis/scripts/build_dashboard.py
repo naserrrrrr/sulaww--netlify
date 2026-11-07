@@ -3,6 +3,7 @@
 
 Usage:
     python3 scripts/build_dashboard.py --run-dir RUN [--draft]
+    python3 scripts/build_dashboard.py --self-test      (token grammar and privacy scrub on synthetic values)
 
 Reads (data-contract.md §0):
     01_workbook_map.json  (optional; summary only — sheets, anomalies, PII column locations)
@@ -17,25 +18,36 @@ Writes:
 
 Exit codes: 0 ok · 1 missing/invalid input · 2 blocking validation errors (without --draft).
 
-Narrative tokens rendered in every narrative string:
-    {{m:metric_id}}         -> formatted value + unit from 05_metrics.json («غير قابل للاحتساب» when null)
-    {{m:metric_id.field}}   -> a field of that result (n_included, abs_change, coverage_num_share, ...)
+Narrative tokens rendered in every narrative string (TOKEN_RE / FACT_TOKEN_RE — validate_analysis.py uses the same grammar):
+    {{m:metric_id}}             -> formatted value + unit from 05_metrics.json («غير قابل للاحتساب» when null)
+    {{m:metric_id.field}}       -> a field of that result (n_included, abs_change, coverage_num_share, ...)
+    {{m:metric_id.field.sub}}   -> a key of a dict field or an index of a list field (comparability.reason,
+                                   same_records.n, ...); metric_id may also be `trend` or a breakdown id
+    {{f:key}}                   -> a fact outside 05 from facts.compute_facts(RUN) (records.isolated, wb.WB-004.recomputed ...)
 Formatting matches the dashboard: Western digits, thousands separators, «ر.س» for SAR,
 percent with 2 decimals below 10 and 1 decimal otherwise, half-away-from-zero rounding.
+
+Privacy (defence in depth; normalize.py already drops PII columns): keys matching apa_common.PII_KEY_RE are dropped
+and block-level personal-data patterns of assets/pii_patterns.json are masked with apa_common.mask_pii in every string;
+review-level hits (e.g. a 10-digit number that may be a national ID or a deed) are kept and reported.
 """
 from __future__ import annotations
 
-import argparse
-import copy
-import datetime as _dt
-import json
-import os
-import re
 import sys
-from decimal import Decimal, ROUND_HALF_UP
+
+sys.dont_write_bytecode = True
+
+import argparse  # noqa: E402
+import copy  # noqa: E402
+import datetime as _dt  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+from decimal import Decimal, ROUND_HALF_UP  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import apa_common as ac  # noqa: E402
+import facts as facts_mod  # noqa: E402
 
 SKILL_DIR = ac.SKILL_DIR
 TEMPLATE_PATH = os.path.join(SKILL_DIR, "assets", "dashboard_template.html")
@@ -45,26 +57,29 @@ DATA_MARK = "/*__APA_DATA__*/"
 
 NOT_COMPUTABLE = "غير قابل للاحتساب"
 UNAVAILABLE = "غير متاح"
-PHONE_MASK = "[رقم محجوب]"
-EMAIL_MASK = "[بريد محجوب]"
 
-TOKEN_RE = re.compile(r"\{\{\s*m:\s*([A-Za-z0-9_\-]+)(?:\.([A-Za-z0-9_]+))?\s*\}\}")
-# Keys that must never reach the dashboard (defence in depth; normalize.py already drops PII columns).
-PII_KEY_RE = re.compile(
-    r"(phone|mobile|supervisor|e-?mail|contact|whatsapp|iban|national_?id|passport|"
-    r"جوال|هاتف|مشرف|تواصل|اتصال|بريد|ايميل|إيميل|هوية)", re.IGNORECASE)
-_SEP = r"[\s\u00A0\-]?"
-PHONE_LOOSE_RE = re.compile(
-    r"(?<!\d)(?:\+?9" + _SEP + "6" + _SEP + "6" + _SEP + "|0" + _SEP + "0" + _SEP + "9" + _SEP + "6" + _SEP + "6" + _SEP +
-    "|0" + _SEP + ")?5(?:" + _SEP + r"\d){8}(?!\d)")
-EMAIL_RE = ac.EMAIL_RE
+# {{m:id}} · {{m:id.field}} · {{m:id.field.sub}}  (groups: id, field, sub)
+TOKEN_RE = re.compile(r"\{\{\s*m:\s*([A-Za-z0-9_\-]+)(?:\.([A-Za-z0-9_]+))?(?:\.([A-Za-z0-9_]+))?\s*\}\}")
+# {{f:key}}  (group: key) — same regex object as facts.FACT_TOKEN_RE
+FACT_TOKEN_RE = facts_mod.FACT_TOKEN_RE
+# Keys that must never reach the dashboard: the shared field-key pattern of assets/pii_patterns.json.
+PII_KEY_RE = ac.PII_KEY_RE
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 MONEY_FIELDS = {"num", "den", "num_known_total", "prev_sum", "curr_sum", "abs_change", "total", "top_sum",
-                "a_sum", "b_sum"}
+                "a_sum", "b_sum", "start_change"}
 SHARE_FIELDS = {"coverage_num_share", "share"}
 PCT_FIELDS = {"pct"}
-COUNT_FIELDS = {"n_scope", "n_included", "n_unknown", "n_known", "top"}
+COUNT_FIELDS = {"n_scope", "n_included", "n_unknown", "n_known", "top", "n", "n_not_applicable"}
+
+
+def n_ar(n: int, one: str, two: str, few: str, many: str) -> str:
+    """Arabic counted noun: 1 and 2 by their own forms, 3–10 plural, 11+ singular accusative."""
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    return f"{n} {few if 3 <= n <= 10 else many}"
 
 
 def eprint(*a):
@@ -121,11 +136,16 @@ def fmt_by_unit(v, unit, cur) -> str:
 # Narrative tokens
 # ---------------------------------------------------------------------------
 class TokenRenderer:
-    def __init__(self, metrics: dict, records_by_id: dict, cur: str):
+    def __init__(self, metrics: dict, records_by_id: dict, cur: str, metrics_doc: dict = None, facts: dict = None):
         self.metrics = metrics or {}
+        doc = metrics_doc or {}
+        self.trend = doc.get("trend") if isinstance(doc.get("trend"), dict) else None
+        self.breakdowns = doc.get("breakdowns") if isinstance(doc.get("breakdowns"), dict) else {}
+        self.facts = facts or {}
         self.records = records_by_id
         self.cur = cur
         self.unknown = []
+        self.unknown_facts = []
         self.count = 0
 
     def _names(self, ids) -> str:
@@ -139,13 +159,64 @@ class TokenRenderer:
                 out.append((r or {}).get("name") or x["id"])
         return "، ".join(out) if out else "لا يوجد"
 
-    def value(self, mid: str, field):
-        res = self.metrics.get(mid)
-        if not isinstance(res, dict):
-            self.unknown.append(mid + ("." + field if field else ""))
+    def _result(self, mid: str):
+        if mid in self.metrics and isinstance(self.metrics.get(mid), dict):
+            return self.metrics[mid]
+        if mid == "trend" and self.trend is not None:
+            return self.trend
+        if isinstance(self.breakdowns.get(mid), dict):
+            return self.breakdowns[mid]
+        return None
+
+    def _fmt(self, key: str, v, unit, ref: str):
+        """Format one value found under `key` (a result field or a sub-key)."""
+        if v is None:
+            return NOT_COMPUTABLE
+        if isinstance(v, bool):
+            return "نعم" if v else "لا"
+        if isinstance(v, str):
+            return v
+        if isinstance(v, list):
+            if key == "excluded":
+                return fmt_plain(len(v))
+            if key == "per_field":
+                return "، ".join(f"{p.get('n_known', 0)}/{p.get('n', 0)}" for p in v if isinstance(p, dict)) or UNAVAILABLE
+            if all(isinstance(x, (str, dict)) for x in v):
+                return self._names(v)
+            self.unknown.append(ref)
+            return UNAVAILABLE
+        if isinstance(v, dict):
+            if key in ("comparability", "comparable"):
+                return v.get("reason") or v.get("status") or UNAVAILABLE
+            self.unknown.append(ref)
+            return UNAVAILABLE
+        if not isinstance(v, (int, float)):
+            return str(v)
+        if key in SHARE_FIELDS:
+            return fmt_pct(v * 100)
+        if key in PCT_FIELDS:
+            return fmt_pct(v)
+        if key in COUNT_FIELDS or key.startswith("n_"):
+            return fmt_plain(v)
+        if key == "value":
+            return fmt_by_unit(v, unit, self.cur)
+        if key in MONEY_FIELDS:
+            return fmt_money(v, self.cur) if unit in ("SAR", "%", None) else fmt_plain(v)
+        if key == "hhi":
+            return fmt_number(v, 0)
+        return fmt_plain(v)
+
+    def value(self, mid: str, field, sub=None):
+        ref = mid + ("." + field if field else "") + ("." + sub if sub else "")
+        res = self._result(mid)
+        if res is None:
+            self.unknown.append(ref)
             return UNAVAILABLE
         unit = res.get("unit")
-        if field is None or field == "value":
+        if (field is None or field == "value") and sub is None:
+            if "value" not in res:
+                self.unknown.append(ref)
+                return UNAVAILABLE
             v = res.get("value")
             if v is None:
                 if res.get("status") == "not_comparable":
@@ -155,43 +226,40 @@ class TokenRenderer:
                 return NOT_COMPUTABLE
             return fmt_by_unit(v, unit, self.cur)
         if field not in res:
-            self.unknown.append(f"{mid}.{field}")
+            self.unknown.append(ref)
             return UNAVAILABLE
         v = res.get(field)
-        if v is None:
-            return NOT_COMPUTABLE
-        if isinstance(v, bool):
-            return "نعم" if v else "لا"
-        if isinstance(v, str):
-            return v
-        if isinstance(v, list):
-            if field == "excluded":
-                return fmt_plain(len(v))
-            if field == "per_field":
-                return "، ".join(f"{p.get('n_known', 0)}/{p.get('n', 0)}" for p in v if isinstance(p, dict)) or UNAVAILABLE
-            return self._names(v)
-        if isinstance(v, dict):
-            if field in ("comparability", "comparable"):
-                return v.get("reason") or v.get("status") or UNAVAILABLE
-            self.unknown.append(f"{mid}.{field}")
+        if sub is None:
+            return self._fmt(field, v, unit, ref)
+        if isinstance(v, dict) and sub in v:
+            return self._fmt(sub, v.get(sub), unit, ref)
+        if isinstance(v, list) and sub.isdigit() and int(sub) < len(v):
+            item = v[int(sub)]
+            if isinstance(item, (str, dict)) and (field.endswith("_ids") or field in ("excluded", "only_curr", "only_prev")):
+                return self._names([item])   # a record: its name, as for the whole list
+            return self._fmt(field, item, unit, ref)
+        self.unknown.append(ref)
+        return UNAVAILABLE
+
+    def fact(self, key: str) -> str:
+        f = self.facts.get(key)
+        if not isinstance(f, dict) or not isinstance(f.get("value"), (int, float)) or isinstance(f.get("value"), bool):
+            self.unknown_facts.append(key)
             return UNAVAILABLE
-        if field in SHARE_FIELDS:
-            return fmt_pct(v * 100)
-        if field in PCT_FIELDS:
-            return fmt_pct(v)
-        if field in COUNT_FIELDS or field.startswith("n_"):
-            return fmt_plain(v)
-        if field in MONEY_FIELDS:
-            return fmt_money(v, self.cur) if unit in ("SAR", "%", None) else fmt_plain(v)
-        if field == "hhi":
-            return fmt_number(v, 0)
+        v = f["value"]
+        if f.get("unit") == "SAR":
+            return fmt_money(v, self.cur)
         return fmt_plain(v)
 
     def render(self, s: str) -> str:
         def rep(m):
             self.count += 1
-            return self.value(m.group(1), m.group(2))
-        return TOKEN_RE.sub(rep, s)
+            return self.value(m.group(1), m.group(2), m.group(3))
+
+        def rep_f(m):
+            self.count += 1
+            return self.fact(m.group(1))
+        return FACT_TOKEN_RE.sub(rep_f, TOKEN_RE.sub(rep, s))
 
     def walk(self, x):
         if isinstance(x, str):
@@ -206,39 +274,48 @@ class TokenRenderer:
 # ---------------------------------------------------------------------------
 # Privacy scrub (defence in depth)
 # ---------------------------------------------------------------------------
+def raw_is_plain_number(raw: str, v) -> bool:
+    """True when `raw` is just the printed form of the numeric value v (e.g. raw "512345678" of a valuation).
+
+    Such raw strings are not scanned (a 9-digit amount starting with 5 would look like a mobile number), but a raw
+    with a leading 0 or + ("0501234567", "+966…") is a phone written in a numeric cell and is scanned."""
+    t = raw.translate(_AR_DIGITS).strip()
+    if re.match(r"^(?:\+|00|0\d)", t):
+        return False
+    try:
+        return float(t.replace(",", "").replace("٬", "")) == float(v)
+    except ValueError:
+        return False
+
+
+_ORPHAN_BRACKET_RE = re.compile(r"\(\s*" + re.escape(ac.REDACTED))
+
+
 class Scrubber:
     def __init__(self):
         self.keys_dropped = 0
         self.values_masked = 0
+        self.kinds = set()
+        self.review_hits = 0
 
     def text(self, s: str) -> str:
-        probe = s.translate(_AR_DIGITS)  # one char -> one char, so spans line up with s
-        spans = [m.span() for m in PHONE_LOOSE_RE.finditer(probe)]
-        if spans:
-            out, last = [], 0
-            for a, b in spans:
-                out.append(s[last:a])
-                out.append(PHONE_MASK)
-                last = b
-            out.append(s[last:])
-            s = "".join(out)
-            self.values_masked += len(spans)
-        if EMAIL_RE.search(s):
-            s, n = EMAIL_RE.subn(EMAIL_MASK, s)
-            self.values_masked += n
-        return s
+        out, kinds = ac.mask_pii(s, ("block",))  # Arabic-Indic digits are matched after translation
+        if kinds:
+            self.values_masked += 1
+            self.kinds.update(kinds)
+            # "(050) 123-4567" is matched from the first digit: drop the opening bracket left in front of the mask
+            out = _ORPHAN_BRACKET_RE.sub(ac.REDACTED, out)
+        if ac.pii_value_hits(out, ("review",)):
+            self.review_hits += 1  # kept: may be a deed or another 10-digit number; reported to the analyst
+        return out
 
     def walk(self, x, key=None, parent=None):
         if isinstance(x, str):
             if key in ("sha256", "sha256_short"):
                 return x
             if key == "raw" and isinstance(parent, dict) and isinstance(parent.get("v"), (int, float)) \
-                    and not isinstance(parent.get("v"), bool):
-                try:
-                    if float(x.replace(",", "").replace("٬", "").strip()) == float(parent["v"]):
-                        return x
-                except ValueError:
-                    pass
+                    and not isinstance(parent.get("v"), bool) and raw_is_plain_number(x, parent["v"]):
+                return x
             return self.text(x)
         if isinstance(x, list):
             return [self.walk(y, key, parent) for y in x]
@@ -257,7 +334,9 @@ def pii_fields(field_meta: dict) -> set:
     out = set()
     for f, m in (field_meta or {}).items():
         m = m or {}
-        label_hit = bool(PII_KEY_RE.search(str(m.get("label") or ""))) and m.get("group") in (None, "text", "other", "pii")
+        label = str(m.get("label") or "")
+        label_hit = bool(PII_KEY_RE.search(label) or ac.PII_HEADER_RE.search(label)) \
+            and m.get("group") in (None, "text", "other", "pii")
         if m.get("group") == "pii" or m.get("kind") == "pii" or PII_KEY_RE.search(f) or label_hit:
             out.add(f)
     return out
@@ -334,8 +413,13 @@ def blocking_items(v: dict) -> list:
         items = v.get("errors")
     if items is None:
         items = [c for c in (v.get("checks") or []) if isinstance(c, dict) and not c.get("passed", True)
-                 and (c.get("blocking") or c.get("severity") in ("blocking", "error"))]
+                 and (c.get("blocking") or _level(c) in ("blocking", "error"))]
     return items if isinstance(items, list) else []
+
+
+def _level(c: dict) -> str:
+    """validate_analysis.py writes `level` (blocking | warning | acknowledged | info); older files `severity`."""
+    return str(c.get("level") or c.get("severity") or "")
 
 
 def blocking_count(v: dict) -> int:
@@ -351,19 +435,25 @@ def validation_summary(v) -> dict:
         return {"available": False, "passed": None, "blocking_count": None, "warning_count": None,
                 "blocking": [], "warnings": []}
     warns = v.get("warnings")
+    failed = [c for c in (v.get("checks") or []) if isinstance(c, dict) and not c.get("passed", True)]
     if warns is None:
-        warns = [c for c in (v.get("checks") or []) if isinstance(c, dict) and not c.get("passed", True)
-                 and c.get("severity") in ("warning", "warn")]
+        warns = [c for c in failed if _level(c) in ("warning", "warn")]
     warns = warns if isinstance(warns, list) else []
+    # warnings the narrative acknowledged with a reason (06 acknowledged_warnings): listed apart, not counted
+    acks = [c for c in failed if _level(c) == "acknowledged"]
     wc = v.get("warning_count")
     if not isinstance(wc, int):
         wc = (v.get("summary") or {}).get("warning_count")
     if not isinstance(wc, int):
         wc = len(warns)
+    ac_n = v.get("acknowledged_count")
+    if not isinstance(ac_n, int):
+        ac_n = len(acks)
     bc = blocking_count(v)
     return {"available": True, "passed": v.get("passed", bc == 0) if bc == 0 else False,
-            "blocking_count": bc, "warning_count": wc,
+            "blocking_count": bc, "warning_count": wc, "acknowledged_count": ac_n,
             "blocking": [_msg(x) for x in blocking_items(v)][:50], "warnings": [_msg(x) for x in warns][:50],
+            "acknowledged": [_msg(x) for x in acks][:50],
             "checked_at": v.get("checked_at") or v.get("generated_at")}
 
 
@@ -409,7 +499,56 @@ def load_opt(path):
     return ac.load_json(path)
 
 
+def self_test() -> int:
+    """Token grammar and privacy scrub on synthetic values (no run folder needed). Exit 0 = ok, 1 = a case failed."""
+    fails = []
+
+    def eq(name, got, exp):
+        if got != exp:
+            fails.append(f"{name}: {got!r} != {exp!r}")
+
+    metrics = {"m1": {"unit": "SAR", "value": 1234567.4, "status": "complete", "n_included": 3,
+                      "comparability": {"status": "unverified", "reason": "سبب"}, "per_field": [{"n_known": 2, "n": 3}],
+                      "top_ids": ["A-1"], "start_change": -50000},
+               "g": {"unit": "%", "value": None, "status": "not_comparable"}}
+    doc = {"trend": {"same_records": {"n": 4}, "points": [{"value": 10}]}, "breakdowns": {"b1": {"total": 900}}}
+    facts = {"records.isolated": {"value": 7, "unit": "count"}, "wb.WB-1.recorded": {"value": 2500, "unit": "SAR"}}
+    tr = TokenRenderer(metrics, {"A-1": {"name": "عمارة"}}, "SAR", metrics_doc=doc, facts=facts)
+    eq("value", tr.render("{{m:m1}}"), "1,234,567 ر.س")
+    eq("field", tr.render("{{m:m1.n_included}}"), "3")
+    eq("money field", tr.render("{{m:m1.start_change}}"), "-50,000 ر.س")
+    eq("nested dict", tr.render("{{m:m1.comparability.status}}"), "unverified")
+    eq("ids", tr.render("{{m:m1.top_ids}}"), "عمارة")
+    eq("list index", tr.render("{{m:m1.top_ids.0}}"), "عمارة")
+    eq("trend point", tr.render("{{m:trend.points.0}}"), "غير متاح")   # a dict: not a printable value
+    eq("not comparable", tr.render("{{m:g}}"), "غير قابل للمقارنة")
+    eq("trend nested", tr.render("{{m:trend.same_records.n}}"), "4")
+    eq("breakdown", tr.render("{{m:b1.total}}"), "900 ر.س")
+    eq("fact count", tr.render("{{f:records.isolated}}"), "7")
+    eq("fact money", tr.render("{{f:wb.WB-1.recorded}}"), "2,500 ر.س")
+    eq("unknown", (tr.render("{{m:nope}} {{f:nope}}"), tr.unknown[-1:], tr.unknown_facts), ("غير متاح غير متاح", ["nope"], ["nope"]))
+    sc = Scrubber()
+    for x in (ac.PII_PATTERNS.get("tests") or {}).get("must_match", []):
+        out = sc.text("قبل " + x + " بعد")
+        if ac.pii_value_hits(x, ("block",)) and (ac.REDACTED not in out or ac.pii_value_hits(out, ("block",))):
+            fails.append(f"block pattern not masked: {x[:3]}…")
+    for x in (ac.PII_PATTERNS.get("tests") or {}).get("must_not_match", []):
+        eq(f"kept {x}", sc.text(x), x)
+    eq("bracket", sc.text("جوال (050) 123-4567"), "جوال " + ac.REDACTED)
+    eq("raw amount kept", sc.walk({"v": 512345678, "s": "value", "raw": "512345678"}), {"v": 512345678, "s": "value", "raw": "512345678"})
+    eq("raw phone masked", sc.walk({"v": 501234567, "s": "value", "raw": "0501234567"})["raw"], ac.REDACTED)
+    eq("pii key dropped", sc.walk({"supervisor_phone": "x", "name": "y"}), {"name": "y"})
+    for f in fails:
+        eprint("فشل: " + f)
+    print(f"build_dashboard --self-test: {'ناجح' if not fails else 'فشل ' + str(len(fails))}")
+    return 0 if not fails else 1
+
+
 def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if "--self-test" in argv:
+        return self_test()
     ap = argparse.ArgumentParser(description="بناء analysis.json وdashboard.html من مجلد التشغيل")
     ap.add_argument("--run-dir", required=True, help="مجلد التشغيل (RUN)")
     ap.add_argument("--draft", action="store_true", help="بناء مسودة رغم الأخطاء المانعة أو غياب السرد/التحقق (تظهر لافتة «مسودة»)")
@@ -494,7 +633,12 @@ def main(argv=None) -> int:
     rec_by_id = {r.get("id"): r for r in records if isinstance(r, dict)}
 
     cur = config.get("currency") or rec_doc.get("currency") or "SAR"
-    tr = TokenRenderer(metrics.get("metrics") or {}, rec_by_id, cur)
+    try:
+        facts = facts_mod.compute_facts(run)
+    except (OSError, ValueError) as exc:
+        eprint(f"تنبيه: تعذر حساب الحقائق ({{{{f:…}}}}) من مجلد التشغيل: {exc}")
+        facts = {}
+    tr = TokenRenderer(metrics.get("metrics") or {}, rec_by_id, cur, metrics_doc=metrics, facts=facts)
     narrative_r = tr.walk(narrative)
 
     issues = list(rec_doc.get("issues") or [])
@@ -519,6 +663,8 @@ def main(argv=None) -> int:
         "workbook_map_summary": workbook_summary(wb, mapping),
         "issues": issues,
         "validation": validation_summary(validation),
+        # counts outside 05 (isolated records, hidden sheets …) — the {{f:key}} vocabulary, read by the template
+        "facts": {k: {"value": f.get("value"), "unit": f.get("unit"), "label": f.get("label")} for k, f in facts.items()},
     }
     sc = Scrubber()
     analysis = sc.walk(analysis)
@@ -540,10 +686,22 @@ def main(argv=None) -> int:
     if tr.unknown:
         eprint("تنبيه: رموز {{m:...}} تشير إلى مؤشرات أو حقول غير موجودة في 05_metrics.json وعُرضت «غير متاح»: "
                + "، ".join(sorted(set(tr.unknown))))
+    if tr.unknown_facts:
+        eprint("تنبيه: رموز {{f:...}} تشير إلى حقائق غير موجودة (python3 scripts/facts.py --run-dir RUN يسردها) "
+               "وعُرضت «غير متاح»: " + "، ".join(sorted(set(tr.unknown_facts))))
     if drop:
         eprint(f"حُذفت حقول بيانات شخصية من السجلات: {len(drop)} حقل.")
     if sc.keys_dropped or sc.values_masked:
-        eprint(f"حماية الخصوصية: حُذف {sc.keys_dropped} مفتاحًا وحُجبت {sc.values_masked} قيمة تشبه رقم جوال أو بريدًا.")
+        parts = []
+        if sc.keys_dropped:
+            parts.append("حُذف " + n_ar(sc.keys_dropped, "مفتاح واحد", "مفتاحان", "مفاتيح", "مفتاحًا"))
+        if sc.values_masked:
+            parts.append("حُجب نص بيانات شخصية في " + n_ar(sc.values_masked, "قيمة واحدة", "قيمتين", "قيم", "قيمة")
+                         + f" ({'، '.join(sorted(sc.kinds)) or '—'}) واستُبدل بـ«{ac.REDACTED}»")
+        eprint("حماية الخصوصية: " + "، و".join(parts) + ".")
+    if sc.review_hits:
+        eprint("تنبيه خصوصية: " + n_ar(sc.review_hits, "نص واحد يحوي", "نصّان يحويان", "نصوص تحوي", "نصًا يحوي")
+               + " رقمًا من 10 خانات يبدأ بـ1 أو 2 (قد يكون رقم هوية أو صكًا)؛ لم يُحجب. راجعه، واحذفه من الربط أو السرد إن كان رقم هوية.")
     kb = lambda p: f"{os.path.getsize(p) / 1024:,.0f} ك.ب"  # noqa: E731
     state = "مسودة لم تجتز التحقق الآلي" if draft else "نسخة نهائية"
     print(f"تم البناء — {state}: {out_json} ({kb(out_json)}) · {out_html} ({kb(out_html)})")

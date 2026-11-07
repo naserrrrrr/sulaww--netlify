@@ -46,7 +46,12 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
-.num { unicode-bidi: isolate; }
+/* numbers: isolated so they never take their order from Arabic neighbours; tokens marked dir=ltr (negative
+   numbers, percentages, ISO dates, ids such as REG-7) are laid out left-to-right inside their isolate */
+.num { unicode-bidi: isolate; white-space: nowrap; }
+.num[dir="ltr"], .tok { direction: ltr; unicode-bidi: isolate; }
+.tok { white-space: nowrap; }
+.ref { direction: ltr; unicode-bidi: isolate; }
 
 /* ===== Buttons, pills, tags ======================================================= */
 .btn {
@@ -63,7 +68,8 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 10px;
   font-size: 12.5px; font-weight: 600; line-height: 1.6; border: 1px solid transparent; max-width: 100%;
 }
-.kpi, .kpi-sub, .item, .chart-card, .plan-col, .assess, .summary-text, .dsec, .asset-detail, .meta-grid dd { overflow-wrap: anywhere; }
+/* break-word (not anywhere): long tokens still wrap, but tables keep whole Arabic words as their minimum width */
+.kpi, .kpi-sub, .item, .chart-card, .plan-col, .assess, .summary-text, .dsec, .asset-detail, .meta-grid dd { overflow-wrap: break-word; }
 .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .tone-ok { color: var(--ok-ink); background: var(--ok-bg); }
 .tone-warn { color: var(--warn-ink); background: var(--warn-bg); border-color: var(--warn-line); }
@@ -72,7 +78,7 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .tone-red { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
 .tone-neutral { color: var(--ink-2); background: var(--na-bg); }
 .tone-navy { color: var(--navy); background: var(--navy-soft); }
-.kind { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--ink-2); background: var(--surface); line-height: 1.7; vertical-align: middle; }
+.kind { display: inline-block; flex: none; white-space: nowrap; font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--ink-2); background: var(--surface); line-height: 1.7; vertical-align: middle; }
 .kind-fact { border-color: #BCD0E2; color: var(--navy-2); }
 .kind-derived { border-color: #B8DCCF; color: var(--green); }
 .kind-inference { border-color: #D9CFE6; color: #5B4A7A; }
@@ -146,12 +152,19 @@ main { padding-bottom: 48px; }
 .kpi-title { font-size: 15px; font-weight: 700; color: var(--navy); }
 .kpi-label { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
 .kpi-eyebrow { font-size: 12.5px; font-weight: 700; color: var(--warn-ink); }
-.kpi-value { font-size: 32px; font-weight: 700; color: var(--ink); line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.kpi-value { font-size: 32px; font-weight: 700; color: var(--ink); line-height: 1.25; letter-spacing: -.01em; overflow-wrap: break-word; }
+.kpi-value .num { white-space: normal; }
 .kpi-value .unit { font-size: 15px; font-weight: 600; color: var(--ink-2); margin-inline-start: 6px; }
 .kpi-value.is-na { font-size: 17px; font-weight: 700; color: var(--na-ink); display: flex; align-items: center; gap: 8px; line-height: 1.5; }
 .kpi-value.is-na::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; }
 .kpi-reason { font-size: 13px; color: var(--na-ink); }
-.kpi-def { font-size: 12.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kpi-note { font-size: 13px; color: var(--ink-2); }
+.kpi-caveat { font-size: 12.5px; color: var(--warn-ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 4px 8px; }
+.kpi-def { font-size: 12.5px; color: var(--muted); }
+.kpi-def.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kpi-def b { color: var(--ink-2); font-weight: 600; }
+.kpi-def .def-line { display: block; }
+.def-toggle { font-size: 12.5px; align-self: flex-start; }
 .kpi-meta { font-size: 12.5px; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 2px; }
 .kpi-meta b { color: var(--ink); font-weight: 600; }
 .kpi-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 12px; }
@@ -198,6 +211,10 @@ main { padding-bottom: 48px; }
 .chart-empty { display: flex; gap: 10px; align-items: flex-start; background: var(--na-bg); color: var(--na-ink); border-radius: 10px; padding: 14px 16px; font-size: 14px; }
 .chart-empty::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; margin-top: 7px; }
 .chart-note { font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+.chart-svg .rid-txt { font-size: 10.5px; fill: var(--muted); }
+.chart-svg .bar-same { fill: none; stroke: #0B5E46; stroke-width: 2; stroke-dasharray: 4 3; }
+.sw-same { width: 12px; height: 12px; border: 2px dashed #0B5E46; border-radius: 3px; display: inline-block; flex: none; }
+.conc-list .id { color: var(--muted); font-size: 12px; }
 .chart-note + .chart-note { margin-top: 2px; }
 .caveat { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
@@ -259,7 +276,9 @@ tr[data-role="asset-row"].is-selected td { background: var(--navy-soft); }
 .detail-sec h4 { font-size: 14px; color: var(--navy); margin-bottom: 8px; }
 .kv { display: grid; grid-template-columns: minmax(96px, 170px) minmax(0, 1fr); gap: 4px 14px; font-size: 13.5px; margin: 0; }
 .kv dt { color: var(--muted); font-weight: 600; }
-.kv dd { margin: 0; overflow-wrap: anywhere; }
+.kv dd { margin: 0; overflow-wrap: break-word; min-width: 0; }
+.raw-val { display: block; font-size: 11.5px; color: var(--ink-2); }
+.flag.managed { background: var(--warn-bg); color: var(--warn-ink); }
 .kv dd .ev { display: block; font-size: 11.5px; color: var(--muted); }
 .mini-table { font-size: 12.5px; }
 .mini-table th, .mini-table td { padding: 6px 8px; }
@@ -286,7 +305,7 @@ details.dsec > summary { list-style: none; cursor: pointer; padding: 14px 18px; 
 details.dsec > summary::-webkit-details-marker { display: none; }
 details.dsec > summary::before { content: ""; width: 8px; height: 8px; border-left: 2px solid var(--navy-2); border-bottom: 2px solid var(--navy-2); transform: rotate(45deg); transition: transform .15s; flex: none; }
 details.dsec[open] > summary::before { transform: rotate(-45deg); margin-top: -4px; }
-details.dsec > summary .cnt { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--na-bg); border-radius: 999px; padding: 0 9px; }
+details.dsec > summary .cnt { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--na-bg); border-radius: 999px; padding: 0 9px; white-space: nowrap; flex: none; }
 details.dsec > summary .hint { font-weight: 400; font-size: 12.5px; color: var(--muted); margin-inline-start: auto; }
 .dbody { padding: 0 18px 18px; font-size: 14px; }
 .dbody h4 { font-size: 14.5px; margin: 18px 0 8px; }
@@ -333,9 +352,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   body { font-size: 14.5px; }
   .wrap { padding: 0 16px; }
   .kpi-grid, .assess-grid { grid-template-columns: minmax(0, 1fr); }
-  .identity h1 { font-size: 23px; }
-  .meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .meta-grid > div { border-inline-start: 0; border-top: 1px solid var(--line); padding: 10px 12px; }
+  .identity-in { padding-top: 16px; padding-bottom: 0; gap: 8px; }
+  .identity h1 { font-size: 22px; }
+  .identity-sub { font-size: 13px; line-height: 1.6; }
+  .meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 10px 0 14px; }
+  .meta-grid > div { border-inline-start: 0; border-top: 1px solid var(--line); padding: 7px 10px; }
+  .meta-grid dt { font-size: 11.5px; }
+  .meta-grid dd { font-size: 13px; }
+  .meta-grid dd .sub { font-size: 11.5px; line-height: 1.5; }
   .meta-grid > div:nth-child(-n+2) { border-top: 0; }
   .meta-grid > div:nth-child(even) { border-inline-start: 1px solid var(--line); }
   .summary-text { padding: 16px; }
@@ -348,6 +372,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .conc-list li { grid-template-columns: 14px minmax(0, 1fr) auto; }
   .conc-list .cum { display: none; }
   .search { max-width: none; }
+  .asset-detail { padding: 14px 14px 18px; }
+  .dbody { padding: 0 12px 14px; }
 }
 
 /* ===== Print ====================================================================== */
@@ -362,15 +388,40 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .identity { border-top-width: 3px; }
   .section { margin-top: 18px; }
   .section > h2, .section-head h2 { break-after: avoid; }
-  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  /* compact executive print: three KPI columns, two chart columns (charts are redrawn at the column width) */
+  .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 10px 12px; gap: 5px; }
+  .kpi-value { font-size: 24px; }
+  .kpi-def, .kpi-meta, .kpi-reason, .kpi-note, .kpi-caveat { font-size: 11px; line-height: 1.55; }
   .assess-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .chart-grid, .two-col { grid-template-columns: minmax(0, 1fr); }
+  /* gaps then actions as plain blocks, so a column heading is never left alone at the foot of a page */
+  .two-col { display: block; }
+  .two-col > div + div { margin-top: 14px; }
+  .stack { display: block; }
+  .stack > * + * { margin-top: 8px; }
+  .col-h { break-after: avoid; }
+  .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .chart-card { padding: 10px 12px; }
+  .sub-h, .section-note { break-after: avoid; }
+  .section-note { break-inside: avoid; }
+  /* the KPI cards start a page: their heading and note never stay orphaned under the assessment */
+  #sec-kpis { break-before: page; margin-top: 0; }
   .plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .kpi, .chart-card, .item, .plan-col, .assess, .summary-text { break-inside: avoid; page-break-inside: avoid; }
+  /* the executive view prints; the study details stay on screen (brief §11: «ضع التفاصيل في أقسام إضافية») */
+  #sec-details { display: none !important; }
+  .identity-in { padding-top: 12px; }
+  .meta-grid { margin: 8px 0 12px; }
+  .meta-grid > div { padding: 6px 10px; }
+  .summary-text { padding: 12px 16px; }
+  .summary-text p { font-size: 13.5px; line-height: 1.85; max-width: none; }
+  .kpi, .chart-card, .item, .plan-col, .assess { break-inside: avoid; page-break-inside: avoid; }
+  .summary-text p, .plan-item { break-inside: avoid; }
   details:not([open]) { display: none; }
   .chart-data { display: none; }
   .tip { display: none !important; }
-  .kpi-def { -webkit-line-clamp: unset; display: block; }
+  .kpi-def.clamp { -webkit-line-clamp: unset; display: block; overflow: visible; }
+  .def-toggle { display: none !important; }
+  footer.foot { margin-top: 12px; padding: 8px 0 0; break-before: avoid; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -532,16 +583,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // ---------------------------------------------------------------------------
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
-  // Bidi: a number that follows Arabic letters becomes an "Arabic number", so "47.0%" would show as "%47.0"
-  // and "-75,000" as "75,000-". Percentages and negative numbers are isolated for display only.
-  var NUM_RE = /-?\d[\d,]*(?:\.\d+)?%|-\d[\d,]*(?:\.\d+)?/g;
-  function numSpans(s) {
-    var out = [], last = 0, m;
-    NUM_RE.lastIndex = 0;
-    while ((m = NUM_RE.exec(s)) !== null) {
+  // Bidi: after Arabic letters a number becomes an "Arabic number", so "-75,000" shows as "75,000-", "2025-12-02"
+  // as "02-12-2025", and two Latin ids in a row ("R1 \u2014 REG-7") are read as one left-to-right run ("REG-7 \u2014 R1").
+  // Such tokens are isolated left-to-right for display only: negative numbers, percentages, ISO dates (with time),
+  // hyphen-joined digit groups, cell ranges (C2:D2), and ids/keys holding a digit, hyphen or dot (REG-7, DQ-002, R1,
+  // rev.2025.excl_vat).
+  var TOK_RE = /\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|-?\d[\d,]*(?:\.\d+)?%|-\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
+  function tokSpans(s) {
+    var out = [], m;
+    TOK_RE.lastIndex = 0;
+    while ((m = TOK_RE.exec(s)) !== null) {
       var tok = m[0], start = m.index;
       if (tok.charAt(0) === '-' && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
-        if (tok.slice(-1) !== '%') continue;          // "REG-12", "2025-12-02": not a negative number
+        if (tok.slice(-1) !== '%') continue;          // "2025-12" or "x-5": not a negative number
         start += 1; tok = tok.slice(1);
       }
       out.push([start, start + tok.length]);
@@ -550,22 +604,23 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   }
   function isoNums(s) {
     s = String(s);
-    var sp = numSpans(s);
+    var sp = tokSpans(s);
     if (!sp.length) return s;
     var out = '', last = 0;
     sp.forEach(function (x) { out += s.slice(last, x[0]) + '\u2066' + s.slice(x[0], x[1]) + '\u2069'; last = x[1]; });
     return out + s.slice(last);
   }
-  var NO_SPAN = { OPTION: 1, TITLE: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1 };
+  var NO_SPAN = { OPTION: 1, TITLE: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1, CODE: 1 };
   function addText(e, s) {
     if (e.namespaceURI === 'http://www.w3.org/2000/svg') { e.appendChild(document.createTextNode(isoNums(s))); return; }
-    var sp = (NO_SPAN[e.tagName] || !/\d/.test(s)) ? [] : numSpans(s);
+    var sp = (NO_SPAN[e.tagName] || !/[\dA-Za-z]/.test(s)) ? [] : tokSpans(s);
     if (!sp.length) { e.appendChild(document.createTextNode(s)); return; }
     var last = 0;
     sp.forEach(function (x) {
       if (x[0] > last) e.appendChild(document.createTextNode(s.slice(last, x[0])));
       var b = document.createElement('span');
-      b.className = 'num';
+      b.className = /\d/.test(s.slice(x[0], x[1])) && !/[A-Za-z]/.test(s.slice(x[0], x[1])) ? 'num' : 'tok';
+      b.setAttribute('dir', 'ltr');
       b.textContent = s.slice(x[0], x[1]);
       e.appendChild(b);
       last = x[1];
@@ -618,7 +673,23 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   }
   function list(x) { return Array.isArray(x) ? x : (x === null || x === undefined || x === '' ? [] : [x]); }
   function bdi(x) { return h('bdi', null, str(x)); }
-  function idc(x) { return h('bdi', { class: 'id' }, str(x)); }
+  function idc(x) { return h('bdi', { class: 'id', dir: 'ltr' }, str(x)); }
+  // A cell reference «Sheet!A1» (or a list «Sheet!A1, Sheet!B2:B9») reads left-to-right like Excel's formula bar;
+  // free text that merely mentions a cell keeps its own direction.
+  var REF1 = '\\$?[A-Z]{1,3}\\$?\\d+(?::\\$?[A-Z]{1,3}\\$?\\d+)?';
+  var SHEET1 = "(?:'[^']+'|[^!'\u060C,;]{1,80})!";
+  var REF_ONLY_RE = new RegExp('^\\s*' + SHEET1 + REF1 + '(?:\\s*[\u060C,;]\\s*(?:' + SHEET1 + ')?' + REF1 + ')*\\s*$');
+  function refc(x) { var s = str(x); return REF_ONLY_RE.test(s) ? h('bdi', { class: 'ref', dir: 'ltr' }, s) : h('bdi', null, s); }
+  function dimFilterActive(f) {
+    f = f || {};
+    return FILTER_DIMS.some(function (d) { return f[d] !== null && f[d] !== undefined && f[d] !== ''; });
+  }
+  /** Arabic number-noun agreement: one, two (dual), 3–10 (plural), 11+ (singular accusative). */
+  function nNoun(n, one, two, few, many) {
+    if (n === 1) return one;
+    if (n === 2) return two;
+    return n + ' ' + (n >= 3 && n <= 10 ? few : many);
+  }
 
   // ---------------------------------------------------------------------------
   // Formatting (Western digits, thousands separators; same rules as build_dashboard.py)
@@ -666,6 +737,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   var ROLE_AR = { asset_register: 'سجل أصول', activity_register: 'سجل أنشطة', allocation: 'تخصيص إيرادات', managed_properties: 'أملاك مدارة للغير', lookup: 'قوائم مرجعية', notes: 'ملاحظات', other: 'أخرى' };
   var MATCH_AR = { probable: 'محتمل', confirmed: 'مؤكد', rejected: 'مرفوض' };
   var SRC_AR = { file: 'ملف', web: 'مصدر ويب', user: 'إفادة المستخدم' };
+  // follow-up statuses (data-contract §6); red stays reserved for proven problems
+  var FOLLOW_TONE = { 'منجز': 'ok', 'منفذ': 'ok', 'قيد التنفيذ': 'navy', 'لم يبدأ': 'neutral', 'متعثر': 'warn', 'لم يُتحقق': 'na', 'لم يعد منطبقًا': 'neutral' };
 
   function dimLabel(dim) { return (V.dims && V.dims[dim]) || (dim === 'record_type' ? 'نوع السجل' : dim); }
   function dimValueLabel(dim, v) {
@@ -713,6 +786,21 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function fv(rec, f) { return isKnown(rec, f) ? tvOf(rec, f).v : null; }
   function recName(id) { var r = REC[id]; return r ? str(r.name || r.id) : str(id); }
   function isAssetType(rec) { return rec && ASSET_TYPES.indexOf(rec.record_type) >= 0; }
+  function isManaged(rec) {
+    var d = (rec && rec.dims) || {};
+    return d.managed_for_others === true || list(d.ownership).indexOf('managed_for_others') >= 0;
+  }
+  var MANAGED_TAG = 'مدار للغير — ليس دخلًا للجمعية';
+  /** Location column: dims.location, falling back to the district; both when both are known. */
+  function locText(rec) {
+    var d = (rec && rec.dims) || {};
+    var loc = d.location, dist = d.district;
+    var has = function (x) { return x !== null && x !== undefined && x !== '' && x !== 'unknown' && !(Array.isArray(x) && !x.length); };
+    if (has(loc) && has(dist) && str(loc) !== str(dist)) return dimText(rec, 'location') + ' · ' + dimText(rec, 'district');
+    if (has(loc)) return dimText(rec, 'location');
+    if (has(dist)) return dimText(rec, 'district');
+    return dimText(rec, 'location');
+  }
   var ID_TOKEN = /[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+/g;
   function idsIn(s) {
     var out = [];
@@ -720,12 +808,22 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return out;
   }
 
+  /** The original cell text of an unknown value (text in a numeric field, «غير متوفر» …), kept beside its status. */
+  function rawOf(t) {
+    if (!t || typeof t !== 'object' || t.raw === null || t.raw === undefined) return '';
+    var r = str(t.raw).trim();
+    // the status already says it for blanks and «لا ينطبق»/«غير متاح» tokens; text, errors and odd zeros keep their cell text
+    if (!r || ['blank', 'filler', 'not_applicable', 'not_available'].indexOf(t.s) >= 0) return '';
+    return r;
+  }
   function fmtFieldValue(f, t) {
     if (!t || typeof t !== 'object') return h('span', { class: 'na-val' }, 'غير موجود');
     var m = FM[f] || {};
     var v = t.v;
     if (v === null || v === undefined || (KNOWN.indexOf(t.s) < 0 && typeof v === 'number')) {
-      return h('span', { class: 'na-val' }, statusAr(t.s));
+      var raw = rawOf(t);
+      return h('span', null, h('span', { class: 'na-val' }, statusAr(t.s)),
+        raw ? h('span', { class: 'raw-val' }, 'النص في الخلية: «', raw, '»') : null);
     }
     if (typeof v === 'number') {
       var grp = m.group;
@@ -787,34 +885,97 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // Evidence rendering
   // ---------------------------------------------------------------------------
   function metricShort(mid) { var r = M05[mid]; return r ? str(r.short_label || r.label || mid) : str(mid); }
+  var M05_TREND = (D.metrics && D.metrics.trend && typeof D.metrics.trend === 'object') ? D.metrics.trend : null;
+  var M05_BD = (D.metrics && D.metrics.breakdowns && typeof D.metrics.breakdowns === 'object') ? D.metrics.breakdowns : {};
+  var FACTS = (D.facts && typeof D.facts === 'object') ? D.facts : {};
+  var FIELD_AR = { n_included: 'السجلات المشمولة', n_scope: 'السجلات في النطاق', abs_change: 'التغير بالريال', start_change: 'تغير بدء الإيراد',
+    coverage_num_share: 'تغطية الإيراد المعروف', prev_sum: 'مجموع الفترة السابقة', curr_sum: 'مجموع الفترة الحالية', num: 'البسط', den: 'المقام',
+    total: 'المجموع', hhi: 'مؤشر هيرفندال', top_ids: 'الأكبر', excluded: 'المستبعدة', revenue_start_ids: 'بدء إيراد', comparability: 'قابلية المقارنة' };
+  /** Value of a metric field for an evidence chip ({{m:id.field}} semantics, formatted like the build). */
+  function fieldValueText(r, field) {
+    var v = r[field];
+    if (v === null || v === undefined) return 'غير قابل للاحتساب';
+    if (typeof v === 'boolean') return v ? 'نعم' : 'لا';
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) return field === 'excluded' ? String(v.length) : v.map(function (x) { return recName(typeof x === 'object' ? x.id : x); }).join('، ');
+    if (typeof v === 'object') return str(v.reason || v.status || '');
+    if (field === 'coverage_num_share' || field === 'share') return fmtShare(v);
+    if (field === 'pct') return fmtPct(v);
+    if (/^n_|^n$|^top$/.test(field)) return fmtPlain(v);
+    if (field === 'hhi') return fmtNumber(v, 0);
+    if (field === 'value') return fmtUnit(v, r.unit);
+    return r.unit === 'SAR' || r.unit === '%' || !r.unit ? fmtMoney(v) : fmtPlain(v);
+  }
   function evidenceChip(e) {
     var ref = (e && typeof e === 'object') ? str(e.ref) : str(e);
     var kind = (e && typeof e === 'object') ? e.kind : null;
     if (!ref) return null;
     var chip = h('span', { class: 'chip' });
     if (kind) add(chip, kindTag(kind));
-    var m = /^m:([A-Za-z0-9_\-]+)$/.exec(ref);
-    if (m) {
-      var r = M05[m[1]];
-      var val = r ? (r.value === null || r.value === undefined ? 'غير قابل للاحتساب' : fmtUnit(r.value, r.unit)) : 'غير متاح';
-      add(chip, 'مؤشر: ' + metricShort(m[1]) + ' — ');
-      add(chip, h('span', { class: 'num' }, val));
-      if (r && r.definition) chip.setAttribute('title', str(r.definition));
+    var m = /^m:([A-Za-z0-9_\-]+)(?:\.([A-Za-z0-9_]+))?$/.exec(ref);
+    if (m && m[1] === 'trend' && !m[2]) {
+      var t = M05_TREND;
+      var np = t ? list(t.points).filter(function (p) { return typeof p.value === 'number'; }).length : 0;
+      add(chip, 'التطور الزمني: ' + (t ? str(t.label || 'تطور الإيراد') + ' — ' + nNoun(np, 'فترة واحدة معروفة', 'فترتان معروفتان', 'فترات معروفة', 'فترة معروفة') : 'غير مفعّل'));
+      if (t && t.comparable && t.comparable.status !== 'confirmed') add(chip, ' (مقارنة غير متحققة)');
+      if (t && t.comparable && t.comparable.reason) chip.setAttribute('title', str(t.comparable.reason));
       return chip;
     }
-    if (ISSUE[ref]) { add(chip, bdi(ref)); chip.setAttribute('title', str(ISSUE[ref].detail)); add(chip, ' مشكلة بيانات'); return chip; }
-    if (ANOM[ref]) { add(chip, bdi(ref)); chip.setAttribute('title', str(ANOM[ref].detail)); add(chip, ' ملاحظة على المصنف'); return chip; }
+    if (m && !m[2] && !M05[m[1]] && M05_BD[m[1]]) {
+      var b = M05_BD[m[1]];
+      add(chip, 'توزيع: ' + str(b.label || m[1]));
+      if (typeof b.total === 'number') { add(chip, ' — المجموع المعروف '); add(chip, h('span', { class: 'num' }, fmtMoney(b.total))); }
+      return chip;
+    }
+    if (m) {
+      var r = M05[m[1]];
+      if (!r) { add(chip, 'مؤشر: ' + m[1] + ' — غير متاح'); return chip; }
+      var val = m[2] && m[2] !== 'value' ? fieldValueText(r, m[2])
+        : (r.value === null || r.value === undefined ? (r.status === 'not_comparable' ? 'غير قابل للمقارنة' : 'غير قابل للاحتساب') : fmtUnit(r.value, r.unit));
+      add(chip, 'مؤشر: ' + metricShort(m[1]) + (m[2] && m[2] !== 'value' ? ' (' + (FIELD_AR[m[2]] || m[2]) + ')' : '') + ' — ');
+      add(chip, h('span', { class: 'num' }, val));
+      if (r.definition) chip.setAttribute('title', str(r.definition));
+      return chip;
+    }
+    var fm = /^f:([A-Za-z0-9_.\-]+)$/.exec(ref);
+    if (fm && FACTS[fm[1]]) {
+      var fx = FACTS[fm[1]];
+      add(chip, str(fx.label || fm[1]) + ': ');
+      add(chip, h('span', { class: 'num' }, fx.unit === 'SAR' ? fmtMoney(fx.value) : fmtPlain(fx.value)));
+      return chip;
+    }
+    if (ISSUE[ref]) { add(chip, idc(ref)); chip.setAttribute('title', str(ISSUE[ref].detail)); add(chip, ' مشكلة بيانات'); return chip; }
+    if (ANOM[ref]) { add(chip, idc(ref)); chip.setAttribute('title', str(ANOM[ref].detail)); add(chip, ' ملاحظة على المصنف'); return chip; }
     if (REC[ref]) { add(chip, recButton(ref)); return chip; }
-    add(chip, bdi(ref));
+    add(chip, refc(ref));
     return chip;
+  }
+  /** Short heading of a recommendation: its optional `title`, else its first action. */
+  function recTitle(r) { return str(r && (r.title || r.first_action || r.target)); }
+  /** Record ids inside a free text become buttons that open the record; a text made only of ids shows the names. */
+  function linkIds(text) {
+    var s = str(text);
+    var ids = idsIn(s);
+    if (!ids.length) return s;
+    var onlyIds = !s.replace(ID_TOKEN, '').replace(/[\s،,؛;:\-—–و()]+/g, '');
+    var out = [], last = 0, m;
+    ID_TOKEN.lastIndex = 0;
+    while ((m = ID_TOKEN.exec(s)) !== null) {
+      if (!hasOwn.call(REC, m[0])) continue;
+      if (m.index > last) out.push(s.slice(last, m.index));
+      out.push(recButton(m[0], onlyIds ? recName(m[0]) : null, !onlyIds));
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) out.push(s.slice(last));
+    return out;
   }
   function evidenceChips(ev) {
     var items = list(ev).map(evidenceChip).filter(Boolean);
     return items.length ? h('div', { class: 'chips' }, items) : null;
   }
-  function recButton(id, label) {
+  function recButton(id, label, asId) {
     return h('button', { type: 'button', class: 'btn-link', 'data-action': 'open-record', 'data-record-ref': id,
-      onclick: function () { openDetail(id, null); } }, label || recName(id));
+      title: asId ? recName(id) : null, onclick: function () { openDetail(id, null); } }, asId ? idc(id) : (label || recName(id)));
   }
   function scopeNodes(scope) {
     var s = str(scope).trim();
@@ -934,8 +1095,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function renderIdentity() {
     var ent = META.entity;
     var h1 = $('#entity-name');
-    if (ent) { h1.textContent = str(ent); h1.classList.remove('na'); }
-    else { h1.textContent = 'الجهة غير مذكورة في الملف'; h1.classList.add('na'); }
+    // an unknown entity is shown as missing metadata, never as the page title
+    h1.textContent = ent ? str(ent) : 'دراسة محفظة الأصول';
+    h1.classList.remove('na');
+    $('.identity .eyebrow').textContent = ent ? 'دراسة محفظة الأصول — العرض التنفيذي لمجلس الإدارة' : 'العرض التنفيذي لمجلس الإدارة';
     document.title = (ent ? str(ent) + ' — ' : '') + 'لوحة محفظة الأصول';
     var vs = D.validation || {};
     var sub = clear($('#identity-sub'));
@@ -949,6 +1112,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(dl, h('div', null, h('dt', null, label), h('dd', null, value, subText ? h('span', { class: 'sub' }, subText) : null)));
     }
     var counts = META.counts || {};
+    if (!ent) item('الجهة', h('span', { class: 'muted' }, 'غير مذكورة في الملف'), META.entity_evidence ? str(META.entity_evidence) : null);
     item('فترة البيانات', META.data_period ? str(META.data_period) : 'غير محددة في الملف', META.data_period_evidence ? 'المصدر: ' + str(META.data_period_evidence) : null);
     item('تاريخ إعداد الدراسة', META.study_date ? h('span', { class: 'num' }, str(META.study_date)) : 'غير محدد', META.study_date_basis ? str(META.study_date_basis) : null);
     item('تاريخ التحليل', h('span', { class: 'num' }, str(META.analysis_date || '')), 'لا يُفترض أنه سنة البيانات');
@@ -1025,9 +1189,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var gl = list(r.gap_ids).map(function (gid) { return GAP[gid] ? str(gid) + ' — ' + str(GAP[gid].title) : str(gid); }).join('؛ ');
       var rk = r.ranking && typeof r.ranking === 'object' ? r.ranking : {};
       add(abox, h('article', { class: 'item action', 'data-role': 'top-action', 'data-rec-id': str(r.id) },
-        h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, str(r.first_action || r.target))),
+        h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, recTitle(r))),
         h('div', { class: 'badges' }, r.target ? pill(str(r.target), 'navy') : null,
           Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).slice(0, 3).map(function (k) { return pill(RANKING_AR[k] + ': ' + levelAr(rk[k]), 'neutral'); })),
+        r.title && r.first_action ? h('p', null, h('span', { class: 'lbl' }, 'الإجراء الأول: '), str(r.first_action)) : null,
         r.problem ? h('p', null, h('span', { class: 'lbl' }, 'المشكلة: '), str(r.problem)) : null,
         h('p', null, h('span', { class: 'lbl' }, 'المسؤول: '), str(r.owner_role || 'غير محدد'), r.duration ? ' · ' : null, r.duration ? h('span', { class: 'lbl' }, 'المدة: ') : null, r.duration ? str(r.duration) : null),
         r.expected_impact ? h('p', null, h('span', { class: 'lbl' }, 'الأثر المتوقع: '), str(r.expected_impact)) : null,
@@ -1048,9 +1213,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         var rc = it.rec_id ? RECO[it.rec_id] : null;
         add(col, h('div', { class: 'plan-item' },
           h('p', { class: 'act' }, str(it.action)),
+          it.status ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'الحالة: '), pill(str(it.status), FOLLOW_TONE[str(it.status)] || 'neutral')) : null,
           it.deliverable ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'المخرج: '), str(it.deliverable)) : null,
           h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'المسؤول: '), str(it.owner_role || (rc && rc.owner_role) || 'غير محدد')),
-          it.rec_id ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'التوصية: '), str(it.rec_id) + (rc ? ' — ' + str(rc.target || rc.first_action) : '')) : null));
+          it.rec_id ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'التوصية: '), idc(it.rec_id),
+            rc ? ' — ' : null, rc ? (rc.title ? str(rc.title) : linkIds(rc.target || rc.first_action)) : null) : null));
       });
     });
   }
@@ -1073,8 +1240,30 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     groups.sort(function (a, b) { return a.order - b.order || a.idx - b.idx; });
     return groups.slice(0, 8);
   }
+  // Why a result is empty: the engine's empty_cause when present; otherwise "filters" only when a dim filter is active.
+  var EMPTY_FILTERS_TEXT = 'لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر';
+  var EMPTY_SCOPE_TEXT = 'لا توجد سجلات مؤهلة لهذا المؤشر في الملف';
+  function emptyCause(r) {
+    if (r && (r.empty_cause === 'filters' || r.empty_cause === 'scope')) return r.empty_cause;
+    var f = (state.last && state.last.filters) || state.filters;
+    return dimFilterActive(f) ? 'filters' : 'scope';
+  }
+  // the engine's generic scope text repeats the card's value line; the card states the cause instead
+  var ENGINE_EMPTY_SCOPE = 'لا توجد سجلات مؤهلة لهذا المؤشر في الملف';
+  var EMPTY_SCOPE_DETAIL = 'لا يوجد في الملف سجل ضمن نطاق الدراسة يحقق شروط هذا المؤشر';
+  function emptyReason(r) {
+    if (emptyCause(r) === 'filters') return EMPTY_FILTERS_TEXT;
+    var t = str((r && (r.empty_text || (r.empty_cause === 'scope' ? r.reason : null))) || '');
+    return !t || t === ENGINE_EMPTY_SCOPE || t === EMPTY_SCOPE_TEXT ? EMPTY_SCOPE_DETAIL : t;
+  }
+  /** Status wording of a result: "empty" is worded by its cause (filters vs. nothing qualifies in the file). */
+  function resultStatusText(r) {
+    if (r && r.status === 'empty') return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية' : 'لا توجد سجلات مؤهلة في الملف';
+    return metricStatus(r && r.status).ar;
+  }
+  function resultPill(r) { return pill(resultStatusText(r), metricStatus(r && r.status).tone); }
   function naText(r) {
-    if (r.status === 'empty') return (V.metric_status && V.metric_status.empty && V.metric_status.empty.ar) || 'لا توجد سجلات ضمن التصفية الحالية';
+    if (r.status === 'empty') return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية' : 'لا توجد سجلات مؤهلة';
     if (r.status === 'not_comparable') return 'غير قابل للمقارنة';
     return 'غير قابل للاحتساب بالبيانات الحالية';
   }
@@ -1093,9 +1282,55 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return el;
   }
   function reasonLine(r) {
-    if (typeof r.value === 'number') return null;
-    var why = r.status === 'empty' ? 'لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر.' : str(r.reason || r.unavailable_reason || '');
+    if (typeof r.value === 'number') return r.note ? h('p', { class: 'kpi-note' }, str(r.note)) : null;
+    var why = r.status === 'empty' ? emptyReason(r) : str(r.reason || r.unavailable_reason || '');
     return why ? h('p', { class: 'kpi-reason' }, why) : null;
+  }
+  /** Full definition (no information hidden in a tooltip); long texts start clamped with an accessible toggle. */
+  var DEF_CLAMP_CHARS = 150;
+  function defBlock(lines) {
+    lines = lines.filter(function (l) { return l && l.text; });
+    if (!lines.length) return null;
+    var total = lines.reduce(function (n, l) { return n + l.text.length + (l.label ? l.label.length : 0); }, 0);
+    var p = h('p', { class: 'kpi-def' + (total > DEF_CLAMP_CHARS ? ' clamp' : '') },
+      lines.map(function (l) { return h('span', { class: lines.length > 1 ? 'def-line' : null }, l.label ? h('b', null, l.label + ': ') : null, l.text); }));
+    if (total <= DEF_CLAMP_CHARS) return p;
+    var btn = h('button', { type: 'button', class: 'btn-link def-toggle', 'data-action': 'toggle-definition', 'aria-expanded': 'false' }, 'عرض التعريف كاملًا');
+    btn.addEventListener('click', function () {
+      var open = p.classList.contains('clamp');
+      p.classList.toggle('clamp', !open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.textContent = open ? 'طيّ التعريف' : 'عرض التعريف كاملًا';
+    });
+    return [p, btn];
+  }
+  /** Isolated records that look like assets: the coverage card must not read as "the register is complete". */
+  // isolated records typed as assets (facts: records.isolated_assetlike), or read from an isolated sheet whose role
+  // describes properties (a second register, managed properties, allocation lines naming properties)
+  var PROPERTY_ROLES = ['asset_register', 'managed_properties', 'allocation'];
+  function isolatedAssetLike() {
+    var roleOf = {};
+    list(WB.decisions).forEach(function (d) { if (d && d.sheet !== undefined) roleOf[str(d.sheet).trim()] = d.role; });
+    var n = RECORDS.filter(function (r) {
+      if (r.scope !== 'isolated') return false;
+      if (['asset', 'land_parcel', 'unit'].indexOf(r.record_type) >= 0) return true;
+      var sh = r.source && r.source.sheet !== undefined ? str(r.source.sheet).trim() : '';
+      return PROPERTY_ROLES.indexOf(roleOf[sh]) >= 0;
+    }).length;
+    var f = FACTS['records.isolated_assetlike'];
+    return Math.max(n, f && typeof f.value === 'number' ? f.value : 0);
+  }
+  function naCountInScope(r, field) {
+    // with an engine that reports n_not_applicable that count is used; otherwise count it among the records of R
+    return list(r.included_ids).filter(function (id) { var t = tvOf(REC[id], field); return t && t.s === 'not_applicable'; }).length;
+  }
+  function growthComparable(r) { return !!(r && r.comparability && r.comparability.status === 'confirmed'); }
+  function revenueStartLine(r) {
+    var ids = list(r.revenue_start_ids);
+    if (!ids.length && !r.revenue_start) return null;
+    var txt = 'بدء إيراد (إيراد سابق صفر): ' + (ids.length ? ids.map(recName).join('، ') : 'سجلات بإيراد سابق صفري') +
+      (typeof r.start_change === 'number' ? ' — التغير ' + fmtMoney(r.start_change) : '') + '؛ خارج نسبة النمو';
+    return txt;
   }
   function metaLines(r) {
     var lines = [];
@@ -1114,14 +1349,28 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       if (r.valuation_date) lines.push(h('span', null, h('b', null, 'التقييم: '), str(r.valuation_date)));
       else if (r.period_text) lines.push(h('span', null, h('b', null, 'الفترة: '), str(r.period_text)));
     } else if (r.kind === 'coverage') {
-      list(r.per_field).forEach(function (p) { lines.push(h('span', null, fieldLabel(p.field) + ': معروف في ' + (p.n_known || 0) + ' من ' + (p.n || 0))); });
+      list(r.per_field).forEach(function (p) {
+        var hasNa = typeof p.n_not_applicable === 'number';
+        var na = hasNa ? p.n_not_applicable : naCountInScope(r, p.field);
+        lines.push(h('span', null, fieldLabel(p.field) + ': معروف في ' + (p.n_known || 0) + ' من ' + (p.n || 0) +
+          (na ? (hasNa ? ' · لا ينطبق على ' + nRec(na) + ' (خارج المقام)' : ' · منها ' + nRec(na) + ' «لا ينطبق»') : '')));
+      });
     } else if (r.kind === 'diff' && typeof r.value === 'number') {
       lines.push(h('span', null, 'مشمول ' + (r.n_included || 0) + ' · مستبعد ' + list(r.excluded).length));
     } else if (r.kind === 'growth') {
-      if (r.revenue_start) lines.push(h('span', null, 'بدء إيراد: لا تُحسب نسبة نمو'));
-      if (typeof r.abs_change === 'number') lines.push(h('span', null, 'التغير: ' + fmtMoney(r.abs_change)));
+      var rs = revenueStartLine(r);
+      if (rs) lines.push(h('span', null, rs));
+      if (typeof r.abs_change === 'number') lines.push(h('span', null, 'التغير للأصول المعروفة في الفترتين: ' + fmtMoney(r.abs_change)));
+      if (r.comparability && !growthComparable(r)) lines.push(h('span', null, h('b', null, 'قابلية المقارنة: '), r.comparability.status === 'not_comparable' ? 'غير قابلة للمقارنة' : 'غير متحققة — لا يُقرأ الرقم نموًا مؤكدًا'));
     }
     return lines.length ? h('p', { class: 'kpi-meta' }, lines.map(function (l) { return l; })) : null;
+  }
+  function coverageCaveat(r) {
+    if (r.kind !== 'coverage') return null;
+    var n = isolatedAssetLike();
+    if (!n) return null;
+    return h('p', { class: 'kpi-caveat', role: 'note' }, 'التغطية تخص السجلات ضمن النطاق فقط؛ في الملف سجلات معزولة تشبه الأصول أو تصف عقارات ' +
+      'لم يُتحقق من نطاقها، عددها ' + n + '، فلا تعني النسبة اكتمال سجل المحفظة.');
   }
   function renderCards(all) {
     var grid = clear($('#kpi-grid'));
@@ -1136,9 +1385,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         if (r.label && r.short_label && r.label !== r.short_label) add(card, h('p', { class: 'kpi-label' }, str(r.label)));
         if (r.kind === 'ratio' && r.status === 'partial') add(card, h('p', { class: 'kpi-eyebrow' }, 'عائد الجزء القابل للاحتساب'));
         add(card, h('div', { class: 'kpi-main', 'data-metric-id': str(r.id) }, valueNode(r)));
-        if (typeof r.value === 'number') add(card, h('div', { class: 'kpi-status' }, statusPill(r.status)));
+        if (typeof r.value === 'number') add(card, h('div', { class: 'kpi-status' }, resultPill(r)));
         add(card, reasonLine(r));
-        if (r.definition) add(card, h('p', { class: 'kpi-def', title: str(r.definition) }, str(r.definition)));
+        add(card, coverageCaveat(r));
+        if (r.definition) add(card, defBlock([{ text: str(r.definition) }]));
         add(card, metaLines(r));
       } else {
         var gt = g.key === 'counts' ? 'عدد السجلات ضمن النطاق' : rs.map(function (x) { return str(x.short_label || x.label); }).join(' و');
@@ -1148,12 +1398,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
           add(split, h('div', { class: 'kpi-sub', 'data-metric-id': str(x.id) },
             h('p', { class: 'kpi-sub-label' }, str(x.short_label || x.label)),
             valueNode(x),
-            (x.status !== 'complete' && typeof x.value === 'number') ? h('p', { class: 'kpi-substatus' + (metricStatus(x.status).tone === 'warn' ? ' warn' : '') }, metricStatus(x.status).ar) : null,
+            (x.status !== 'complete' && typeof x.value === 'number') ? h('p', { class: 'kpi-substatus' + (metricStatus(x.status).tone === 'warn' ? ' warn' : '') }, resultStatusText(x)) : null,
             reasonLine(x)));
         });
         add(card, split);
-        var defs = rs.map(function (x) { return str(x.definition).split(/[؛.]/)[0]; }).filter(Boolean);
-        if (defs.length) add(card, h('p', { class: 'kpi-def', title: rs.map(function (x) { return str(x.definition); }).join(' ') }, defs.join('. ') + '.'));
+        add(card, defBlock(rs.map(function (x) { return { label: str(x.short_label || x.label), text: str(x.definition) }; })));
       }
       grid.appendChild(card);
     });
@@ -1199,19 +1448,38 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return 'M' + x + ',' + y0 + 'V' + (y1 + r) + 'Q' + x + ',' + y1 + ' ' + (x + r) + ',' + y1 + 'H' + (x + w - r) +
       'Q' + (x + w) + ',' + y1 + ' ' + (x + w) + ',' + (y1 + r) + 'V' + y0 + 'Z';
   }
-  var PRINT_W = 660;  // A4 content width (186 mm) minus the chart card padding, in CSS px
-  function chartWidth(el) {
-    if (state.printing) return PRINT_W;
+  var PRINT_W = 660;       // A4 content width (186 mm) minus the chart card padding, in CSS px
+  var PRINT_W_HALF = 300;  // one of the two print columns (paper is shared by two charts)
+  function chartWidth(el, wide) {
+    if (state.printing) return wide ? PRINT_W : PRINT_W_HALF;
     var w = el && el.clientWidth ? el.clientWidth : 0;
     if (!w) { var g = $('#chart-grid'); w = g && g.clientWidth ? Math.min(g.clientWidth, 640) - 40 : 560; }
     return Math.max(240, Math.floor(w));
   }
   function emptyState(reason) { return h('div', { class: 'chart-empty', 'data-role': 'chart-empty', role: 'note' }, h('span', null, str(reason) || 'لا توجد بيانات كافية لهذا الرسم')); }
+  /** Empty chart text for a result with status "empty", worded by whether a dim filter is active. */
+  function emptyChartText(r) {
+    return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية لهذا الرسم.' : 'لا توجد سجلات مؤهلة لهذا الرسم في الملف.';
+  }
+  /** A number printed in a chart, tagged with the computeAll path it comes from so check_dashboard.mjs can compare it. */
+  function chartNum(text, key, value) {
+    return h('span', { class: 'num', 'data-role': 'chart-number', 'data-key': key, 'data-value': typeof value === 'number' ? String(value) : '' }, text);
+  }
+  /** Chart row label: the name, plus the id when the name is truncated or shared by another row. */
+  function rowLabels(ids, maxW, size) {
+    var names = ids.map(recName);
+    var count = {};
+    names.forEach(function (n) { count[n] = (count[n] || 0) + 1; });
+    return ids.map(function (id, i) {
+      var shown = fit(names[i], maxW, size);
+      return { name: shown, id: (shown !== names[i] || count[names[i]] > 1) ? str(id) : null };
+    });
+  }
   function dataTable(cols, rows) {
     var t = h('table', { class: 'data-table mini-table' });
     add(t, h('thead', null, h('tr', null, cols.map(function (c) { return h('th', { class: c.num ? 'n' : null, scope: 'col' }, c.label); }))));
     var tb = h('tbody');
-    rows.forEach(function (r) { add(tb, h('tr', null, cols.map(function (c) { return h('td', { class: c.num ? 'n' : null }, c.cell(r)); }))); });
+    rows.forEach(function (r, i) { add(tb, h('tr', null, cols.map(function (c) { return h('td', { class: c.num ? 'n' : null }, c.cell(r, i)); }))); });
     add(t, tb);
     return h('details', { class: 'chart-data' }, h('summary', null, 'عرض بيانات الرسم كجدول'), h('div', { class: 'table-wrap' }, t));
   }
@@ -1281,7 +1549,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var r = all.breakdowns[spec.id] || {};
     var sub = ['الوحدة: ' + CUR, kind === 'value' ? (r.valuation_date ? 'تاريخ التقييم: ' + str(r.valuation_date) : null) : (r.period_text ? str(r.period_text) : null)].filter(Boolean).join(' · ');
     var fig = figure(id, str(r.label || spec.label || baseTitle), sub);
-    if (r.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية لهذا التوزيع.')); return fig; }
+    if (r.status === 'empty') { add(fig._body, emptyState(emptyChartText(r))); return fig; }
     if (r.status === 'not_computable' || !list(r.rows).length) { add(fig._body, emptyState(str(r.reason || spec.unavailable_reason || 'لا توجد قيم معروفة ضمن النطاق'))); return fig; }
     var rows = list(r.rows).map(function (x) {
       var lbl = dimValueLabel(spec.by, x.key);
@@ -1289,7 +1557,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var share = typeof x.share === 'number' ? x.share : null;
       return {
         label: lbl, value: known ? x.value : null,
-        text: known ? (W < 520 ? fmtCompact(x.value) : fmtMoney(x.value)) + (share !== null ? ' · ' + fmtShare(share) : '') : 'غير متاح (' + x.n_unknown + ' سجل)',
+        text: known ? (W < 520 ? fmtCompact(x.value) : fmtMoney(x.value)) + (share !== null ? ' · ' + fmtShare(share) : '') : 'غير متاح (' + nRec(x.n_unknown) + ')',
         tip: lbl + '\n' + (known ? fmtMoney(x.value) + (share !== null ? ' — ' + fmtShare(share) + ' من المعروف' : '') : 'قيمة غير معروفة') +
           '\nسجلات معروفة: ' + x.n_known + (x.n_unknown ? ' · غير معروفة: ' + x.n_unknown : ''),
         raw: x
@@ -1307,12 +1575,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       shown = head;
     }
     add(fig._body, hbars(shown, { width: W, color: kind === 'value' ? '#2C6A9E' : '#1F9A72', aria: str(r.label) }));
-    add(fig._body, h('p', { class: 'chart-note' }, 'المجموع المعروف: ', h('span', { class: 'num' }, typeof r.total === 'number' ? fmtMoney(r.total) : '—'),
+    add(fig._body, h('p', { class: 'chart-note' }, 'المجموع المعروف: ', chartNum(typeof r.total === 'number' ? fmtMoney(r.total) : '—', 'breakdowns.' + spec.id + '.total', r.total),
       ' · سجلات معروفة ' + (r.n_known || 0) + (r.n_unknown ? ' · ' + nRec(r.n_unknown) + ' بقيمة غير معروفة لا تُحسب صفرًا' : '')));
     if (r.overlap) add(fig._body, h('p', { class: 'chart-note' }, 'قد تتداخل الفئات: السجل الواحد قد يظهر في أكثر من فئة، فلا تُجمع الحصص.'));
     add(fig._body, dataTable([
       { label: dimLabel(spec.by), cell: function (x) { return x.label; } },
-      { label: 'القيمة', num: true, cell: function (x) { return typeof x.value === 'number' ? fmtMoney(x.value) : 'غير متاح'; } },
+      { label: 'القيمة', num: true, cell: function (x, i) { return typeof x.value === 'number' ? chartNum(fmtMoney(x.value), 'breakdowns.' + spec.id + '.rows.' + i + '.value', x.value) : 'غير متاح'; } },
       { label: 'الحصة', num: true, cell: function (x) { return typeof x.raw.share === 'number' ? fmtShare(x.raw.share) : '—'; } },
       { label: 'معروفة', num: true, cell: function (x) { return String(x.raw.n_known); } },
       { label: 'غير معروفة', num: true, cell: function (x) { return String(x.raw.n_unknown); } }
@@ -1342,7 +1610,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var r = all.metrics[spec.id];
       if (!r || typeof r.value !== 'number') {
         add(blk, h('p', { class: 'conc-head' }, str(r && r.label || spec.label || label)),
-          emptyState(r && r.status === 'empty' ? 'لا توجد سجلات ضمن التصفية الحالية.' : str((r && (r.reason || r.unavailable_reason)) || 'غير قابل للاحتساب بالبيانات الحالية')));
+          emptyState(r && r.status === 'empty' ? emptyChartText(r) : str((r && (r.reason || r.unavailable_reason)) || 'غير قابل للاحتساب بالبيانات الحالية')));
         add(fig._body, blk);
         return;
       }
@@ -1355,7 +1623,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var segs = items.slice(0, top).map(function (x, i) { return { id: x.id, v: x.v, share: total ? x.v / total : 0, color: shades[Math.min(i, shades.length - 1)], ink: inkFor(i), rank: i + 1 }; });
       var restV = items.slice(top).reduce(function (s, x) { return s + x.v; }, 0);
       if (restV > 0) segs.push({ id: null, v: restV, share: total ? restV / total : 0, color: '#DDE2E8', ink: '#0B1F2E', rank: null, n: items.length - top });
-      add(blk, h('p', { class: 'conc-head' }, label + ': أكبر ' + top + ' = ', h('span', { class: 'num' }, fmtPct(r.value)),
+      add(blk, h('p', { class: 'conc-head' }, label + ': أكبر ' + top + ' = ', chartNum(fmtPct(r.value), 'metrics.' + spec.id + '.value', r.value),
         ' من المجموع المعروف' + (typeof r.hhi === 'number' ? ' · مؤشر هيرفندال ' : ''), typeof r.hhi === 'number' ? h('span', { class: 'num' }, fmtNumber(r.hhi, 0)) : null));
       var H = 30;
       var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': label + ': حصة أكبر ' + top + ' سجلات ' + fmtPct(r.value) });
@@ -1378,10 +1646,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(blk, svg);
       var ol = h('ol', { class: 'conc-list' });
       var cum = 0;
+      var dupName = {};
+      segs.forEach(function (s) { if (s.id) dupName[recName(s.id)] = (dupName[recName(s.id)] || 0) + 1; });
       segs.forEach(function (s) {
         cum += s.share;
         add(ol, h('li', null, h('span', { class: 'sw', style: 'background:' + s.color, 'aria-hidden': 'true' }),
-          h('span', { class: 'nm', title: s.id ? recName(s.id) : '' }, s.id ? (s.rank + '. ' + recName(s.id)) : 'بقية السجلات (' + s.n + ')'),
+          h('span', { class: 'nm', title: s.id ? recName(s.id) + ' (' + s.id + ')' : '' }, s.id ? [s.rank + '. ',
+            (dupName[recName(s.id)] > 1 || recName(s.id).length > 28) ? [idc(s.id), ' · '] : null, recName(s.id)] : 'بقية السجلات (' + s.n + ')'),
           h('span', { class: 'num' }, fmtShare(s.share)),
           s.id ? h('span', { class: 'cum' }, 'تراكمي ', h('span', { class: 'num' }, fmtShare(cum))) : h('span', { class: 'cum' }, '')));
       });
@@ -1398,21 +1669,25 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return fig;
   }
 
+  // The comparison weighs value share against revenue share, so it is built on the investment-asset yield: a service
+  // or admin asset serves beneficiaries and must not appear as a "weak performer" for not earning rent (brief §1).
   function comparisonMetric(all) {
     var pref = (CFG.dashboard && CFG.dashboard.comparison_metric) ? [CFG.dashboard.comparison_metric] : [];
-    pref = pref.concat(['gross_yield_owned', 'gross_yield_investment']);
+    pref = pref.concat(['gross_yield_investment', 'gross_yield_income_producing', 'gross_yield_owned']);
     for (var i = 0; i < pref.length; i++) if (all.metrics[pref[i]]) return all.metrics[pref[i]];
     var spec = findMetricSpec(function (m) { return m.kind === 'ratio' && m.num === '{REV}' && m.den === '{VAL}'; });
     return spec ? all.metrics[spec.id] : null;
   }
+  function nonInvestmentUse(rec) { var u = rec && rec.dims ? rec.dims.use : null; return u === 'service' || u === 'admin'; }
   function chartComparison(all, W) {
     var r = comparisonMetric(all);
     var fig = figure('asset-comparison', 'وزن الأصل في القيمة مقابل مساهمته في الإيراد',
-      r ? [str(r.period_text), r.valuation_date ? 'تقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ') : null, true);
+      r ? [str(r.short_label || r.label), str(r.period_text), r.valuation_date ? 'تقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ') : null, true);
     if (!r) { add(fig._body, emptyState('لا يوجد مؤشر عائد (إيراد ÷ تقييم) في الإعدادات تُبنى عليه المقارنة.')); return fig; }
     var numF = r.resolved_fields && r.resolved_fields.num, denF = r.resolved_fields && r.resolved_fields.den;
     var ids = list(r.included_ids);
-    if (r.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية.')); return fig; }
+    if (r.status === 'empty') { add(fig._body, emptyState(emptyChartText(r))); return fig; }
+    if (r.status === 'not_comparable' || r.status === 'not_computable') { add(fig._body, emptyState(str(r.reason || 'غير قابل للاحتساب بالبيانات الحالية'))); return fig; }
     if (!numF || !denF || ids.length < 2) {
       add(fig._body, emptyState('تلزم أصول (اثنان على الأقل) يتوافر لها الإيراد والتقييم معًا للمقارنة؛ المتاح ضمن التصفية الحالية: ' + ids.length + '.'));
       return fig;
@@ -1436,12 +1711,20 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     shown.forEach(function (x) { max = Math.max(max, x.vs, x.rs); });
     if (!max) max = 1;
     var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': 'مقارنة حصة القيمة بحصة الإيراد لكل أصل' });
+    var labels = rowLabels(shown.map(function (x) { return x.id; }), labelW - 4, 12.5);
+    var anyService = false;
     shown.forEach(function (x, i) {
       var y = top + i * rowH;
       var nm = recName(x.id);
-      var g = sv('g', { class: 'mark', 'data-tip': nm + '\nحصة القيمة: ' + fmtShare(x.vs) + ' (' + fmtMoney(x.v) + ')\nحصة الإيراد: ' + fmtShare(x.rs) + ' (' + fmtMoney(x.rv) + ')' });
+      var svc = nonInvestmentUse(REC[x.id]);
+      if (svc) anyService = true;
+      var g = sv('g', { class: 'mark', 'data-tip': nm + ' (' + x.id + ')' + (svc ? '\nأصل ' + dimValueLabel('use', REC[x.id].dims.use) + ': لا يُحكم عليه بالإيجار' : '') +
+        '\nحصة القيمة: ' + fmtShare(x.vs) + ' (' + fmtMoney(x.v) + ')\nحصة الإيراد: ' + fmtShare(x.rs) + ' (' + fmtMoney(x.rv) + ')' });
       add(g, sv('rect', { x: 0, y: y, width: W, height: rowH, fill: 'transparent' }));
-      add(g, svgText(fit(nm, labelW - 4, 12.5), W - 2, y + rowH / 2 + 4, 'start', 'lbl'));
+      var lb = labels[i];
+      var sub = [lb.id, svc ? dimValueLabel('use', REC[x.id].dims.use) : null].filter(Boolean).join(' · ');
+      add(g, svgText(lb.name, W - 2, y + rowH / 2 + (sub ? -2 : 4), 'start', 'lbl'));
+      if (sub) add(g, svgText(sub, W - 2, y + rowH / 2 + 13, 'start', 'rid-txt'));
       [[x.vs, '#2C6A9E', y + 7], [x.rs, '#1F9A72', y + 7 + bh + 2]].forEach(function (b) {
         var len = b[0] > 0 ? Math.max(2, b[0] / max * maxLen) : 0;
         if (len) add(g, sv('path', { d: barPathH(x0, b[2], len, bh), fill: b[1] }));
@@ -1452,11 +1735,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     });
     add(svg, sv('line', { x1: x0, x2: x0, y1: top, y2: H - top, class: 'axis' }));
     add(fig._body, svg);
-    add(fig._body, h('p', { class: 'chart-note' }, 'النطاق: ' + str(r.scope_text || '') + ' · ' + ids.length + ' أصول يتوافر لها الرقمان' +
+    add(fig._body, h('p', { class: 'chart-note' }, 'النطاق: ' + str(r.scope_text || '') + ' · ', chartNum(String(ids.length), 'metrics.' + r.id + '.n_included', r.n_included),
+      ' ' + (ids.length >= 3 && ids.length <= 10 ? 'أصول' : 'أصلًا') + ' يتوافر لها الرقمان' +
       (rows.length > shown.length ? ' (يُعرض أكبر ' + shown.length + ' قيمةً)' : '') + '. الأصول ذات القيمة أو الإيراد غير المعروف خارج المقارنة (' + list(r.excluded).length + ').'));
     add(fig._body, h('p', { class: 'chart-note' }, 'الحصص قبل المصروفات؛ الفرق بين الحصتين يدل على وزن الأصل مقابل مساهمته ولا يثبت سببًا بعينه.'));
+    if (anyService) add(fig._body, h('p', { class: 'caveat', role: 'note' }, 'تشمل المقارنة أصولًا خدمية أو إدارية (مميزة تحت اسمها): غرضها خدمة المستفيدين، فلا يُحكم بضعف أدائها لعدم تحقيق إيجار.'));
     add(fig._body, dataTable([
-      { label: 'الأصل', cell: function (x) { return recName(x.id); } },
+      { label: 'الأصل', cell: function (x) { return [recName(x.id), ' ', h('span', { class: 'rid' }, idc(x.id))]; } },
       { label: 'القيمة', num: true, cell: function (x) { return fmtMoney(x.v); } },
       { label: 'حصة القيمة', num: true, cell: function (x) { return fmtShare(x.vs); } },
       { label: 'الإيراد', num: true, cell: function (x) { return fmtMoney(x.rv); } },
@@ -1466,22 +1751,48 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return fig;
   }
 
+  /** Growth line under the trend chart: the % only when the comparability is confirmed (brief §6), revenue starts apart. */
+  function growthNote(gr) {
+    if (!gr) return null;
+    if (gr.status === 'not_comparable') return 'تغير الإيراد بين الفترتين: غير قابل للمقارنة — ' + str(gr.reason || '');
+    var parts = [];
+    if (typeof gr.abs_change === 'number') {
+      var pct = growthComparable(gr) && typeof gr.value === 'number' ? ' (' + fmtPct(gr.value) + ')' : '';
+      parts.push(str(gr.short_label || gr.label) + ' للأصول نفسها المعروفة في الفترتين (' + nRec(gr.n_included || 0) + '): ' + fmtMoney(gr.abs_change) + pct);
+      if (!growthComparable(gr)) parts.push(gr.comparability && gr.comparability.status === 'not_comparable'
+        ? 'المقارنة غير صالحة؛ لا تُعرض نسبة نمو' : 'تغير بالريال فقط — قابلية المقارنة غير متحققة، فلا تُعرض نسبة نمو');
+    } else if (!list(gr.revenue_start_ids).length) {
+      parts.push(str(gr.short_label || gr.label) + ': ' + (gr.status === 'empty' ? emptyReason(gr) : 'غير قابل للاحتساب — ' + str(gr.reason || '')));
+    }
+    var rs = revenueStartLine(gr);
+    if (rs) parts.push(rs);
+    var one = list(gr.only_curr).length + list(gr.only_prev).length;
+    if (one) parts.push('معروفة في فترة واحدة فقط: ' + nRec(one) + ' (خارج المقارنة)');
+    return parts.join(' · ');
+  }
   function chartTrend(all, W) {
     var t = all.trend || {};
     var fig = figure('revenue-trend', str(t.label || 'تطور الإيراد عبر الفترات'), 'الوحدة: ' + CUR + ' · مجموع السجلات المعروف إيرادها في كل فترة', true);
     var comp = t.comparable || {};
     if (t.status === 'not_computable' && !list(t.points).length) { add(fig._body, emptyState(str(t.reason || 'التطور الزمني غير مفعّل أو لا توجد فترات كافية'))); return fig; }
     if (comp.status === 'not_comparable') { add(fig._body, emptyState('المقارنة الزمنية غير صالحة: ' + str(comp.reason || 'اختلاف أساس الفترات'))); return fig; }
-    if (t.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية لهذا الرسم.')); return fig; }
+    if (t.status === 'empty') { add(fig._body, emptyState(emptyChartText(t))); return fig; }
     if (t.status === 'not_computable') { add(fig._body, emptyState(str(t.reason || 'لا توجد قيم إيراد معروفة ضمن النطاق'))); return fig; }
     var pts = list(t.points);
     if (comp.status !== 'confirmed') add(fig._body, h('p', { class: 'caveat', role: 'note' }, 'تنبيه — مقارنة غير متحققة: ' + str(comp.reason || 'لم يثبت تماثل أساس الفترات؛ تُعرض القيم للاطلاع دون حكم بالنمو.')));
+    // the same records known in every period (engine A18): drawn as a dashed outline when the record set changes
+    var sr = t.same_records && typeof t.same_records === 'object' ? t.same_records : null;
+    var srPts = sr ? list(sr.points) : [];
+    var varies = t.n_known_varies === true || (t.n_known_varies === undefined && pts.some(function (p) { return pts[0] && p.n_known !== pts[0].n_known; }));
+    var showSame = !!(varies && sr && sr.n > 0 && srPts.length === pts.length);
     var H = 250, padTop = 26, axisH = 46;
     var y0 = H - axisH;
     var slot = W / Math.max(1, pts.length);
-    var bw = Math.min(24, slot * 0.4);
+    var bw = Math.min(24, slot * (showSame ? 0.3 : 0.4));
+    var narrowSlot = slot < 88;
     var max = 0;
     pts.forEach(function (p) { if (typeof p.value === 'number' && p.value > max) max = p.value; });
+    srPts.forEach(function (p) { if (showSame && typeof p.value === 'number' && p.value > max) max = p.value; });
     if (!max) max = 1;
     var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': str(t.label || 'تطور الإيراد') });
     add(svg, sv('line', { x1: 0, x2: W, y1: y0, y2: y0, class: 'axis' }));
@@ -1489,36 +1800,48 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var cx = W - slot * (i + 0.5);   // oldest period on the right (reading direction)
       var known = typeof p.value === 'number';
       var len = known && p.value > 0 ? Math.max(2, p.value / max * (y0 - padTop)) : 0;
-      var g = sv('g', { class: 'mark', 'data-tip': str(p.period) + '\n' + (known ? fmtMoney(p.value) : 'غير متاح') + '\nسجلات معروفة: ' + p.n_known + ' من ' + p.n });
+      var sp = showSame ? srPts[i] : null;
+      var sKnown = sp && typeof sp.value === 'number';
+      var sLen = sKnown && sp.value > 0 ? Math.max(2, sp.value / max * (y0 - padTop)) : 0;
+      var tip = str(p.period) + '\n' + (known ? fmtMoney(p.value) : 'غير متاح') + '\nسجلات معروفة: ' + p.n_known + ' من ' + p.n +
+        (sp ? '\nالسجلات نفسها في كل الفترات (' + sr.n + '): ' + (sKnown ? fmtMoney(sp.value) : 'غير متاح') : '');
+      var g = sv('g', { class: 'mark', 'data-tip': tip });
       add(g, sv('rect', { x: (cx - slot / 2).toFixed(1), y: 0, width: slot.toFixed(1), height: H, fill: 'transparent' }));
-      if (len) add(g, sv('path', { d: barPathV(cx - bw / 2, y0, bw, len), fill: '#1F9A72' }));
+      var bx = showSame ? cx + 1 : cx - bw / 2;     // RTL: the all-records bar on the right, same-records on the left
+      if (len) add(g, sv('path', { d: barPathV(bx, y0, bw, len), fill: '#1F9A72' }));
+      if (sLen) add(g, sv('rect', { class: 'bar-same', x: (cx - bw - 1).toFixed(1), y: (y0 - sLen + 1).toFixed(1), width: (bw - 2).toFixed(1), height: (sLen - 1).toFixed(1) }));
       var lab = known ? (W < 560 || pts.length > 5 ? fmtCompact(p.value) : fmtMoneyNum(p.value)) : 'غير متاح';
-      add(g, svgText(lab, cx, y0 - len - 7, 'middle', 'val' + (known ? '' : ' na')));
-      add(g, svgText(str(p.period), cx, y0 + 18, 'middle', 'lbl', { 'font-weight': '700' }));
-      add(g, svgText(p.n_known + ' من ' + p.n + ' معروف', cx, y0 + 35, 'middle', 'val na'));
+      add(g, svgText(fit(lab, slot - 4, 12, 600), cx, y0 - Math.max(len, sLen) - 7, 'middle', 'val' + (known ? '' : ' na')));
+      add(g, svgText(fit(str(p.period), slot - 4, 12.5, 700), cx, y0 + 18, 'middle', 'lbl', { 'font-weight': '700' }));
+      // short form on narrow slots so neighbouring labels never overlap (mobile)
+      add(g, svgText(narrowSlot ? p.n_known + '/' + p.n : p.n_known + ' من ' + p.n + ' معروف', cx, y0 + 35, 'middle', 'val na'));
       add(g, sv('title', null, str(p.period) + ': ' + (known ? fmtMoney(p.value) : 'غير متاح')));
       add(svg, g);
     });
     add(fig._body, svg);
+    var lg = h('div', { class: 'legend' }, h('span', null, h('span', { class: 'sw', style: 'background:#1F9A72', 'aria-hidden': 'true' }), 'كل السجلات المعروف إيرادها في الفترة'));
+    if (showSame) add(lg, h('span', null, h('span', { class: 'sw-same', 'aria-hidden': 'true' }),
+      h('span', null, 'السجلات نفسها المعروفة في كل الفترات (', chartNum(String(sr.n), 'trend.same_records.n', sr.n), ')')));
+    if (narrowSlot) add(lg, h('span', null, 'تحت كل فترة: المعروف/الإجمالي'));
+    add(fig._body, lg);
+    if (varies) {
+      add(fig._body, h('p', { class: 'caveat', role: 'note' }, 'عدد السجلات المعروف إيرادها يختلف بين الفترات (' +
+        pts.map(function (p) { return str(p.period) + ': ' + p.n_known; }).join('، ') + ')؛ الفرق بين الأعمدة يتأثر بتغير السجلات لا بالأداء وحده' +
+        (showSame ? '. للمقارنة استخدم السلسلة المتقطعة للسجلات نفسها.' : (sr && sr.n === 0 ? '، ولا توجد سجلات معروفة في كل الفترات.' : '.'))));
+    }
     var gspec = findMetricSpec(function (m) { return m.kind === 'growth'; });
     var gr = gspec ? all.metrics[gspec.id] : null;
-    if (gr) {
-      var gl;
-      if (gr.status === 'not_comparable') gl = 'تغير الإيراد بين الفترتين: غير قابل للمقارنة — ' + str(gr.reason || '');
-      else if (typeof gr.abs_change === 'number') {
-        gl = str(gr.short_label || gr.label) + ' للأصول نفسها المعروفة في الفترتين (' + (gr.n_included || 0) + '): ' + fmtMoney(gr.abs_change) +
-          (gr.revenue_start ? ' — بدء إيراد (لا تُحسب نسبة)' : (typeof gr.value === 'number' ? ' (' + fmtPct(gr.value) + ')' : '')) +
-          (list(gr.only_curr).length || list(gr.only_prev).length ? ' · معروفة في فترة واحدة فقط: ' + (list(gr.only_curr).length + list(gr.only_prev).length) + ' (تُعرض منفصلة)' : '');
-      } else gl = str(gr.short_label || gr.label) + ': ' + (gr.status === 'empty' ? 'لا توجد سجلات' : 'غير قابل للاحتساب — ' + str(gr.reason || ''));
-      add(fig._body, h('p', { class: 'chart-note' }, gl));
-    }
-    add(fig._body, h('p', { class: 'chart-note' }, 'عدد السجلات المعروف إيرادها قد يختلف بين الفترات، ولا تُقرأ الفروق نموًا إلا لأصول متطابقة وبأساس موحد.'));
-    add(fig._body, dataTable([
+    var gl = growthNote(gr);
+    if (gl) add(fig._body, h('p', { class: 'chart-note' }, gl));
+    if (!varies) add(fig._body, h('p', { class: 'chart-note' }, 'لا تُقرأ الفروق نموًا إلا لأصول متطابقة وبأساس موحد.'));
+    var cols = [
       { label: 'الفترة', cell: function (p) { return str(p.period); } },
-      { label: 'الإيراد المعروف', num: true, cell: function (p) { return typeof p.value === 'number' ? fmtMoney(p.value) : 'غير متاح'; } },
-      { label: 'سجلات معروفة', num: true, cell: function (p) { return p.n_known + ' من ' + p.n; } },
-      { label: 'الحقل', cell: function (p) { return fieldLabel(p.field); } }
-    ], pts));
+      { label: 'الإيراد المعروف', num: true, cell: function (p, i) { return typeof p.value === 'number' ? chartNum(fmtMoney(p.value), 'trend.points.' + i + '.value', p.value) : 'غير متاح'; } },
+      { label: 'سجلات معروفة', num: true, cell: function (p) { return p.n_known + ' من ' + p.n; } }
+    ];
+    if (sr && srPts.length === pts.length) cols.push({ label: 'السجلات نفسها (' + sr.n + ')', num: true, cell: function (p, i) { var x = srPts[i]; return x && typeof x.value === 'number' ? fmtMoney(x.value) : 'غير متاح'; } });
+    cols.push({ label: 'الحقل', cell: function (p) { return fieldLabel(p.field); } });
+    add(fig._body, dataTable(cols, pts));
     return fig;
   }
 
@@ -1531,7 +1854,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     clear(grid);
     var probeWide = h('div', { class: 'chart-card wide' }, h('div', { class: 'chart-body' }));
     add(grid, probeWide);
-    var Ww = chartWidth(probeWide.firstChild);
+    var Ww = chartWidth(probeWide.firstChild, true);
     clear(grid);
     var figs = [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn), chartComparison(all, Ww), chartConcentration(all, Wn), chartTrend(all, Wn)];
     // keep the grid tidy: the trend chart shares a row with concentration
@@ -1568,7 +1891,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   var COLS = [
     { key: 'name', label: 'الأصل / السجل', sort: function (d) { return str(d.rec.name); } },
     { key: 'asset_type', label: function () { return dimLabel('asset_type'); }, sort: function (d) { return dimText(d.rec, 'asset_type'); } },
-    { key: 'location', label: function () { return dimLabel('location'); }, sort: function (d) { return dimText(d.rec, 'location'); } },
+    { key: 'location', label: function () { return dimLabel('location'); }, sort: function (d) { return locText(d.rec); } },
     { key: 'use', label: function () { return dimLabel('use'); }, sort: function (d) { return dimText(d.rec, 'use'); } },
     { key: 'income_nature', label: function () { return dimLabel('income_nature'); }, sort: function (d) { return dimText(d.rec, 'income_nature'); } },
     { key: 'value', num: true, label: 'القيمة المسجلة', hsub: function () { var vl = CFG.valuation || {}; return str(vl.label || ''); }, sort: function (d) { return d.v; } },
@@ -1612,7 +1935,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   }
   function searchText(rec) {
     var d = rec.dims || {};
-    return norm([rec.name, rec.id, dimText(rec, 'asset_type'), dimText(rec, 'location'), d.district, dimText(rec, 'use'), dimText(rec, 'income_nature')].map(str).join(' '));
+    return norm([rec.name, rec.id, dimText(rec, 'asset_type'), locText(rec), d.district, dimText(rec, 'use'), dimText(rec, 'income_nature'), isManaged(rec) ? MANAGED_TAG : ''].map(str).join(' '));
   }
   function cmp(a, b) {
     if (a === b) return 0;
@@ -1621,9 +1944,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (typeof a === 'number' && typeof b === 'number') return a - b;
     return String(a).localeCompare(String(b), 'ar');
   }
-  function moneyCell(v, t) {
-    if (typeof v === 'number') return h('span', null, h('span', { class: 'num' }, fmtMoney(v)), t && t.s === 'zero_recorded' ? h('span', { class: 'zero-note' }, 'صفر مسجل') : (t && t.s === 'zero_confirmed' ? h('span', { class: 'zero-note' }, 'صفر مؤكد') : null));
-    return h('span', { class: 'na-val', title: t ? statusAr(t.s) : 'الحقل غير موجود' }, t ? statusAr(t.s) : 'غير متاح');
+  function moneyCell(v, t, managed) {
+    if (typeof v === 'number') return h('span', null, h('span', { class: 'num' }, fmtMoney(v)), t && t.s === 'zero_recorded' ? h('span', { class: 'zero-note' }, 'صفر مسجل') : (t && t.s === 'zero_confirmed' ? h('span', { class: 'zero-note' }, 'صفر مؤكد') : null),
+      managed ? h('span', { class: 'zero-note' }, 'ليس دخلًا للجمعية') : null);
+    var raw = rawOf(t);
+    return h('span', { class: 'na-val', title: raw ? 'النص في الخلية: «' + raw + '»' : (t ? statusAr(t.s) : 'الحقل غير موجود') }, t ? statusAr(t.s) : 'غير متاح',
+      raw ? h('span', { class: 'raw-val' }, '«' + raw + '»') : null);
   }
   function renderTable(all) {
     if (!all) return;
@@ -1647,17 +1973,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var tr = h('tr', { 'data-role': 'asset-row', 'data-record-id': str(rec.id), tabindex: '0', class: state.detailId === rec.id ? 'is-selected' : null,
         'aria-label': str(rec.name) + ' — اضغط Enter لعرض التفاصيل' });
       var typeTag = rec.record_type && rec.record_type !== 'asset' ? ' · ' + ((V.record_type && V.record_type[rec.record_type]) || rec.record_type) : '';
-      add(tr, h('td', null, h('span', { class: 'rname' }, str(rec.name || rec.id)), h('span', { class: 'rid' }, idc(rec.id), typeTag)));
+      var managed = isManaged(rec);
+      add(tr, h('td', null, h('span', { class: 'rname' }, str(rec.name || rec.id)), h('span', { class: 'rid' }, idc(rec.id), typeTag),
+        managed ? h('span', { class: 'flag managed', 'data-role': 'managed-tag' }, MANAGED_TAG) : null));
       add(tr, h('td', null, dimText(rec, 'asset_type')));
-      add(tr, h('td', null, dimText(rec, 'location')));
+      add(tr, h('td', null, locText(rec)));
       add(tr, h('td', null, dimText(rec, 'use')));
       add(tr, h('td', null, dimText(rec, 'income_nature')));
       add(tr, h('td', { class: 'n' }, vf ? moneyCell(d.v, tvOf(rec, vf)) : h('span', { class: 'na-val' }, 'لا يوجد تقييم')));
-      add(tr, h('td', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf)) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
+      add(tr, h('td', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf), managed) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
       add(tr, h('td', { class: 'n' }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y)) : h('span', { class: 'muted small', title: d.yNa || 'يلزم الإيراد والتقييم معًا' }, '—')));
       var fl = h('td');
       d.flags.forEach(function (f) { add(fl, h('span', { class: 'flag' }, f)); });
-      if (d.issues) add(fl, h('span', { class: 'flag' }, d.issues + ' ملاحظة بيانات'));
+      if (d.issues) add(fl, h('span', { class: 'flag' }, nNoun(d.issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات')));
       if (!d.flags.length && !d.issues) add(fl, h('span', { class: 'flag ok' }, 'مكتملة'));
       add(tr, fl);
       add(tr, h('td', { class: 'n' }, d.links ? h('span', { class: 'links-n', title: 'عدد الفجوات والتوصيات التي تستشهد بالسجل' }, String(d.links)) : h('span', { class: 'muted' }, '—')));
@@ -1710,14 +2038,15 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       pill(scopeAr, rec.scope === 'in_scope' ? 'ok' : 'na')));
     if (rec.scope_reason) add(body, h('p', { class: 'small muted', style: 'margin-top:6px' }, 'سبب النطاق: ' + str(rec.scope_reason)));
     var src = rec.source || {};
-    add(body, h('p', { class: 'small', style: 'margin-top:6px' }, 'المصدر: ', bdi(src.ref_name || ((src.sheet || '') + (src.row ? ' — الصف ' + src.row : '')))));
+    add(body, h('p', { class: 'small', style: 'margin-top:6px' }, 'المصدر: ', src.ref_name ? refc(src.ref_name) : bdi((src.sheet || '') + (src.row ? ' — الصف ' + src.row : ''))));
+    if (isManaged(rec)) add(body, h('p', { class: 'small', style: 'margin-top:6px' }, h('span', { class: 'flag managed' }, MANAGED_TAG), ' إيراده يُعرض للتوثيق ولا يدخل دخل الجمعية أو عوائدها.'));
 
     var dsec = h('div', { class: 'detail-sec' }, h('h4', null, 'التصنيف'));
     var dl = h('dl', { class: 'kv' });
     var dims = rec.dims || {};
     Object.keys(dims).forEach(function (k) {
       var ev = rec.dims_evidence && rec.dims_evidence[k];
-      add(dl, [h('dt', null, dimLabel(k)), h('dd', null, dimText(rec, k), ev ? h('span', { class: 'ev' }, 'الدليل: ', bdi(ev)) : null)]);
+      add(dl, [h('dt', null, dimLabel(k)), h('dd', null, dimText(rec, k), ev ? h('span', { class: 'ev' }, 'الدليل: ', refc(ev)) : null)]);
     });
     add(dsec, dl);
     var colA = h('div'), colB = h('div');
@@ -1736,7 +2065,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     fields.forEach(function (f) {
       var tvv = rec.fields[f];
       add(tb, h('tr', null, h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, str(tvv.note)) : null),
-        h('td', null, fmtFieldValue(f, tvv)), h('td', null, tvv ? statusAr(tvv.s) : '—'), h('td', null, tvv && tvv.ref ? bdi(tvv.ref) : '—')));
+        h('td', null, fmtFieldValue(f, tvv)), h('td', null, tvv ? statusAr(tvv.s) : '—'), h('td', null, tvv && tvv.ref ? refc(tvv.ref) : '—')));
     });
     add(t, tb);
     add(fsec, h('div', { class: 'table-wrap' }, t));
@@ -1748,7 +2077,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var isec = h('div', { class: 'detail-sec' }, h('h4', null, 'ملاحظات البيانات على السجل (' + iss.length + ')'));
     if (!iss.length) add(isec, h('p', { class: 'small muted' }, 'لا توجد ملاحظات مسجلة.'));
     iss.forEach(function (x) {
-      add(isec, h('div', { class: 'cite' }, h('b', null, h('bdi', null, str(x.id))), ' · ', levelAr(x.severity), ' — ', str(x.detail),
+      add(isec, h('div', { class: 'cite' }, h('b', null, idc(x.id)), ' · ', levelAr(x.severity), ' — ', str(x.detail),
         x.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(x.impact)) : null, x.treatment ? h('p', { class: 'small muted' }, 'المعالجة: ' + str(x.treatment)) : null));
     });
     add(colA, isec);
@@ -1760,11 +2089,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var it = c.item;
       var how = c.how === 'group' ? ' (عبر نطاق مجموعة)' : (c.how === 'via_gap' ? ' (عبر فجوة مرتبطة)' : '');
       if (c.type === 'gap') {
-        add(csec, h('div', { class: 'cite' }, h('b', null, 'فجوة ' + str(it.id) + ': ' + str(it.title)), how, ' ', it.is_proven_problem ? pill('مشكلة مثبتة', 'red') : pill('يحتاج تحقق', 'neutral'),
+        add(csec, h('div', { class: 'cite' }, h('b', null, 'فجوة ', idc(it.id), ': ' + str(it.title)), how, ' ', it.is_proven_problem ? pill('مشكلة مثبتة', 'red') : pill('يحتاج تحقق', 'neutral'),
           it.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(it.impact && it.impact.text !== undefined ? it.impact.text : it.impact)) : null,
           h('div', { class: 'ev' }, evidenceChips(it.evidence))));
       } else {
-        add(csec, h('div', { class: 'cite' }, h('b', null, 'توصية ' + str(it.id) + ': ' + str(it.first_action || it.target)), how,
+        add(csec, h('div', { class: 'cite' }, h('b', null, 'توصية ', idc(it.id), ': ' + recTitle(it)), how,
           it.problem ? h('p', { class: 'small' }, 'المشكلة: ' + str(it.problem)) : null,
           h('div', { class: 'ev' }, evidenceChips(it.evidence))));
       }
@@ -1817,7 +2146,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   }
   var KEY_AR = { status: 'الحالة', summary: 'الملخص', added: 'أُضيفت', removed: 'غابت عن الملف', changed: 'تغيرت', unchanged: 'دون تغيير', performance: 'تغير الأداء', scope: 'تغير النطاق',
     valuation: 'تغير التقييم', corrections: 'تصحيحات البيانات', prev: 'النسخة السابقة', curr: 'النسخة الحالية', note: 'ملاحظة', notes: 'ملاحظات', id: 'المعرف', rec_id: 'التوصية',
-    evidence: 'الدليل', reason: 'السبب', text: 'النص', metric: 'المؤشر', value: 'القيمة', detail: 'التفاصيل', records: 'السجلات', name: 'الاسم' };
+    evidence: 'الدليل', reason: 'السبب', text: 'النص', metric: 'المؤشر', value: 'القيمة', detail: 'التفاصيل', records: 'السجلات', name: 'الاسم',
+    counts: 'الأعداد', category: 'الفئة', subtype: 'نوع الفرق', field: 'الحقل', delta: 'الفرق', record_id_prev: 'المعرّف السابق', record_id_curr: 'المعرّف الحالي',
+    prev_name: 'الاسم السابق', curr_name: 'الاسم الحالي', match_confidence: 'درجة المطابقة', v: 'القيمة', s: 'الحالة', ref: 'الخلية', key: 'البند',
+    prev_value: 'القيمة السابقة', curr_value: 'القيمة الحالية', data_signals: 'إشارات البيانات', target: 'الهدف', first_action: 'الإجراء الأول', success_kpi: 'مؤشر النجاح',
+    period: 'الفترة', label: 'الوصف', source_ref: 'المرجع', scope: 'النطاق', record_type: 'نوع السجل', examples: 'أمثلة' };
   function renderAny(x, depth) {
     depth = depth || 0;
     if (x === null || x === undefined) return '—';
@@ -1873,10 +2206,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(b, h('h4', null, 'التحقق الآلي'));
     if (!vs.available) add(b, h('p', { class: 'small' }, 'لا توجد نتيجة تحقق مرفقة؛ هذه مسودة.'));
     else {
-      add(b, h('p', { class: 'small' }, 'الأخطاء المانعة: ' + (vs.blocking_count || 0) + ' · التنبيهات: ' + (vs.warning_count || 0) + (vs.checked_at ? ' · ' + str(vs.checked_at) : '')));
-      var msgs = list(vs.blocking).concat(list(vs.warnings));
+      add(b, h('p', { class: 'small' }, 'الأخطاء المانعة: ' + (vs.blocking_count || 0) + ' · التنبيهات: ' + (vs.warning_count || 0) +
+        (vs.acknowledged_count ? ' · تنبيهات معلَّلة في السرد: ' + vs.acknowledged_count : '') + (vs.checked_at ? ' · ' + str(vs.checked_at) : '')));
+      var msgs = list(vs.blocking).concat(list(vs.warnings), list(vs.acknowledged));
       if (msgs.length) add(b, h('ul', { class: 'small' }, list(vs.blocking).map(function (m) { return h('li', null, pill('مانع', 'red'), ' ', str(m)); })
-        .concat(list(vs.warnings).map(function (m) { return h('li', null, str(m)); }))));
+        .concat(list(vs.warnings).map(function (m) { return h('li', null, pill('تنبيه', 'warn'), ' ', str(m)); }),
+          list(vs.acknowledged).map(function (m) { return h('li', null, pill('معلَّل', 'neutral'), ' ', str(m)); }))));
     }
     setCount('methodology', null);
   }
@@ -1889,9 +2224,9 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       case 'sum': return 'مجموع ' + F('field') + ' للسجلات المعروفة قيمتها؛ السجلات غير المعروفة تظهر مستبعدة ولا تُحسب صفرًا.';
       case 'ratio': return 'مجموع ' + F('num') + ' ÷ مجموع ' + F('den') + ' × ' + (spec.scale || 1) + ' لنفس السجلات التي يتوافر لها الرقمان والمقام موجب (مجاميع متطابقة لا متوسط عوائد).';
       case 'diff': return 'مجموع (' + F('a') + ' − ' + F('b') + ') للسجلات التي يتوافر لها الرقمان.';
-      case 'growth': return '(مجموع ' + F('curr') + ' − مجموع ' + F('prev') + ') ÷ مجموع ' + F('prev') + ' × 100 للأصول المعروفة في الفترتين؛ إذا كان السابق صفرًا يُعرض «بدء إيراد» دون نسبة.';
+      case 'growth': return '(مجموع ' + F('curr') + ' − مجموع ' + F('prev') + ') ÷ مجموع ' + F('prev') + ' × 100 للأصول المعروفة في الفترتين؛ السجل الذي إيراده السابق صفر يُعرض «بدء إيراد» بتغيره بالريال خارج النسبة.';
       case 'concentration': return 'مجموع أكبر ' + (spec.top || 3) + ' قيم موجبة من ' + F('field') + ' ÷ مجموع القيم الموجبة المعروفة × 100؛ مؤشر هيرفندال = مجموع مربعات الحصص × 10000.';
-      case 'coverage': return 'لكل حقل: عدد السجلات المعروفة ÷ عدد السجلات؛ القيمة = الأدنى × 100 (تغطية بالعدد لا بالقيمة).';
+      case 'coverage': return 'لكل حقل: عدد السجلات المعروفة ÷ عدد السجلات التي ينطبق عليها الحقل؛ القيمة = الأدنى × 100 (تغطية بالعدد لا بالقيمة).';
       default: return str(spec.kind);
     }
   }
@@ -1918,7 +2253,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         return list(v).map(function (f) { return fieldLabel(f) + ' [' + f + ']'; }).join('، ');
       }).filter(Boolean).join(' · ');
       var pairs = [
-        ['القيمة', typeof r.value === 'number' ? h('span', { class: 'num' }, fmtUnit(r.value, r.unit)) : naText(r) + (r.reason ? ' — ' + str(r.reason) : '')],
+        ['القيمة', typeof r.value === 'number' ? [h('span', { class: 'num' }, fmtUnit(r.value, r.unit)), r.note ? ' — ' + str(r.note) : null]
+          : naText(r) + (r.status === 'empty' ? ' — ' + emptyReason(r) : (r.reason ? ' — ' + str(r.reason) : ''))],
         ['التعريف', str(r.definition)],
         ['طريقة الحساب', formulaWords(spec, r)],
         ['الحقول المستخدمة', fieldsTxt || '—'],
@@ -1934,15 +2270,20 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         if (typeof r.coverage_num_share === 'number') pairs.push(['تغطية البسط', 'تغطي ' + fmtShare(r.coverage_num_share) + ' من الإيراد المعروف (' + fmtMoney(r.num_known_total || 0) + ')']);
       }
       if (r.kind === 'growth') {
-        if (typeof r.prev_sum === 'number') pairs.push(['المجموعان', 'السابق ' + fmtMoney(r.prev_sum) + ' · الحالي ' + fmtMoney(r.curr_sum) + ' · التغير ' + fmtMoney(r.abs_change) + (r.revenue_start ? ' · بدء إيراد' : '')]);
-        if (r.comparability) pairs.push(['قابلية المقارنة', str(r.comparability.reason || r.comparability.status)]);
+        if (typeof r.prev_sum === 'number') pairs.push(['المجموعان', 'السابق ' + fmtMoney(r.prev_sum) + ' · الحالي ' + fmtMoney(r.curr_sum) + ' · التغير ' + fmtMoney(r.abs_change)]);
+        var rsl = revenueStartLine(r);
+        if (rsl) pairs.push(['بدء إيراد', rsl]);
+        if (r.comparability) pairs.push(['قابلية المقارنة', (r.comparability.status === 'confirmed' ? 'متحققة' : (r.comparability.status === 'not_comparable' ? 'غير قابلة للمقارنة' : 'غير متحققة')) +
+          (r.comparability.reason ? ' — ' + str(r.comparability.reason) : '')]);
         if (list(r.only_curr).length || list(r.only_prev).length) pairs.push(['معروفة في فترة واحدة', list(r.only_curr).concat(list(r.only_prev)).map(recName).join('، ')]);
       }
       if (r.kind === 'concentration' && list(r.top_ids).length) pairs.push(['الأكبر', list(r.top_ids).map(recName).join('، ') + (typeof r.hhi === 'number' ? ' · هيرفندال ' + fmtNumber(r.hhi, 0) : '')]);
-      if (r.kind === 'coverage') pairs.push(['لكل حقل', list(r.per_field).map(function (p) { return fieldLabel(p.field) + ': ' + p.n_known + ' من ' + p.n; }).join(' · ')]);
+      if (r.kind === 'coverage') pairs.push(['لكل حقل', list(r.per_field).map(function (p) {
+        return fieldLabel(p.field) + ': ' + p.n_known + ' من ' + p.n + (p.n_not_applicable ? ' (لا ينطبق على ' + nRec(p.n_not_applicable) + '، خارج المقام)' : '');
+      }).join(' · ')]);
       if (r.kind === 'diff' && typeof r.a_sum === 'number') pairs.push(['المجموعان', fmtMoney(r.a_sum) + ' − ' + fmtMoney(r.b_sum)]);
       var art = h('article', { class: 'calc' },
-        h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), statusPill(r.status)),
+        h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), resultPill(r)),
         kvList(pairs),
         h('details', { class: 'sub' }, h('summary', null, 'السجلات المشمولة (' + list(r.included_ids).length + ') والمستبعدة (' + list(r.excluded).length + ')'),
           h('p', { class: 'small lbl' }, 'المشمولة:'), namesList(list(r.included_ids)),
@@ -1964,7 +2305,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(b, h('h4', null, 'الفجوات (' + GAPS.length + ')'));
     if (!GAPS.length) add(b, h('p', { class: 'muted' }, 'لا توجد فجوات في السرد.'));
     GAPS.forEach(function (g) {
-      add(b, h('article', { class: 'calc' }, h('h5', null, str(g.id) + ' — ' + str(g.title), provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
+      add(b, h('article', { class: 'calc' }, h('h5', null, idc(g.id), ' — ' + str(g.title), provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
         kvList([['النطاق', scopeNodes(g.scope)], ['الأثر', g.impact && typeof g.impact === 'object' ? str(g.impact.text) : str(g.impact)],
           ['السبب المثبت', g.proven_cause ? str(g.proven_cause) : 'لا يوجد سبب مثبت'], ['أسباب محتملة', list(g.possible_causes).map(str).join('؛ ')],
           ['يلزم للتحقق', list(g.verification_needed).map(str).join('؛ ')], ['الإجراء المقترح', str(g.proposed_action)], ['الدليل', evidenceChips(g.evidence)]])));
@@ -1973,8 +2314,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!RECS.length) add(b, h('p', { class: 'muted' }, 'لا توجد توصيات في السرد.'));
     RECS.slice().sort(function (a, c) { return (a.priority || 99) - (c.priority || 99); }).forEach(function (r) {
       var rk = r.ranking && typeof r.ranking === 'object' ? r.ranking : {};
-      add(b, h('article', { class: 'calc' }, h('h5', null, str(r.id) + ' — ' + str(r.target), r.priority ? pill('الأولوية ' + r.priority, 'navy') : null),
-        kvList([['المشكلة', str(r.problem)], ['الفجوات', list(r.gap_ids).map(function (x) { return GAP[x] ? x + ' — ' + str(GAP[x].title) : str(x); }).join('؛ ')],
+      add(b, h('article', { class: 'calc' }, h('h5', null, idc(r.id), ' — ' + (r.title ? str(r.title) : str(r.target)), r.priority ? pill('الأولوية ' + r.priority, 'navy') : null),
+        kvList([['الأصل أو النشاط', r.title ? linkIds(r.target) : null], ['المشكلة', str(r.problem)], ['الفجوات', list(r.gap_ids).map(function (x) { return GAP[x] ? x + ' — ' + str(GAP[x].title) : str(x); }).join('؛ ')],
           ['الإجراء الأول', str(r.first_action)], ['البدائل', list(r.alternatives).map(str).join('؛ ')], ['الخيار الموصى به', str(r.recommended_option)],
           ['السبب', str(r.rationale)], ['المسؤول', str(r.owner_role)], ['المدة', str(r.duration)], ['التكلفة', str(r.cost)],
           ['الأثر المتوقع', str(r.expected_impact)], ['مؤشر النجاح', str(r.success_kpi)], ['الاعتماد المطلوب', r.approval_required ? str(r.approval_required) : 'لا يلزم'],
@@ -1997,7 +2338,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     else add(b, simpleTable([
       { label: 'المعرف', cell: function (x) { return idc(x.id); } },
       { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
-      { label: 'الموضع', cell: function (x) { return bdi(x.where); } },
+      { label: 'الموضع', cell: function (x) { return refc(x.where); } },
       { label: 'المشكلة', cell: function (x) { return str(x.detail); } },
       { label: 'الأثر', cell: function (x) { return str(x.impact); } },
       { label: 'المعالجة', cell: function (x) { return str(x.treatment); } },
@@ -2016,7 +2357,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       { label: 'النوع', cell: function (r) { return (V.record_type && V.record_type[r.record_type]) || str(r.record_type); } },
       { label: 'النطاق', cell: function (r) { return (V.scope && V.scope[r.scope]) || str(r.scope); } },
       { label: 'السبب', cell: function (r) { return str(r.scope_reason) || '—'; } },
-      { label: 'المصدر', cell: function (r) { return bdi((r.source && (r.source.ref_name || r.source.sheet)) || ''); } }
+      { label: 'المصدر', cell: function (r) { return refc((r.source && (r.source.ref_name || r.source.sheet)) || ''); } }
     ], out));
     var ex = list(D.excluded_rows);
     if (ex.length) {
@@ -2026,7 +2367,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var ne = list(NAR.exclusions);
     if (ne.length) {
       add(b, h('h4', null, 'استبعادات موثقة في الدراسة'));
-      add(b, simpleTable([{ label: 'ما استُبعد', cell: function (x) { return str(x.what); } }, { label: 'الموضع', cell: function (x) { return bdi(x.where); } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ne));
+      add(b, simpleTable([{ label: 'ما استُبعد', cell: function (x) { return str(x.what); } }, { label: 'الموضع', cell: function (x) { return refc(x.where); } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ne));
     }
     setCount('exclusions', out.length + ex.length + ne.length);
   }
@@ -2060,14 +2401,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (an.length) {
       add(b, h('h4', null, 'ملاحظات على المصنف (' + an.length + ')'));
       add(b, simpleTable([{ label: 'المعرف', cell: function (x) { return idc(x.id); } }, { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
-        { label: 'الموضع', cell: function (x) { return bdi(x.where); } }, { label: 'التفاصيل', cell: function (x) { return str(x.detail); } }], an));
+        { label: 'الموضع', cell: function (x) { return refc(x.where); } }, { label: 'التفاصيل', cell: function (x) { return str(x.detail); } }], an));
     }
     var pii = list(WB.pii_columns);
     if (pii.length) add(b, h('p', { class: 'small', style: 'margin-top:12px' }, 'أعمدة بيانات شخصية لم تُنقل قيمها إلى اللوحة: ' + pii.map(function (p) { return str(p.sheet).trim() + '!' + str(p.col) + ' (' + str(p.header) + ')'; }).join('، ')));
     var ln = list(WB.links);
     if (ln.length) {
       add(b, h('h4', null, 'روابط محتملة بين الأوراق'));
-      add(b, simpleTable([{ label: 'السجل', cell: function (x) { return REC[x.record] ? recButton(x.record) : bdi(x.record); } }, { label: 'المرجع الآخر', cell: function (x) { return bdi(x.other_ref); } },
+      add(b, simpleTable([{ label: 'السجل', cell: function (x) { return REC[x.record] ? recButton(x.record) : bdi(x.record); } }, { label: 'المرجع الآخر', cell: function (x) { return refc(x.other_ref); } },
         { label: 'التطابق', cell: function (x) { return MATCH_AR[x.match] || str(x.match); } }, { label: 'الأساس', cell: function (x) { return str(x.basis); } },
         { label: 'استُخدم؟', cell: function (x) { return x.used ? 'نعم' : 'لا'; } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ln));
     }
@@ -2139,16 +2480,178 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     setCount('scenarios', items.length);
   }
 
+  // ---- versions (brief §12): the five categories of compare_versions.py and the follow-up table ----------------
+  var VC_CATS = [['new_period_performance', 'أداء فترة جديدة'], ['scope_change', 'تغير نطاق المحفظة'], ['valuation_change', 'تغير التقييم'],
+    ['data_correction', 'تصحيح بيانات للفترة نفسها'], ['definition_change', 'تغير تعريف أو تصنيف']];
+  var VC_RELATION_AR = { same_period: 'الفترة نفسها — رفع نسخة أحدث ليس نموًا زمنيًا', new_period: 'فترة جديدة', different: 'فترتان افتراضيتان مختلفتان' };
+  var VC_CONF_AR = { exact: 'مطابقة تامة', deed: 'بالصك', probable: 'محتملة' };
+  var VC_MAX_ROWS = 40;
+  var VC_KNOWN_KEYS = ['contract_version', 'generator', 'generated_at', 'prev', 'curr', 'same_source_file', 'period_relation', 'new_periods', 'growth_note',
+    'matching', 'counts', 'category_labels', 'categories', 'changes', 'examples', 'metric_deltas', 'recommendation_followup', 'summary', 'summary_ar', 'id_conflicts', 'ambiguous'];
+  function vcCatLabel(labels, key) {
+    var d = VC_CATS.filter(function (c) { return c[0] === key; })[0];
+    return str(labels[key] || (d ? d[1] : key));
+  }
+  function vcBrief(tv, field) {
+    if (tv === null || tv === undefined) return '—';
+    if (typeof tv !== 'object') return typeof tv === 'number' ? fmtPlain(tv) : str(tv);
+    if (typeof tv.v === 'number' && KNOWN.indexOf(tv.s) >= 0) {
+      var g = (FM[field] || {}).group;
+      return ['revenue', 'valuation', 'expense'].indexOf(g) >= 0 ? fmtMoney(tv.v) : fmtPlain(tv.v);
+    }
+    if (typeof tv.v === 'string' && tv.v.trim()) return tv.v;   // text fields (deed, notes …): the text itself
+    return statusAr(tv.s) + (rawOf(tv) ? ' «' + rawOf(tv) + '»' : '');
+  }
+  function vcRecord(c) {
+    var p = c.record_id_prev, n = c.record_id_curr;
+    var ids = p && n && p !== n ? [idc(p), ' ← ', idc(n)] : [idc(n || p || c.id || '—')];
+    var id = n || p;
+    var name = str(c.name || (REC[id] ? recName(id) : ''));
+    return [REC[id] ? recButton(id, name) : name, name ? ' ' : null, h('span', { class: 'rid' }, ids)];
+  }
+  function vcChangeTable(items, cat) {
+    var defLike = cat === 'definition_change' || items.every(function (c) { return !c.record_id_prev && !c.record_id_curr; });
+    if (defLike) {
+      return simpleTable([
+        { label: 'البند', cell: function (c) { return h('code', null, str(c.key || c.metric_id || c.field || c.subtype)); } },
+        { label: 'السابق', cell: function (c) { return renderAny(c.prev_value !== undefined ? c.prev_value : c.prev, 2); } },
+        { label: 'الحالي', cell: function (c) { return renderAny(c.curr_value !== undefined ? c.curr_value : c.curr, 2); } },
+        { label: 'ملاحظة', cell: function (c) { return str(c.note) || '—'; } }
+      ], items, 'mini-table');
+    }
+    return simpleTable([
+      { label: 'السجل', cell: vcRecord },
+      { label: 'الحقل', cell: function (c) { return c.field === 'name' ? 'الاسم' : (c.field ? fieldLabel(c.field) : '—'); } },
+      { label: 'السابق', num: true, cell: function (c) { return c.field === 'name' ? str(c.prev_name || '—') : vcBrief(c.prev, c.field); } },
+      { label: 'الحالي', num: true, cell: function (c) { return c.field === 'name' ? str(c.curr_name || '—') : vcBrief(c.curr, c.field); } },
+      { label: 'الفرق', num: true, cell: function (c) { return typeof c.delta === 'number' ? vcBrief({ v: c.delta, s: 'value' }, c.field) : '—'; } },
+      { label: 'ملاحظة', cell: function (c) { return str(c.note) || '—'; } }
+    ], items, 'mini-table');
+  }
+  function renderVersionComparison(b, vc) {
+    var labels = vc.category_labels && typeof vc.category_labels === 'object' ? vc.category_labels : {};
+    // G6 shape: categories.<key> lists; older shape: changes.<key>; an analyst's summary: counts + examples
+    var lists = vc.categories && typeof vc.categories === 'object' && !Array.isArray(vc.categories) ? vc.categories
+      : (vc.changes && typeof vc.changes === 'object' && !Array.isArray(vc.changes) ? vc.changes : {});
+    var examples = list(vc.examples).filter(function (x) { return x && typeof x === 'object'; });
+    var counts = vc.counts && typeof vc.counts === 'object' ? vc.counts : {};
+    var pi = vc.prev && typeof vc.prev === 'object' ? vc.prev : null, ci = vc.curr && typeof vc.curr === 'object' ? vc.curr : null;
+    var pairs = [];
+    if (pi || ci) pairs.push(['النسختان', [str(pi && (pi.source_file || pi.data_period)) || 'السابقة', ' ← ', str(ci && (ci.source_file || ci.data_period)) || 'الحالية',
+      vc.same_source_file ? ' (الملف نفسه بالبصمة)' : '']]);
+    if (vc.period_relation) pairs.push(['العلاقة بين الفترتين', VC_RELATION_AR[vc.period_relation] || str(vc.period_relation)]);
+    if (list(vc.new_periods).length) pairs.push(['فترات جديدة', list(vc.new_periods).map(str).join('، ')]);
+    var mc = vc.matching && vc.matching.counts ? vc.matching.counts : null;
+    if (mc) pairs.push(['مطابقة السجلات', Object.keys(VC_CONF_AR).filter(function (k) { return typeof mc[k] === 'number'; }).map(function (k) { return VC_CONF_AR[k] + ' ' + mc[k]; }).join(' · ') +
+      ' · في السابقة فقط ' + (mc.only_prev || 0) + ' · في الجديدة فقط ' + (mc.only_curr || 0)]);
+    add(b, h('h4', null, 'مقارنة بالنسخة السابقة'));
+    if (pairs.length) add(b, kvList(pairs));
+    if (vc.growth_note) add(b, h('p', { class: 'caveat', role: 'note' }, str(vc.growth_note)));
+    // the five categories, always in the brief's order, with a count even when empty
+    add(b, h('div', { 'data-role': 'version-categories' }, simpleTable([
+      { label: 'الفئة', cell: function (c) { return c.label; } },
+      { label: 'عدد الفروق', num: true, cell: function (c) { return c.n === null ? 'غير مذكور' : String(c.n); } }
+    ], VC_CATS.map(function (c) {
+      var items = Array.isArray(lists[c[0]]) ? lists[c[0]] : null;
+      var n = typeof counts[c[0]] === 'number' ? counts[c[0]]
+        : (items ? items.length : (examples.length ? examples.filter(function (x) { return x.category === c[0]; }).length : null));
+      return { key: c[0], label: vcCatLabel(labels, c[0]), n: n };
+    }), 'mini-table')));
+    VC_CATS.forEach(function (c) {
+      var items = (Array.isArray(lists[c[0]]) ? lists[c[0]] : examples.filter(function (x) { return x.category === c[0]; }))
+        .filter(function (x) { return x && typeof x === 'object'; });
+      if (!items.length) return;
+      var total = typeof counts[c[0]] === 'number' ? counts[c[0]] : items.length;
+      add(b, h('h5', { 'data-role': 'version-category', 'data-category': c[0] }, vcCatLabel(labels, c[0]) + ' (' + total + ')'));
+      add(b, vcChangeTable(items.slice(0, VC_MAX_ROWS), c[0]));
+      var shown = Math.min(items.length, VC_MAX_ROWS);
+      if (total > shown) add(b, h('p', { class: 'small muted' }, 'يُعرض ' + shown + ' من ' + total + '؛ القائمة كاملة في version_comparison.json.'));
+    });
+    var conf = list(vc.id_conflicts || (vc.matching && vc.matching.id_conflicts)).filter(function (x) { return x && typeof x === 'object'; });
+    if (conf.length) {
+      add(b, h('h5', null, 'تعارض معرّفات لم يُطابق تلقائيًا (' + conf.length + ')'));
+      add(b, simpleTable([{ label: 'المعرّف', cell: function (x) { return idc(x.id); } }, { label: 'الاسم السابق', cell: function (x) { return str(x.prev_name) || '—'; } },
+        { label: 'الاسم الحالي', cell: function (x) { return str(x.curr_name) || '—'; } }, { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }], conf, 'mini-table'));
+    }
+    var amb = list(vc.ambiguous || (vc.matching && vc.matching.ambiguous)).filter(function (x) { return x && typeof x === 'object'; });
+    if (amb.length) {
+      var ids = function (a) { return list(a).map(function (i, k) { return [k ? '، ' : null, idc(i)]; }); };
+      add(b, h('h5', null, 'حالات تحتاج مراجعة يدوية (' + amb.length + ')'));
+      add(b, simpleTable([{ label: 'السابقة', cell: function (x) { return ids(x.prev_ids); } }, { label: 'الحالية', cell: function (x) { return ids(x.curr_ids); } },
+        { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }], amb, 'mini-table'));
+    }
+    var md = list(vc.metric_deltas).filter(function (x) { return x && typeof x === 'object'; });
+    if (md.length) {
+      add(b, h('h5', null, 'فروق المؤشرات بين النسختين'));
+      add(b, simpleTable([
+        { label: 'المؤشر', cell: function (x) { return str(x.label || x.id); } },
+        { label: 'السابق', num: true, cell: function (x) { return typeof x.prev_value === 'number' ? fmtUnit(x.prev_value, x.unit) : statusAr(x.prev_status); } },
+        { label: 'الحالي', num: true, cell: function (x) { return typeof x.curr_value === 'number' ? fmtUnit(x.curr_value, x.unit) : statusAr(x.curr_status); } },
+        { label: 'الفرق', num: true, cell: function (x) { return typeof x.difference === 'number' ? fmtUnit(x.difference, x.unit) : '—'; } },
+        { label: 'يتأثر بـ', cell: function (x) {
+          var af = x.affected_by && typeof x.affected_by === 'object' ? x.affected_by : {};
+          return Object.keys(af).map(function (k) { return vcCatLabel(labels, k) + ' (' + list(af[k]).length + ')'; }).join('؛ ') || '—';
+        } },
+        { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }
+      ], md, 'mini-table'));
+    }
+    var sum = list(vc.summary_ar || vc.summary).filter(function (x) { return typeof x === 'string' && x.trim(); });
+    if (sum.length) add(b, h('details', { class: 'sub' }, h('summary', null, 'ملخص المقارنة النصي'), h('ul', { class: 'small' }, sum.map(function (x) { return h('li', null, x.replace(/^-\s*/, '')); }))));
+    var rest = Object.keys(vc).filter(function (k) { return VC_KNOWN_KEYS.indexOf(k) < 0; });
+    if (rest.length) {
+      var o = {};
+      rest.forEach(function (k) { o[k] = vc[k]; });
+      add(b, h('details', { class: 'sub' }, h('summary', null, 'بيانات إضافية في المقارنة'), renderAny(o, 1)));
+    }
+  }
+  /** Data signals of a follow-up item, de-duplicated (one line per record, category and field). */
+  function followSignals(x) {
+    var seen = {}, out = [];
+    list(x.data_signals).forEach(function (sg) {
+      if (!sg || typeof sg !== 'object') return;
+      var k = [sg.record_id, sg.category, sg.field].join('|');
+      if (seen[k]) return;
+      seen[k] = 1;
+      out.push([idc(sg.record_id), ': ' + vcCatLabel({}, sg.category) + (sg.field ? ' — ' + (sg.field === 'name' ? 'الاسم' : fieldLabel(sg.field)) : '') +
+        (typeof sg.delta === 'number' ? ' (' + vcBrief({ v: sg.delta, s: 'value' }, sg.field) + ')' : '')]);
+    });
+    return out;
+  }
   function renderVersions() {
     var b = clear(SEC.versions.body);
     var vc = NAR.version_comparison;
+    var has = !!(vc && typeof vc === 'object' && !Array.isArray(vc) && Object.keys(vc).length);
+    if (!has) add(b, h('p', null, 'لا توجد نسخة سابقة متاحة للمقارنة في هذا التشغيل؛ لا يُدّعى وجود نسخة سابقة.'));
+    else renderVersionComparison(b, vc);
     var fu = list(NAR.recommendation_followup);
-    if (!vc || (typeof vc === 'object' && !Object.keys(vc).length)) add(b, h('p', null, 'لا توجد نسخة سابقة متاحة للمقارنة في هذا التشغيل؛ لا يُدّعى وجود نسخة سابقة.'));
-    else { add(b, h('h4', null, 'مقارنة بالنسخة السابقة')); add(b, renderAny(vc, 0)); }
+    if (!fu.length && has) fu = list(vc.recommendation_followup);
+    fu = fu.filter(function (x) { return x && typeof x === 'object'; });
     add(b, h('h4', null, 'متابعة التوصيات السابقة'));
     if (!fu.length) add(b, h('p', { class: 'muted' }, 'لا توجد توصيات سابقة للمتابعة.'));
-    else add(b, h('div', null, fu.map(function (x) { return h('div', { class: 'calc' }, renderAny(x, 1)); })));
-    setCount('versions', vc ? 1 + fu.length : fu.length || null);
+    else {
+      var anySignals = fu.some(function (x) { return followSignals(x).length; });
+      var cols = [
+        { label: 'التوصية', cell: function (x) {
+          var r = RECO[x.rec_id];
+          var t = x.title || x.target || (r && (r.title || r.target));
+          return [idc(x.rec_id), t ? ' — ' : null, t ? linkIds(t) : null];
+        } },
+        { label: 'الحالة', cell: function (x) { return pill(str(x.status) || 'لم يُتحقق', FOLLOW_TONE[str(x.status)] || 'neutral'); } },
+        { label: 'الدليل', cell: function (x) {
+          var ev = x.evidence;
+          if (ev === null || ev === undefined || ev === '' || (Array.isArray(ev) && !ev.length)) return h('span', { class: 'muted' }, 'لا يوجد دليل بعد');
+          return Array.isArray(ev) ? evidenceChips(ev) : refc(ev);
+        } },
+        { label: 'ملاحظة', cell: function (x) { return str(x.note) || '—'; } }
+      ];
+      if (anySignals) cols.push({ label: 'إشارات من الملف (لا تثبت التنفيذ)', cell: function (x) {
+        var sg = followSignals(x);
+        return sg.length ? h('ul', { class: 'small' }, sg.map(function (l) { return h('li', null, l); })) : '—';
+      } });
+      add(b, h('div', { 'data-role': 'followup-table' }, simpleTable(cols, fu)));
+      add(b, h('p', { class: 'small muted' }, 'تُحدَّث الحالة («لم يبدأ» أو «قيد التنفيذ» أو «منجز» أو «متعثر») بدليل أو بإفادة المستخدم فقط؛ تحسن رقم أو تغير في الملف لا يثبت تنفيذ التوصية.'));
+    }
+    setCount('versions', has ? 1 + fu.length : (fu.length || null));
   }
 
   function renderAllRecords() {
@@ -2161,7 +2664,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       { label: 'النطاق', cell: function (r) { return (V.scope && V.scope[r.scope]) || str(r.scope); } },
       { label: 'الاستخدام', cell: function (r) { return dimText(r, 'use'); } },
       { label: 'طبيعة الدخل', cell: function (r) { return dimText(r, 'income_nature'); } },
-      { label: 'المصدر', cell: function (r) { return bdi((r.source && r.source.ref_name) || ''); } }
+      { label: 'المصدر', cell: function (r) { return refc((r.source && r.source.ref_name) || ''); } }
     ], rows));
     setCount('records', rows.length);
   }

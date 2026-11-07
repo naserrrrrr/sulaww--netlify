@@ -3,42 +3,56 @@
  * check_dashboard.mjs — headless-browser test of a built dashboard.html (data-contract.md §0, §8).
  *
  * Usage:
- *   node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000]
- * Writes RUN/08_dashboard_check.json and RUN/screens/{desktop.png, mobile.png, mobile_full.png, print.pdf}.
+ *   node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000] [--allow-draft]
+ *   node scripts/check_dashboard.mjs --self-test     (number parsing and shared PII patterns, no browser)
+ * Writes RUN/08_dashboard_check.json and RUN/screens/{desktop.png, desktop_01.png …, details_open.png, mobile.png,
+ * mobile_full.png, mobile_360.png, mobile_detail.png, print.pdf}.
  * Exit code: 0 = every check passed, 1 = a check failed (or the browser could not run), 2 = bad arguments.
  *
  * Checks (DOM contract shared with assets/dashboard_template.html):
- *   load, html_lang_dir, api, structure, details_sections, parity (every parity case of
- *   05_metrics.json recomputed in the page by APA.computeAll), cards, charts, filters, period_filter,
- *   table_search, table_sort, table_detail, buttons, no_raw_tokens, privacy, desktop_screenshot,
- *   mobile_overflow, print, offline, console_errors.
+ *   load, draft (a --draft build fails unless --allow-draft), html_lang_dir (attributes and computed direction),
+ *   api, structure, details_sections, parity (every parity case of 05_metrics.json recomputed in the page by
+ *   APA.computeAll), cards (data-value/status AND the displayed number; ratio cards show their scope, basis and
+ *   valuation date), charts (every [data-role=chart-number] against computeAll and its own text), table_cells
+ *   (value/revenue/yield cells against the records), filters, period_filter (cards, charts and table cells per
+ *   state), table_search, table_sort (every sortable column; numeric columns must be ordered), table_detail,
+ *   buttons, no_raw_tokens, privacy (the shared patterns of assets/pii_patterns.json: block level fails, review
+ *   level is reported in `warnings`), desktop_screenshot, mobile_overflow (360 and 390 px, default view and with the
+ *   details and an asset detail open), print (executive sections visible on paper), offline, console_errors.
  * Playwright is loaded from the local project, NODE_PATH or the global npm root.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PARITY_REL_TOL = 1e-9;
 const MAX_FILTER_VALUES = 3;
 const MAX_BUTTONS = 150;
-const MAX_SORT_HEADERS = 6;
+const MAX_SORT_HEADERS = 30;
+const MAX_TABLE_ROWS = 80;
+const MAX_CROPS = 14;
 const DETAIL_SECTIONS = ['calculations', 'issues', 'exclusions', 'assumptions', 'sources', 'workbook', 'questions',
   'scenarios', 'versions', 'methodology', 'records'];
+// sections of the executive view that must be on paper (brief §11: the executive view prints)
+const PRINT_SECTIONS = ['sec-summary', 'sec-kpis', 'sec-priorities', 'sec-charts', 'sec-plan'];
+const MOBILE_WIDTHS = [360, 390];
 const MAX_CARDS = 8;
+const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PII_PATTERNS_PATH = path.join(SKILL_DIR, 'assets', 'pii_patterns.json');
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 function usage(msg) {
   if (msg) console.error('خطأ: ' + msg);
-  console.error('الاستخدام: node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000]');
+  console.error('الاستخدام: node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000] [--allow-draft]');
   process.exit(2);
 }
 
 function parseArgs(argv) {
-  const out = { timeout: 30000 };
+  const out = { timeout: 30000, allowDraft: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const eq = a.indexOf('=');
@@ -47,9 +61,12 @@ function parseArgs(argv) {
     if (key === '--html') out.html = val();
     else if (key === '--out') out.out = val();
     else if (key === '--timeout') out.timeout = Number(val());
+    else if (key === '--allow-draft') out.allowDraft = true;
+    else if (key === '--self-test') out.selfTest = true;
     else if (key === '-h' || key === '--help') usage();
     else usage('وسيط غير معروف: ' + a);
   }
+  if (out.selfTest) return out;
   if (!out.html) usage('--html مطلوب');
   if (!out.out) out.out = path.dirname(path.resolve(out.html));
   if (!Number.isFinite(out.timeout) || out.timeout <= 0) usage('--timeout يجب أن يكون رقمًا موجبًا بالملّي ثانية');
@@ -104,6 +121,8 @@ function cleanFilters(f) {
 }
 
 const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+/** Arabic counted noun: 1 and 2 by their own forms, 3–10 plural, 11+ singular accusative. */
+const nAr = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : `${n} ${n >= 3 && n <= 10 ? few : many}`);
 const short = (x, n = 300) => { const s = typeof x === 'string' ? x : JSON.stringify(x); return s && s.length > n ? s.slice(0, n) + '…' : s; };
 
 function toAsciiDigits(s) {
@@ -126,6 +145,58 @@ function isMissingText(text) {
 function hasArabicWords(text) {
   const t = String(text).replace(/ريال(\s*سعودي)?|ر\.?\s*س\.?/g, ' ');
   return /[ء-ي]{2,}/.test(t);
+}
+
+/**
+ * The first number shown in a text, as the reader sees it: Arabic-Indic digits, thousands separators, the minus
+ * sign (ASCII or U+2212) and bidi control characters are handled. Returns {value, decimals} or null.
+ */
+function shownNumber(text) {
+  const t = toAsciiDigits(String(text)).replace(/[⁦-⁩‎‏؜]/g, '').replace(/−/g, '-')
+    .replace(/٫/g, '.').replace(/(\d)[,٬](?=\d{3}(?:\D|$))/g, '$1');
+  const m = /(-?)\s?(\d+(?:\.\d+)?)/.exec(t);
+  if (!m) return null;
+  const dec = m[2].includes('.') ? m[2].split('.')[1].length : 0;
+  return { value: Number((m[1] ? '-' : '') + m[2]), decimals: dec };
+}
+
+/** shownNumber() only when the text starts with the number (a status such as «غير متاح «6 محلات»» is not a number). */
+function leadingNumber(text) {
+  const t = toAsciiDigits(String(text)).replace(/[⁦-⁩‎‏؜]/g, '').replace(/−/g, '-').trim();
+  return /^-?\s?\d/.test(t) ? shownNumber(t) : null;
+}
+
+/** True when a displayed number is the rounded form of `expected` (rounding to the decimals it shows). */
+function shownMatches(text, expected) {
+  const s = shownNumber(text);
+  if (!s || typeof expected !== 'number') return false;
+  const tol = 0.5 * Math.pow(10, -s.decimals) + 1e-9 * Math.max(1, Math.abs(expected));
+  return Math.abs(s.value - expected) <= tol;
+}
+
+/** Shared personal-data patterns (assets/pii_patterns.json), compiled for JS; values are tested on ASCII digits. */
+function loadPiiPatterns() {
+  const raw = JSON.parse(fs.readFileSync(PII_PATTERNS_PATH, 'utf8'));
+  const flags = (f) => (String(f || '').includes('i') ? 'i' : '');
+  const values = (raw.values || []).map((v) => ({ kind: v.kind, level: v.level || 'block', re: new RegExp(v.pattern, flags(v.flags)) }));
+  const hits = (text, level) => {
+    const t = toAsciiDigits(text);
+    return values.filter((v) => v.level === level && v.re.test(t)).map((v) => v.kind);
+  };
+  // the same self-test as apa_common._self_test_pii: a pattern that behaves differently in JS must not pass silently
+  const selfTest = [];
+  const tests = raw.tests || {};
+  for (const x of tests.must_match || []) if (!values.some((v) => v.re.test(toAsciiDigits(x)))) selfTest.push('لا يطابق: ' + x.replace(/\d/g, '#'));
+  for (const x of tests.must_not_match || []) if (values.some((v) => v.re.test(toAsciiDigits(x)))) selfTest.push('يطابق خطأً: ' + x);
+  return { values, hits, selfTest, version: raw.version };
+}
+
+/** A raw cell text that is only the printed form of its numeric value (not scanned: a 9-digit amount may start with 5). */
+function rawIsPlainNumber(raw, v) {
+  const t = toAsciiDigits(raw).trim();
+  if (/^(?:\+|00|0\d)/.test(t)) return false;   // a phone written in a numeric cell keeps its leading 0 or +
+  const n = Number(t.replace(/[,\s٬]/g, ''));
+  return Number.isFinite(n) && n === v;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,24 +228,61 @@ window.__apaCheck = (function () {
     var out = [];
     document.querySelectorAll('[data-role="kpi-card"]').forEach(function (card, ci) {
       var vals = card.querySelectorAll('[data-role="kpi-value"]');
+      var cardText = (card.textContent || '').replace(/\\s+/g, ' ').trim();
       if (!vals.length) out.push({ card: ci, cardId: card.getAttribute('data-metric-id'), missing: true });
       vals.forEach(function (el) {
         var holder = el.closest('[data-metric-id]') || card;
         out.push({
           card: ci, cardId: card.getAttribute('data-metric-id'), metricId: holder.getAttribute('data-metric-id'),
           dataValue: el.getAttribute('data-value'), dataStatus: el.getAttribute('data-status'),
-          text: (el.innerText || el.textContent || '').trim(), visible: visible(el)
+          text: (el.innerText || el.textContent || '').trim(), visible: visible(el), cardText: cardText
         });
       });
     });
     return out;
   }
-  function charts() {
+  function getPath(obj, key) {
+    var parts = String(key || '').split('.');
+    var x = obj;
+    for (var i = 0; i < parts.length; i++) {
+      if (x === null || x === undefined) return undefined;
+      x = x[parts[i]];
+    }
+    return x;
+  }
+  function charts(all) {
     return Array.prototype.map.call(document.querySelectorAll('[data-role="chart"]'), function (c) {
       var empty = c.querySelector('[data-role="chart-empty"]');
+      var nums = Array.prototype.map.call(c.querySelectorAll('[data-role="chart-number"]'), function (n) {
+        var key = n.getAttribute('data-key');
+        var exp = all ? getPath(all, key) : undefined;
+        return { key: key, dataValue: n.getAttribute('data-value'), text: (n.textContent || '').trim(),
+          expected: typeof exp === 'number' ? exp : (exp === undefined ? 'missing' : null) };
+      });
       return { id: c.getAttribute('data-chart-id'), svg: !!c.querySelector('svg'),
-        empty: !!empty, emptyText: empty ? (empty.textContent || '').trim() : null };
+        empty: !!empty, emptyText: empty ? (empty.textContent || '').trim() : null, numbers: nums };
     });
+  }
+  /** Value, revenue and yield cells of the visible rows, with the record values they must show. */
+  function tableCells(filters) {
+    var t = table();
+    if (!t || !window.APA || typeof window.APA.resolveField !== 'function') return null;
+    var idx = {};
+    Array.prototype.forEach.call(t.querySelectorAll('th[data-sort]'), function (th) { idx[th.getAttribute('data-sort')] = th.cellIndex; });
+    var vf = window.APA.resolveField('{VAL}', filters), rf = window.APA.resolveField('{REV}', filters);
+    var KNOWN = ['value', 'derived', 'zero_recorded', 'zero_confirmed'];
+    var recs = {};
+    (window.APA.data.records || []).forEach(function (r) { recs[r.id] = r; });
+    var fval = function (rec, f) {
+      var tv = f && rec && rec.fields ? rec.fields[f] : null;
+      return tv && KNOWN.indexOf(tv.s) >= 0 && typeof tv.v === 'number' ? tv.v : null;
+    };
+    var cell = function (row, key) { var i = idx[key]; return i !== undefined && row.cells[i] ? (row.cells[i].textContent || '').replace(/\\s+/g, ' ').trim() : null; };
+    return { vf: vf, rf: rf, cols: Object.keys(idx), rows: rows().slice(0, ${MAX_TABLE_ROWS}).map(function (row) {
+      var id = row.getAttribute('data-record-id');
+      var rec = recs[id];
+      return { id: id, v: fval(rec, vf), rv: fval(rec, rf), value: cell(row, 'value'), revenue: cell(row, 'revenue'), yld: cell(row, 'yield') };
+    }) };
   }
   function scopeText() {
     var el = document.querySelector('[data-role="filter-scope"]');
@@ -188,17 +296,28 @@ window.__apaCheck = (function () {
     });
     return m;
   }
+  function cardMeta(all) {
+    var m = {};
+    Object.keys(all.metrics || {}).forEach(function (id) {
+      var r = all.metrics[id];
+      m[id] = { kind: r.kind, unit: r.unit, scope_text: r.scope_text || null, basis: r.basis || null, valuation_date: r.valuation_date || null };
+    });
+    return m;
+  }
   function snapshot() {
     var out = { error: null };
+    var all = null;
     try {
       out.filters = window.APA_UI.getFilters();
-      var all = window.APA.computeAll(out.filters);
+      all = window.APA.computeAll(out.filters);
       out.expected = compact(all);
+      out.meta = cardMeta(all);
       out.expectedRows = window.APA.filterRecords(out.filters).length;
+      out.table = tableCells(out.filters);
     } catch (e) { out.error = String(e && e.message || e); }
     out.rows = rowIds();
     out.cards = cards();
-    out.charts = charts();
+    out.charts = charts(all);
     out.scope = scopeText();
     out.selects = Array.prototype.map.call(document.querySelectorAll('select[data-filter]'), function (s) {
       return { dim: s.getAttribute('data-filter'), value: s.value };
@@ -210,7 +329,7 @@ window.__apaCheck = (function () {
       document.querySelectorAll('[data-role="asset-detail"]').length]);
   }
   return { visible: visible, rows: rows, rowIds: rowIds, cards: cards, charts: charts, scopeText: scopeText,
-    snapshot: snapshot, signature: signature, table: table, compact: compact };
+    snapshot: snapshot, signature: signature, table: table, compact: compact, tableCells: tableCells };
 })();
 `;
 
@@ -262,8 +381,19 @@ function compareCards(snap) {
       else if (!hasArabicWords(c.text)) problems.push(`${id}: المؤشر غير قابل للاحتساب ويجب عرض نص عربي يوضح ذلك، المعروض «${c.text}»`);
     } else if (!c.text) {
       problems.push(`${id}: البطاقة لا تعرض نصًا للقيمة`);
+    } else if (!shownMatches(c.text, exp.value)) {
+      // the number the board reads, not only the attribute (a formatting fault leaves data-value intact)
+      problems.push(`${id}: الرقم المعروض «${short(c.text, 60)}» لا يطابق computeAll=${exp.value}`);
     }
     if (/NaN|undefined|Infinity|\[object/.test(c.text)) problems.push(`${id}: نص غير صالح في البطاقة «${c.text}»`);
+    // brief §11: under a yield card, its scope, basis and valuation date — as computed for the current filters
+    const meta = snap.meta && snap.meta[id];
+    if (meta && meta.kind === 'ratio' && exp.value !== null && c.cardText !== undefined) {
+      const norm = (s) => String(s).replace(/\s+/g, ' ').trim();
+      for (const [k, label] of [['scope_text', 'النطاق'], ['basis', 'الأساس'], ['valuation_date', 'تاريخ التقييم']]) {
+        if (meta[k] && !norm(c.cardText).includes(norm(meta[k]))) problems.push(`${id}: البطاقة لا تعرض ${label} المحسوب «${short(meta[k], 80)}»`);
+      }
+    }
   }
   return problems;
 }
@@ -273,6 +403,41 @@ function compareCharts(snap) {
   for (const ch of snap.charts) {
     if (!ch.svg && !ch.empty) problems.push(`الرسم ${ch.id}: لا يحتوي <svg> ولا [data-role=chart-empty]`);
     else if (!ch.svg && ch.empty && !ch.emptyText) problems.push(`الرسم ${ch.id}: حالة فارغة دون سبب مكتوب`);
+    // a drawn chart declares the numbers it prints, so they can be held against computeAll (template contract)
+    if (ch.svg && !(ch.numbers || []).length) problems.push(`الرسم ${ch.id}: لا يعلن أرقامه المعروضة [data-role=chart-number] للمقارنة بـcomputeAll`);
+    for (const n of ch.numbers || []) {
+      if (n.expected === 'missing') { problems.push(`الرسم ${ch.id}: الرقم ${n.key} غير موجود في computeAll`); continue; }
+      const dv = n.dataValue === '' || n.dataValue === null ? null : Number(n.dataValue);
+      if (!numClose(dv, n.expected)) problems.push(`الرسم ${ch.id}: ${n.key} = ${n.dataValue} لا يطابق computeAll=${n.expected} للمرشحات الحالية`);
+      else if (dv !== null && !shownMatches(n.text, dv)) problems.push(`الرسم ${ch.id}: النص المعروض «${short(n.text, 60)}» لا يطابق ${n.key}=${dv}`);
+    }
+  }
+  return problems;
+}
+
+/** Table cells against the records: value, revenue and yield shown for each visible row of the current filters. */
+function compareTable(snap) {
+  const t = snap.table;
+  if (snap.error || !t) return [];
+  const problems = [];
+  const checkMoney = (row, col, exp, label) => {
+    const text = row[col];
+    if (text === null || text === undefined) return;
+    if (typeof exp === 'number') {
+      if (!shownMatches(text, exp)) problems.push(`${row.id}: خانة «${label}» تعرض «${short(text, 50)}» والقيمة في السجل ${exp}`);
+    } else if (!hasArabicWords(text) && !isMissingText(text)) {
+      problems.push(`${row.id}: خانة «${label}» تعرض «${short(text, 50)}» والقيمة في السجل غير معروفة`);
+    }
+  };
+  for (const row of t.rows) {
+    if (t.vf) checkMoney(row, 'value', row.v, 'القيمة');
+    if (t.rf) checkMoney(row, 'revenue', row.rv, 'الإيراد');
+    const y = row.yld;
+    if (y !== null && y !== undefined && leadingNumber(y)) {
+      if (!(typeof row.v === 'number' && row.v > 0 && typeof row.rv === 'number')) problems.push(`${row.id}: خانة العائد تعرض رقمًا «${y}» دون إيراد وتقييم معروفين`);
+      else if (!shownMatches(y, row.rv / row.v * 100)) problems.push(`${row.id}: خانة العائد «${y}» لا تساوي الإيراد ÷ التقييم × 100 (${(row.rv / row.v * 100).toFixed(4)})`);
+    }
+    if (problems.length >= 12) break;
   }
   return problems;
 }
@@ -286,15 +451,42 @@ function compareRows(snap) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
+/** Node-side helpers on fixed cases (no browser): displayed-number parsing and the shared PII patterns. */
+function selfTest() {
+  const fails = [];
+  const ok = (name, cond) => { if (!cond) fails.push(name); };
+  ok('money', shownMatches('24,550,000 ر.س', 24550000.4));
+  ok('money wrong x10', !shownMatches('245,500,000 ر.س', 24550000));
+  ok('negative', shownMatches('-2,352,000 ر.س', -2352000));
+  ok('unicode minus', shownMatches('−2,352,000', -2352000));
+  ok('pct', shownMatches('6.65%', 6.6489));
+  ok('pct off', !shownMatches('6.75%', 6.6489));
+  ok('arabic digits', shownMatches('٢٤٬٥٥٠٬٠٠٠', 24550000));
+  ok('isolates', shownMatches('⁦78.6%⁩', 78.57));
+  ok('leading status', leadingNumber('غير متاح «6 محلات»') === null);
+  ok('leading number', (leadingNumber('1,641,000 ر.س صفر مسجل') || {}).value === 1641000);
+  ok('raw plain', rawIsPlainNumber('512,345,678', 512345678) && !rawIsPlainNumber('0501234567', 501234567));
+  ok('nAr', nAr(1, 'a', 'b', 'c', 'd') === 'a' && nAr(5, 'a', 'b', 'c', 'd') === '5 c' && nAr(12, 'a', 'b', 'c', 'd') === '12 d');
+  const pii = loadPiiPatterns();
+  ok('pii patterns self-test: ' + pii.selfTest.join('؛ '), pii.selfTest.length === 0);
+  ok('pii block', pii.hits('(050) 123-4567', 'block').includes('mobile') && pii.hits('011-4567890', 'block').includes('landline'));
+  ok('pii review', pii.hits('1023456789', 'review').includes('national_id') && !pii.hits('1023456789', 'block').length);
+  ok('pii arabic digits', pii.hits('٠٥٠١٢٣٤٥٦٧', 'block').includes('mobile'));
+  for (const f of fails) console.error('فشل: ' + f);
+  console.log(`check_dashboard --self-test: ${fails.length ? 'فشل ' + fails.length : 'ناجح'}`);
+  return fails.length ? 1 : 0;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.selfTest) return selfTest();
   const htmlPath = path.resolve(args.html);
   const outDir = path.resolve(args.out);
   const screensDir = path.join(outDir, 'screens');
   fs.mkdirSync(screensDir, { recursive: true });
   const report = {
     contract_version: '1.0', html: htmlPath, checked_at: new Date().toISOString(), passed: false,
-    summary: null, checks: [], screenshots: [], console_errors: [], external_requests: []
+    summary: null, checks: [], warnings: [], screenshots: [], console_errors: [], external_requests: []
   };
   const add = (name, passed, detail, data) => {
     const c = { name, passed: !!passed, detail: detail || (passed ? 'ناجح' : 'فشل') };
@@ -319,6 +511,7 @@ async function main() {
     fs.writeFileSync(path.join(outDir, '08_dashboard_check.json'), JSON.stringify(report, null, 2) + '\n', 'utf8');
     console.log(`فحص الداشبورد في المتصفح: ${report.passed ? 'ناجح' : 'غير ناجح'} — ${report.summary.passed}/${report.summary.total} فحصًا`);
     for (const c of failed) console.log(`  [فشل] ${c.name}: ${short(c.detail, 400)}`);
+    for (const w of report.warnings) console.log(`  [تنبيه] ${w.check}: ${short(w.detail, 400)}`);
     if (report.screenshots.length) console.log('  اللقطات: ' + report.screenshots.map((s) => path.join(outDir, s)).join('، '));
     console.log('  التقرير: ' + path.join(outDir, '08_dashboard_check.json'));
     return report.passed ? 0 : 1;
@@ -380,18 +573,55 @@ async function main() {
       return finish();
     }
 
-    // ---- desktop screenshot of the untouched default view ---------------------------------------
+    // ---- draft builds are previews, never deliverables ----------------------------------------------
+    await section(['draft'], async () => {
+      const dr = await page.evaluate(() => {
+        const m = (window.APA && window.APA.data && window.APA.data.meta) || {};
+        const v = (window.APA && window.APA.data && window.APA.data.validation) || {};
+        return { draft: m.draft === true, blocking: v.blocking_count, available: v.available };
+      });
+      if (!dr.draft) add('draft', true, 'نسخة نهائية (meta.draft = false)');
+      else if (args.allowDraft) {
+        add('draft', true, 'مسودة (meta.draft = true) فُحصت بالخيار --allow-draft؛ لا تُسلَّم قبل اجتياز التحقق وإعادة البناء دون --draft');
+        report.warnings.push({ check: 'draft', detail: 'اللوحة مسودة لم تجتز التحقق الآلي؛ لا تُسلَّم' });
+      } else {
+        add('draft', false, 'اللوحة مسودة (meta.draft = true' + (dr.blocking ? `، أخطاء مانعة ${dr.blocking}` : (dr.available === false ? '، لا نتيجة تحقق' : '')) +
+          ')؛ أصلح التحقق وأعد البناء دون --draft، أو مرّر --allow-draft لفحص مسودة لا تُسلَّم');
+      }
+    });
+
+    // ---- desktop screenshots of the untouched default view: full page + viewport-sized crops ------------
     await section(['desktop_screenshot'], async () => {
       await page.screenshot({ path: path.join(screensDir, 'desktop.png'), fullPage: true });
       report.screenshots.push('screens/desktop.png');
-      add('desktop_screenshot', true, 'لقطة سطح المكتب 1440×900 (الصفحة كاملة): screens/desktop.png');
+      for (const f of fs.readdirSync(screensDir)) if (/^desktop_\d+\.png$/.test(f)) fs.unlinkSync(path.join(screensDir, f));
+      const vp = page.viewportSize() || { width: 1440, height: 900 };
+      const fullH = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+      const n = Math.min(MAX_CROPS, Math.ceil(fullH / vp.height));
+      const crops = [];
+      for (let i = 0; i < n; i++) {
+        const name = `desktop_${String(i + 1).padStart(2, '0')}.png`;
+        const y = i * vp.height;
+        await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
+          clip: { x: 0, y, width: vp.width, height: Math.min(vp.height, fullH - y) } });
+        crops.push('screens/' + name);
+      }
+      report.screenshots.push(...crops);
+      add('desktop_screenshot', true, `لقطة سطح المكتب 1440×900 (الصفحة كاملة): screens/desktop.png، و${nAr(crops.length, 'لقطة واحدة', 'لقطتان', 'لقطات', 'لقطة')} بحجم الشاشة ` +
+        `(${crops[0] || '—'} …)` + (Math.ceil(fullH / vp.height) > n ? ` — أول ${n} شاشات من ${Math.ceil(fullH / vp.height)}` : ''));
     });
 
     // ---- html lang / dir, API, structure -----------------------------------------------------------
     let st = { reset: 0, table: 0, search: 0, sortable: 0, sections: [] };
     await section(['html_lang_dir', 'api', 'structure', 'details_sections'], async () => {
-      const ld = await page.evaluate(() => ({ lang: document.documentElement.getAttribute('lang'), dir: document.documentElement.getAttribute('dir') }));
-      add('html_lang_dir', ld.lang === 'ar' && ld.dir === 'rtl', `lang="${ld.lang}" dir="${ld.dir}" (المطلوب lang="ar" dir="rtl")`);
+      const ld = await page.evaluate(() => ({
+        lang: document.documentElement.getAttribute('lang'), dir: document.documentElement.getAttribute('dir'),
+        body: getComputedStyle(document.body).direction,
+        main: document.querySelector('main') ? getComputedStyle(document.querySelector('main')).direction : null
+      }));
+      const dirOk = ld.lang === 'ar' && ld.dir === 'rtl' && ld.body === 'rtl' && (ld.main === null || ld.main === 'rtl');
+      add('html_lang_dir', dirOk, `lang="${ld.lang}" dir="${ld.dir}"، الاتجاه المحسوب: body=${ld.body}` + (ld.main ? `، main=${ld.main}` : '') +
+        (dirOk ? '' : ' (المطلوب lang="ar" وdir="rtl" واتجاه محسوب rtl للصفحة والمحتوى)'));
 
       const api = await page.evaluate(() => {
         const A = window.APA, U = window.APA_UI;
@@ -473,7 +703,7 @@ async function main() {
 
     // ---- default state: cards, charts ------------------------------------------------------------------
     let def = null;
-    await section(['cards', 'charts'], async () => {
+    await section(['cards', 'charts', 'table_cells'], async () => {
       def = await snap(page);
       const cardIds = await page.evaluate(() => ((window.APA.data.config && window.APA.data.config.metrics) || [])
         .filter((m) => m && m.card).map((m) => m.id));
@@ -482,12 +712,19 @@ async function main() {
       const notShown = cardIds.filter((id) => !shown.has(id));
       if (notShown.length) cardProblems.push('مؤشرات card:true غير معروضة في البطاقات: ' + notShown.join('، '));
       add('cards', cardProblems.length === 0 && def.cards.length > 0,
-        cardProblems.length ? cardProblems.join('؛ ') : `${def.cards.length} قيمة بطاقة تطابق computeAll للمرشحات الافتراضية`,
+        cardProblems.length ? cardProblems.join('؛ ') : `${nAr(def.cards.length, 'قيمة بطاقة واحدة', 'قيمتا بطاقة', 'قيم بطاقات', 'قيمة بطاقة')} تطابق computeAll للمرشحات الافتراضية (الخاصية والرقم المعروض)`,
         { filters: def.filters, cards: def.cards.map((c) => ({ id: c.metricId, value: c.dataValue, status: c.dataStatus, text: c.text })) });
       const chartProblems = compareCharts(def);
+      const nNums = def.charts.reduce((n, c) => n + (c.numbers || []).length, 0);
       add('charts', chartProblems.length === 0 && def.charts.length > 0,
         def.charts.length === 0 ? 'لا توجد رسوم [data-role=chart]'
-          : chartProblems.length ? chartProblems.join('؛ ') : `${def.charts.length} رسمًا: كل رسم يحتوي SVG أو حالة فارغة مسببة`);
+          : chartProblems.length ? chartProblems.join('؛ ')
+            : `${nAr(def.charts.length, 'رسم واحد', 'رسمان', 'رسوم', 'رسمًا')}: كل رسم يحتوي SVG أو حالة فارغة مسببة، و${nAr(nNums, 'رقم واحد', 'رقمان', 'أرقام', 'رقمًا')} معروضة في الرسوم تطابق computeAll`);
+      const tableProblems = compareTable(def);
+      add('table_cells', !!def.table && tableProblems.length === 0,
+        !def.table ? 'تعذر قراءة خانات الجدول (الجدول أو APA.resolveField غير موجود)'
+          : tableProblems.length ? tableProblems.join('؛ ')
+            : `خانات القيمة والإيراد والعائد في ${def.table.rows.length} صفًا تطابق السجلات (الحقلان ${def.table.vf || '—'} و${def.table.rf || '—'})`);
     });
 
     // ---- filters ------------------------------------------------------------------------------------------
@@ -535,6 +772,7 @@ async function main() {
           compareRows(s).forEach((p) => fProblems.push(`${label}: ${p}`));
           compareCards(s).forEach((p) => fProblems.push(`${label}: ${p}`));
           compareCharts(s).forEach((p) => fProblems.push(`${label}: ${p}`));
+          compareTable(s).forEach((p) => fProblems.push(`${label}: ${p}`));
           if (s.scope === def.scope) fProblems.push(`${label}: نص [data-role=filter-scope] لم يتغير («${short(s.scope, 80)}»)`);
           await resetFilters(fProblems, `إعادة الضبط بعد ${label}`);
           await checkDefaultRestored(`إعادة الضبط بعد ${label}`, fProblems);
@@ -547,7 +785,7 @@ async function main() {
       add('filters', fProblems.length === 0,
         fProblems.length ? fProblems.slice(0, 12).join('؛ ')
           : dimSelects === 0 ? 'لا توجد مرشحات أبعاد معرّفة في الإعدادات (يوجد مرشح الفترة فقط)'
-            : `جُرّب ${tried.length} خيارًا في ${dimSelects} مرشحات: الصفوف والبطاقات والرسوم ونص النطاق متسقة، وإعادة الضبط تستعيد الافتراضي`,
+            : `جُرّب ${nAr(tried.length, 'خيار واحد', 'خياران', 'خيارات', 'خيارًا')} في ${nAr(dimSelects, 'مرشح واحد', 'مرشحين', 'مرشحات', 'مرشحًا')}: الصفوف والبطاقات والرسوم وخانات الجدول ونص النطاق متسقة، وإعادة الضبط تستعيد الافتراضي`,
         { tried, problems: fProblems.slice(0, 50) });
     });
 
@@ -568,6 +806,7 @@ async function main() {
           compareRows(s).forEach((p) => pProblems.push(`period=${v}: ${p}`));
           compareCards(s).forEach((p) => pProblems.push(`period=${v}: ${p}`));
           compareCharts(s).forEach((p) => pProblems.push(`period=${v}: ${p}`));
+          compareTable(s).forEach((p) => pProblems.push(`period=${v}: ${p}`));
         }
         await resetFilters(periodsTried.length > 1 ? pProblems : null, 'إعادة الضبط بعد تغيير الفترة');
         await checkDefaultRestored('إعادة الضبط بعد تغيير الفترة', pProblems);
@@ -629,18 +868,21 @@ async function main() {
         const key = await header(i).getAttribute('data-sort');
         if (!(await header(i).isVisible())) { sortInfo.push({ key, skipped: 'hidden' }); continue; }
         const idsBefore = await page.evaluate(() => window.__apaCheck.rowIds());
-        await header(i).click();
-        await waitStable(page);
-        const s1 = await page.evaluate((idx) => {
+        const readCol = (idx) => page.evaluate((k) => {
           const ths = document.querySelectorAll('table[data-role="asset-table"] th[data-sort]');
-          const ci = ths[idx] ? ths[idx].cellIndex : -1;
+          const th = ths[k];
+          const ci = th ? th.cellIndex : -1;
           const rows = window.__apaCheck.rows();
-          return { ids: rows.map((r) => r.getAttribute('data-record-id')),
+          return { numeric: !!th && th.classList.contains('n'), ids: rows.map((r) => r.getAttribute('data-record-id')),
             texts: rows.map((r) => (r.cells[ci] ? (r.cells[ci].textContent || '').trim() : null)) };
-        }, i);
+        }, idx);
         await header(i).click();
         await waitStable(page);
-        const ids2 = await page.evaluate(() => window.__apaCheck.rowIds());
+        const s1 = await readCol(i);
+        await header(i).click();
+        await waitStable(page);
+        const s2 = await readCol(i);
+        const ids2 = s2.ids;
         // Rows without a value ("—", "غير متاح", ...) may legitimately stay last in both directions:
         // only the rows holding a value must reverse, and only when they hold >= 2 distinct values.
         const textOf = new Map(s1.ids.map((id, k) => [id, s1.texts[k]]));
@@ -648,15 +890,28 @@ async function main() {
         const valued1 = s1.ids.filter(hasValue), valued2 = ids2.filter(hasValue);
         const distinct = new Set(valued1.map((id) => textOf.get(id))).size;
         const changed = !sameJSON(valued1, valued2);
-        sortInfo.push({ key, rows: ids2.length, rows_with_value: valued1.length, distinct_values: distinct, changed });
+        // numeric columns: the shown numbers must be ordered, one direction per click
+        let order = null;
+        if (s1.numeric) {
+          const nums = (st) => st.texts.map((t) => (t && !isMissingText(t) ? leadingNumber(t) : null)).filter(Boolean).map((x) => x.value);
+          const dir = (a) => {
+            let up = true, down = true;
+            for (let k = 1; k < a.length; k++) { if (a[k] < a[k - 1]) up = false; if (a[k] > a[k - 1]) down = false; }
+            return up && down ? 'flat' : up ? 'asc' : down ? 'desc' : 'none';
+          };
+          order = [dir(nums(s1)), dir(nums(s2))];
+        }
+        sortInfo.push({ key, rows: ids2.length, rows_with_value: valued1.length, distinct_values: distinct, changed, order });
         if (!sameJSON([...s1.ids].sort(), [...idsBefore].sort()) || !sameJSON([...ids2].sort(), [...idsBefore].sort())) {
           sProblems.push(`الفرز حسب ${key} غيّر مجموعة الصفوف`);
         } else if (distinct >= 2 && !changed) {
           sProblems.push(`النقر مرتين على عمود ${key} لم يعكس ترتيب الصفوف رغم اختلاف القيم`);
+        } else if (order && (order.includes('none') || (order[0] !== 'flat' && order[0] === order[1]))) {
+          sProblems.push(`الفرز حسب العمود الرقمي ${key} لا يرتب الأرقام المعروضة (${order.join(' ثم ')})`);
         }
       }
       if (!nHeaders) sProblems.push('لا توجد أعمدة قابلة للفرز th[data-sort]');
-      add('table_sort', sProblems.length === 0, sProblems.length ? sProblems.join('؛ ') : `جُرّب الفرز (نقرتان) على ${sortInfo.length} عمودًا`, sortInfo);
+      add('table_sort', sProblems.length === 0, sProblems.length ? sProblems.join('؛ ') : `جُرّب الفرز (نقرتان) على ${nAr(sortInfo.length, 'عمود واحد', 'عمودين', 'أعمدة', 'عمودًا')}، والأعمدة الرقمية مرتبة`, sortInfo);
     });
 
     // ---- table: detail ---------------------------------------------------------------------------------
@@ -704,6 +959,17 @@ async function main() {
     await section(['no_raw_tokens', 'privacy'], async () => {
       await page.evaluate(() => { document.querySelectorAll('details').forEach((d) => { d.open = true; }); });
       await waitStable(page);
+      // a capture of the study details as the board would open them (C21: the full page alone is unreadable)
+      try {
+        const det = page.locator('#sec-details').first();
+        if (await det.count()) {
+          // the sticky filter bar would be painted over the capture of a section taller than the window
+          const unstick = await page.addStyleTag({ content: '.filterbar{position:static!important}' });
+          await det.screenshot({ path: path.join(screensDir, 'details_open.png') });
+          await unstick.evaluate((el) => el.remove());
+          report.screenshots.push('screens/details_open.png');
+        }
+      } catch (e) { report.warnings.push({ check: 'details_open', detail: 'تعذر التقاط screens/details_open.png: ' + short(String(e.message || e), 160) }); }
       const texts = await page.evaluate(() => {
         const out = [];
         const skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1 };
@@ -724,37 +990,49 @@ async function main() {
         const walk = (x, key, parent) => {
           if (typeof x === 'string') {
             if (key === 'sha256' || key === 'sha256_short' || /^[0-9a-f]{16,}$/i.test(x)) return;
-            if (key === 'raw' && parent && typeof parent.v === 'number' && Number(x.replace(/[,\s٬]/g, '')) === parent.v) return;
-            out.push(x);
+            out.push({ s: x, rawOf: key === 'raw' && parent && typeof parent.v === 'number' ? parent.v : null });
           } else if (Array.isArray(x)) x.forEach((y) => walk(y, key, parent));
           else if (x && typeof x === 'object') Object.keys(x).forEach((k) => walk(x[k], k, x));
         };
         walk(window.APA.data, null, null);
         return out;
       });
-      const BAD = /\bNaN\b|\bundefined\b|\[object Object\]|\bInfinity\b|\{\{\s*m:/;
+      const BAD = /\bNaN\b|\bundefined\b|\[object Object\]|\bInfinity\b|\{\{\s*[mf]:/;
       const badHits = texts.filter((t) => BAD.test(t)).map((t) => short(t.trim(), 120));
       add('no_raw_tokens', badHits.length === 0, badHits.length
-        ? 'نصوص غير صالحة في الصفحة (NaN/undefined/[object Object]/Infinity أو رموز {{m:}} غير مُعالجة): ' + short(badHits.slice(0, 5), 500)
+        ? 'نصوص غير صالحة في الصفحة (NaN/undefined/[object Object]/Infinity أو رموز {{m:}}/{{f:}} غير مُعالجة): ' + short(badHits.slice(0, 5), 500)
         : 'لا توجد قيم خام غير صالحة في نص الصفحة', badHits.length ? badHits.slice(0, 20) : undefined);
-      const PHONE = /(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)/;
-      const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/;
-      const piiHits = [];
+      // the shared patterns of assets/pii_patterns.json (same as apa_common.mask_pii), tested on ASCII digits
+      let pii;
+      try { pii = loadPiiPatterns(); } catch (e) {
+        add('privacy', false, 'تعذر تحميل أنماط البيانات الشخصية ' + PII_PATTERNS_PATH + ': ' + short(String(e.message || e), 200));
+        return;
+      }
+      const blockHits = [], reviewHits = [];
       const scan = (arr, where) => {
-        for (const t0 of arr) {
-          const t = toAsciiDigits(t0);
-          const collapsed = t.replace(/(\d)[\s\u00A0-](?=\d)/g, '$1');
-          if (PHONE.test(t) || PHONE.test(collapsed)) piiHits.push({ where, kind: 'phone' });
-          else if (EMAIL.test(t)) piiHits.push({ where, kind: 'email' });
+        for (const x of arr) {
+          const t0 = typeof x === 'string' ? x : x.s;
+          if (typeof x === 'object' && x.rawOf !== null && rawIsPlainNumber(t0, x.rawOf)) continue;
+          for (const kind of pii.hits(t0, 'block')) blockHits.push({ where, kind });
+          for (const kind of pii.hits(t0, 'review')) reviewHits.push({ where, kind });
         }
       };
       scan(texts, 'page_text');
       scan(dataStrings, 'embedded_data');
-      const piiSummary = piiHits.reduce((a, h) => { const k = h.where + ':' + h.kind; a[k] = (a[k] || 0) + 1; return a; }, {});
-      add('privacy', piiHits.length === 0,
-        piiHits.length ? 'وُجدت أنماط بيانات شخصية (لا تُطبع القيم): ' + Object.entries(piiSummary).map(([k, n]) => `${k}×${n}`).join('، ')
-          : `لا أرقام جوال سعودية ولا بريد إلكتروني في نص الصفحة (${texts.length} نصًا) ولا في البيانات المضمّنة (${dataStrings.length} نصًا)`,
-        piiHits.length ? piiSummary : undefined);
+      const tally = (hits) => hits.reduce((a, x) => { const k = x.where + ':' + x.kind; a[k] = (a[k] || 0) + 1; return a; }, {});
+      const fmtTally = (t) => Object.entries(t).map(([k, n]) => `${k}×${n}`).join('، ');
+      const blockSum = tally(blockHits), reviewSum = tally(reviewHits);
+      const probs = [];
+      if (pii.selfTest.length) probs.push('أنماط pii_patterns.json لا تعمل في JS كما في Python: ' + pii.selfTest.slice(0, 5).join('؛ '));
+      if (blockHits.length) probs.push('وُجدت بيانات شخصية (لا تُطبع القيم): ' + fmtTally(blockSum));
+      if (reviewHits.length) {
+        report.warnings.push({ check: 'privacy', detail: 'أرقام من 10 خانات تبدأ بـ1 أو 2 قد تكون أرقام هوية (أو صكوكًا) — راجعها: ' + fmtTally(reviewSum) });
+      }
+      add('privacy', probs.length === 0,
+        probs.length ? probs.join('؛ ')
+          : `لا جوال ولا هاتف ثابت ولا بريد ولا آيبان (أنماط pii_patterns.json الإصدار ${pii.version}) في نص الصفحة (${texts.length} نصًا) ولا في البيانات المضمّنة (${dataStrings.length} نصًا)` +
+            (reviewHits.length ? `؛ للمراجعة: ${reviewHits.length} رقمًا قد يكون رقم هوية (انظر warnings)` : ''),
+        blockHits.length || reviewHits.length ? { block: blockSum, review: reviewSum } : undefined);
     });
 
     // ---- every visible button / [data-action] -----------------------------------------------------------
@@ -809,74 +1087,133 @@ async function main() {
     await section(['print'], async () => {
       const pp = await open(desktop, 'print');
       await pp.emulateMedia({ media: 'print' });
+      await pp.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
       await settle(pp);
-      const ph = await pp.evaluate(() => {
+      const ph = await pp.evaluate((ids) => {
         const els = Array.prototype.slice.call(document.querySelectorAll('[data-print="hide"]'));
-        return { n: els.length, shown: els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.tagName.toLowerCase()
-          + (e.getAttribute('data-role') ? `[data-role=${e.getAttribute('data-role')}]` : '')
-          + (e.getAttribute('data-action') ? `[data-action=${e.getAttribute('data-action')}]` : '')) };
-      });
+        const shownOnPaper = (el) => {
+          if (!el) return false;
+          for (let p = el; p && p !== document.documentElement; p = p.parentElement) {
+            const cs = getComputedStyle(p);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+          }
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        };
+        const cards = Array.prototype.filter.call(document.querySelectorAll('[data-role="kpi-card"]'), shownOnPaper).length;
+        return {
+          n: els.length,
+          shown: els.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.tagName.toLowerCase()
+            + (e.getAttribute('data-role') ? `[data-role=${e.getAttribute('data-role')}]` : '')
+            + (e.getAttribute('data-action') ? `[data-action=${e.getAttribute('data-action')}]` : '')),
+          missing: ids.filter((id) => document.getElementById(id) && !shownOnPaper(document.getElementById(id))),
+          absent: ids.filter((id) => !document.getElementById(id)),
+          cards, cardsTotal: document.querySelectorAll('[data-role="kpi-card"]').length
+        };
+      }, PRINT_SECTIONS);
       const pdfPath = path.join(screensDir, 'print.pdf');
       if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
       await pp.pdf({ path: pdfPath, format: 'A4', printBackground: true });
       const size = fs.existsSync(pdfPath) ? fs.statSync(pdfPath).size : 0;
+      let pages = null;
+      try { pages = (fs.readFileSync(pdfPath, 'latin1').match(/\/Type\s*\/Page(?!s)/g) || []).length || null; } catch (e) { /* size check below */ }
       if (size > 0) report.screenshots.push('screens/print.pdf');
       const prob = [];
       if (!ph.n) prob.push('لا توجد عناصر [data-print=hide] (المرشحات والأزرار يجب أن تُخفى عند الطباعة)');
       if (ph.shown.length) prob.push(`${ph.shown.length} عنصر [data-print=hide] يظهر عند الطباعة: ` + short(ph.shown.slice(0, 5)));
+      if (ph.missing.length) prob.push('أقسام العرض التنفيذي لا تظهر عند الطباعة: ' + ph.missing.map((x) => '#' + x).join('، '));
+      if (ph.absent.length) prob.push('أقسام العرض التنفيذي غير موجودة: ' + ph.absent.map((x) => '#' + x).join('، '));
+      if (ph.cardsTotal && ph.cards < ph.cardsTotal) prob.push(`${nAr(ph.cardsTotal - ph.cards, 'بطاقة مؤشر واحدة', 'بطاقتا مؤشر', 'بطاقات مؤشرات', 'بطاقة مؤشر')} لا تظهر عند الطباعة`);
       if (!(size > 1000)) prob.push('ملف PDF للطباعة لم يُنشأ أو فارغ');
       add('print', prob.length === 0, prob.length ? prob.join('؛ ')
-        : `${ph.n} عنصر [data-print=hide] مخفي عند الطباعة، وأُنشئ screens/print.pdf (A4، ${Math.round(size / 1024)} ك.ب)`);
+        : `عناصر [data-print=hide] (${ph.n}) مخفية عند الطباعة، وأقسام العرض التنفيذي (${PRINT_SECTIONS.length}) وبطاقاته (${ph.cards}) ظاهرة، ` +
+          `وأُنشئ screens/print.pdf (A4، ${pages ? nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة') + '، ' : ''}${Math.round(size / 1024)} ك.ب)`, pages ? { pages } : undefined);
       await pp.close();
     });
     await desktop.close().catch(() => {});
 
-    // ---- mobile -------------------------------------------------------------------------------------------
+    // ---- mobile: 360 and 390 px, default view and with the details + an asset detail open -------------------
     await section(['mobile_overflow'], async () => {
-      const dev = Object.assign({}, pw.devices['iPhone 13']);
-      delete dev.defaultBrowserType;
-      const mobile = await browser.newContext(Object.assign(dev, { locale: 'ar-SA', timezoneId: 'Asia/Riyadh', bypassCSP: true }));
-      await mobile.addInitScript({ content: PAGE_HELPERS });
-      try {
-        const mp = await open(mobile, 'mobile');
-        const ov = await mp.evaluate(() => {
-          // Mobile Chromium zooms out to fit over-wide content, which inflates innerWidth to the content
-          // width; the layout/visual viewport keeps the device width, so take the smallest of the three.
-          const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || Infinity,
-            (window.visualViewport && window.visualViewport.width) || Infinity);
-          const sw = document.documentElement.scrollWidth;
-          const offenders = [];
-          if (sw > vw + 1) {
-            const clipped = (el) => {
-              for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-                const ox = getComputedStyle(p).overflowX;
-                if (ox === 'auto' || ox === 'scroll' || ox === 'hidden' || ox === 'clip') return true;
-              }
-              return false;
-            };
-            document.querySelectorAll('body *').forEach((el) => {
-              if (offenders.length >= 5) return;
-              const r = el.getBoundingClientRect();
-              if ((r.right > vw + 1 || r.left < -1) && r.width > 0 && !clipped(el)) {
-                const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
-                offenders.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + cls + ` (${Math.round(r.left)}..${Math.round(r.right)})`);
-              }
-            });
-          }
-          return { vw: Math.round(vw), sw, offenders, innerWidth: window.innerWidth };
-        });
-        await mp.screenshot({ path: path.join(screensDir, 'mobile.png') });
-        report.screenshots.push('screens/mobile.png');
+      const measure = (mp) => mp.evaluate(() => {
+        // Mobile Chromium zooms out to fit over-wide content, which inflates innerWidth to the content
+        // width; the layout/visual viewport keeps the device width, so take the smallest of the three.
+        const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || Infinity,
+          (window.visualViewport && window.visualViewport.width) || Infinity);
+        const sw = document.documentElement.scrollWidth;
+        const offenders = [];
+        if (sw > vw + 1) {
+          const clipped = (el) => {
+            for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+              const ox = getComputedStyle(p).overflowX;
+              if (ox === 'auto' || ox === 'scroll' || ox === 'hidden' || ox === 'clip') return true;
+            }
+            return false;
+          };
+          document.querySelectorAll('body *').forEach((el) => {
+            if (offenders.length >= 5) return;
+            const r = el.getBoundingClientRect();
+            if ((r.right > vw + 1 || r.left < -1) && r.width > 0 && !clipped(el)) {
+              const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+              offenders.push(el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + cls + ` (${Math.round(r.left)}..${Math.round(r.right)})`);
+            }
+          });
+        }
+        return { vw: Math.round(vw), sw, offenders };
+      });
+      const results = [];
+      const mProblems = [];
+      for (const w of MOBILE_WIDTHS) {
+        const base = w === 390 ? Object.assign({}, pw.devices['iPhone 13']) : { viewport: { width: w, height: 780 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
+        delete base.defaultBrowserType;
+        const mobile = await browser.newContext(Object.assign(base, { locale: 'ar-SA', timezoneId: 'Asia/Riyadh', bypassCSP: true }));
+        await mobile.addInitScript({ content: PAGE_HELPERS });
         try {
-          await mp.screenshot({ path: path.join(screensDir, 'mobile_full.png'), fullPage: true, scale: 'css' });
-          report.screenshots.push('screens/mobile_full.png');
-        } catch (e) { /* very long pages: the viewport shot is enough */ }
-        add('mobile_overflow', ov.sw <= ov.vw + 1,
-          ov.sw <= ov.vw + 1 ? `لا تمرير أفقي على iPhone 13 (عرض الصفحة ${ov.sw} ≤ ${ov.vw})، اللقطات: screens/mobile.png وscreens/mobile_full.png`
-            : `تمرير أفقي على الجوال: scrollWidth=${ov.sw} > عرض الشاشة الفعلي ${ov.vw}؛ عناصر تتجاوز العرض: ${ov.offenders.join('، ')}`, ov);
-      } finally {
-        await mobile.close().catch(() => {});
+          const mp = await open(mobile, `mobile${w}`);
+          const d0 = await measure(mp);
+          results.push({ width: w, state: 'default', ...d0 });
+          if (w === 390) {
+            await mp.screenshot({ path: path.join(screensDir, 'mobile.png') });
+            report.screenshots.push('screens/mobile.png');
+            try {
+              await mp.screenshot({ path: path.join(screensDir, 'mobile_full.png'), fullPage: true, scale: 'css' });
+              report.screenshots.push('screens/mobile_full.png');
+            } catch (e) { /* very long pages: the viewport shot is enough */ }
+          } else {
+            await mp.screenshot({ path: path.join(screensDir, `mobile_${w}.png`) });
+            report.screenshots.push(`screens/mobile_${w}.png`);
+          }
+          // every <details> open and the first asset's detail panel open
+          await mp.evaluate(() => { document.querySelectorAll('details').forEach((d) => { d.open = true; }); });
+          const row = mp.locator('table[data-role="asset-table"] tr[data-role="asset-row"]').first();
+          let opened = false;
+          if (await row.count()) {
+            await row.scrollIntoViewIfNeeded().catch(() => {});
+            await row.click().catch(async () => { await row.evaluate((el) => el.click()); });
+            opened = true;
+          }
+          await waitStable(mp);
+          const d1 = await measure(mp);
+          results.push({ width: w, state: opened ? 'details_and_asset_detail_open' : 'details_open', ...d1 });
+          if (w === MOBILE_WIDTHS[0] && opened) {
+            try {
+              // what the phone shows when a row is opened: the top of the detail panel, one screen tall
+              await mp.evaluate(() => { const d = document.querySelector('[data-role="asset-detail"]'); if (d) d.scrollIntoView({ block: 'start' }); });
+              await settle(mp);
+              await mp.screenshot({ path: path.join(screensDir, 'mobile_detail.png') });
+              report.screenshots.push('screens/mobile_detail.png');
+            } catch (e) { /* the overflow numbers above are the check */ }
+          }
+        } finally {
+          await mobile.close().catch(() => {});
+        }
       }
+      for (const r of results) {
+        if (r.sw > r.vw + 1) mProblems.push(`${r.width}px (${r.state === 'default' ? 'العرض الافتراضي' : 'مع فتح التفاصيل وتفاصيل أصل'}): scrollWidth=${r.sw} > ${r.vw}؛ ` +
+          `عناصر تتجاوز العرض: ${r.offenders.join('، ') || 'غير محددة'}`);
+      }
+      add('mobile_overflow', mProblems.length === 0, mProblems.length ? 'تمرير أفقي على الجوال: ' + mProblems.join('؛ ')
+        : `لا تمرير أفقي على ${MOBILE_WIDTHS.join(' و')} بكسل في العرض الافتراضي ومع فتح كل التفاصيل وتفاصيل أصل؛ اللقطات: screens/mobile.png، screens/mobile_${MOBILE_WIDTHS[0]}.png، screens/mobile_detail.png`,
+        results);
     });
 
     // ---- global -------------------------------------------------------------------------------------------
