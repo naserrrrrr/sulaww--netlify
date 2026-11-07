@@ -11,7 +11,8 @@ set -euo pipefail
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SD="$(dirname "$TESTS_DIR")"
 S="$SD/scripts"
-BUILD="$TESTS_DIR/_build"
+# APA_BUILD_DIR lets parallel runs (or CI) use a private build folder instead of tests/_build.
+BUILD="${APA_BUILD_DIR:-$TESTS_DIR/_build}"
 RUN="$BUILD/run"
 XLSX="$BUILD/synthetic_portfolio.xlsx"
 LOGS="$BUILD/logs"

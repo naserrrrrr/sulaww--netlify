@@ -1,0 +1,30 @@
+{
+  "_comment": "Single source of truth for personal-data detection. Loaded by scripts/apa_common.py (Python re) and scripts/check_dashboard.mjs (JS RegExp). Patterns must be valid in both engines: ASCII digits only (callers translate Arabic-Indic digits first), fixed-width lookbehind only. Value 'level': block = must never appear in outputs; review = flagged for the analyst (e.g. a 10-digit number may be a deed or a national ID).",
+  "version": 2,
+  "redaction": "<محجوب>",
+  "digit_separators": "[\\s\\u00A0\\-.()/]",
+  "header": {
+    "flags": "i",
+    "pattern": "جوال|هاتف|تلفون|تليفون|تواصل|اتصال|موبايل|واتس|ايميل|إيميل|بريد|mobile|phone|\\btel\\b|whatsapp|e-?mail|contact|اسم\\s*المشرف|المشرف|المسؤول\\s*عن|هوي[ةه]|(?:ال)?سجل\\s*(?:ال)?مدني|إقامة|اقامة|iqama|national\\s*id|\\bid\\s*(?:no|number)\\b|passport|جواز|\\biban\\b|ايبان|آيبان|حساب\\s*بنكي|(?:اسم\\s*)?(?:ال)?(?:مستأجر|مؤجر|مالك|مستفيد|يتيم|وكيل|مندوب|عميل|موظف)(?=\\s|$)|tenant|landlord|owner'?s?\\s*name|beneficiar|orphan"
+  },
+  "field_key": {
+    "flags": "i",
+    "pattern": "phone|mobile|supervisor|e-?mail|contact|whatsapp|iban|national_?id|iqama|passport|tenant|landlord|owner_?name|beneficiar|orphan|جوال|هاتف|مشرف|تواصل|اتصال|بريد|ايميل|إيميل|هوية|مستأجر|مستفيد"
+  },
+  "values": [
+    {"kind": "mobile", "level": "block", "flags": "",
+     "pattern": "(?<!\\d)(?:(?:\\+|00)[\\s\\u00A0]?9[\\s\\u00A0]?6[\\s\\u00A0]?6[\\s\\u00A0\\-.()/]{0,3}|0)?[\\s\\u00A0\\-.()/]{0,3}5(?:[\\s\\u00A0\\-.()/]{0,3}\\d){8}(?!\\d)"},
+    {"kind": "landline", "level": "block", "flags": "",
+     "pattern": "(?<!\\d)(?:(?:\\+|00)[\\s\\u00A0]?966[\\s\\u00A0\\-.()/]{0,3}|0)[\\s\\u00A0\\-.()/]{0,2}1[1-7](?:[\\s\\u00A0\\-.()/]{0,3}\\d){7}(?!\\d)"},
+    {"kind": "email", "level": "block", "flags": "",
+     "pattern": "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}"},
+    {"kind": "iban", "level": "block", "flags": "i",
+     "pattern": "\\bSA\\d{2}(?:\\s?[A-Z0-9]){20}\\b"},
+    {"kind": "national_id", "level": "review", "flags": "",
+     "pattern": "(?<![\\d.,])[12]\\d{9}(?![\\d.,])"}
+  ],
+  "tests": {
+    "must_match": ["0501234567", "050 123 4567", "(050) 123-4567", "050.123.4567", "+966 50 123 4567", "00966501234567", "011-4567890", "+966 11 456 7890", "٠٥٠١٢٣٤٥٦٧", "someone@example.com", "SA0380000000608010167519", "1012345678"],
+    "must_not_match": ["5,000,000", "1,446,500", "921281", "1403/2/29", "2025-12-02", "REG-5", "15.68%", "144450.5", "مشمول 8 من 11"]
+  }
+}

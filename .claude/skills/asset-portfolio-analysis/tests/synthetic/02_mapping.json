@@ -98,7 +98,7 @@
         "I": {"field": "val.2024.land", "kind": "money", "zero_policy": "missing"},
         "J": {"field": "val.2024.building", "kind": "money", "zero_policy": "missing"},
         "K": {"field": "val.2024.total", "kind": "money", "zero_policy": "missing"},
-        "L": {"field": "notes", "kind": "text"},
+        "L": {"field": "notes", "kind": "text", "pii_ok": true, "note": "عنوان مشوّه «ملاحظات، ملاحظات المالك»: ملاحظات تشغيلية عن العقار وليست بيانات شخصية؛ القيم تُفحص آليًا وتُحجب أنماط الاتصال"},
         "M": {"kind": "pii"},
         "N": {"kind": "pii"}
       }

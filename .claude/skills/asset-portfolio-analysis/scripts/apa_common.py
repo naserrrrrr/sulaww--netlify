@@ -273,18 +273,97 @@ def parse_date(v: Any, calendar_hint: str = "auto") -> dict:
 # ---------------------------------------------------------------------------
 # Personal-data detection (never rendered in the dashboard)
 # ---------------------------------------------------------------------------
-PII_HEADER_RE = re.compile(r"(جوال|هاتف|تواصل|اتصال|موبايل|ايميل|إيميل|بريد|mobile|phone|email|اسم\s*المشرف|المشرف|المسؤول\s*عن|هوية|سجل\s*مدني|iban|ايبان|آيبان)", re.IGNORECASE)
-PHONE_RE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?5\d{8}(?!\d)")
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+# Patterns live in assets/pii_patterns.json (shared with scripts/check_dashboard.mjs). Callers must translate
+# Arabic-Indic digits to ASCII before matching values (pii_value_hits / mask_pii do it for you).
+def _load_pii_patterns() -> dict:
+    with open(os.path.join(SKILL_DIR, "assets", "pii_patterns.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _flags(f: str) -> int:
+    return re.IGNORECASE if "i" in (f or "") else 0
+
+
+PII_PATTERNS = _load_pii_patterns()
+REDACTED = PII_PATTERNS.get("redaction", "<محجوب>")
+PII_HEADER_RE = re.compile("(" + PII_PATTERNS["header"]["pattern"] + ")", _flags(PII_PATTERNS["header"].get("flags")))
+PII_KEY_RE = re.compile("(" + PII_PATTERNS["field_key"]["pattern"] + ")", _flags(PII_PATTERNS["field_key"].get("flags")))
+PII_VALUE_RES = [(v["kind"], v.get("level", "block"), re.compile(v["pattern"], _flags(v.get("flags"))))
+                 for v in PII_PATTERNS["values"]]
+# Back-compat names used by older call sites.
+PHONE_RE = next(rx for k, _l, rx in PII_VALUE_RES if k == "mobile")
+EMAIL_RE = next(rx for k, _l, rx in PII_VALUE_RES if k == "email")
+
+
+def _pii_text(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return str(v)
+    return clean_text(v).translate(_AR_INDIC)
+
+
+def pii_value_hits(v: Any, levels: Tuple[str, ...] = ("block", "review")) -> list:
+    """Kinds of personal data found in a value (e.g. ['mobile']). Never returns the matched text."""
+    t = _pii_text(v)
+    if not t:
+        return []
+    return [k for k, lvl, rx in PII_VALUE_RES if lvl in levels and rx.search(t)]
+
+
+def mask_pii(v: Any, levels: Tuple[str, ...] = ("block",)) -> Tuple[str, list]:
+    """Return (text with personal-data spans replaced by REDACTED, kinds found). Arabic-Indic digits are
+    matched after translation; translation is 1:1 per character, so spans map back to the original text."""
+    if v is None:
+        return "", []
+    orig = v if isinstance(v, str) else _pii_text(v)
+    t = orig.translate(_AR_INDIC)
+    spans, kinds = [], []
+    for k, lvl, rx in PII_VALUE_RES:
+        if lvl not in levels:
+            continue
+        for m in rx.finditer(t):
+            spans.append((m.start(), m.end()))
+            kinds.append(k)
+    if not spans:
+        return orig, []
+    spans.sort()
+    merged = [list(spans[0])]
+    for a, b in spans[1:]:
+        if a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out, last = [], 0
+    for a, b in merged:
+        out.append(orig[last:a])
+        out.append(REDACTED)
+        last = b
+    out.append(orig[last:])
+    return "".join(out), sorted(set(kinds))
 
 
 def looks_like_phone(v: Any) -> bool:
-    if v is None:
+    """True when the whole value is a phone number (mobile or landline), separators allowed."""
+    t = _pii_text(v).strip()
+    if not t:
         return False
-    s = clean_text(v).translate(_AR_INDIC).replace(" ", "").replace("-", "")
-    if isinstance(v, float) and v.is_integer():
-        s = str(int(v))
-    return bool(PHONE_RE.fullmatch(s))
+    for k, _lvl, rx in PII_VALUE_RES:
+        if k in ("mobile", "landline"):
+            m = rx.search(t)
+            if m and not re.sub(r"[\s\u00A0\-.()/+]", "", t[:m.start()] + t[m.end():]):
+                return True
+    return False
+
+
+def _self_test_pii() -> None:
+    tests = PII_PATTERNS.get("tests") or {}
+    for x in tests.get("must_match", []):
+        assert pii_value_hits(x), f"PII pattern miss: {x!r}"
+    for x in tests.get("must_not_match", []):
+        assert not pii_value_hits(x), f"PII false positive: {x!r} -> {pii_value_hits(x)}"
 
 
 def ref(sheet: str, coord: str) -> str:

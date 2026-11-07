@@ -1185,6 +1185,13 @@ def _pii_columns(ctx: Ctx) -> list:
                 info = cols.setdefault(key, {"header": None, "header_row": None})
                 if isinstance(src.get("header_row"), int):
                     info["header_row"] = src["header_row"]
+    # A column the analyst explicitly cleared with "pii_ok": true (e.g. a notes column whose garbled header
+    # mentions «المالك») is not a personal-data column; its values are still pattern-scanned elsewhere.
+    for src in as_list(ctx.mapping.get("sources")):
+        src = as_dict(src)
+        for col, spec in as_dict(src.get("columns")).items():
+            if isinstance(spec, dict) and spec.get("pii_ok") is True and spec.get("kind") != "pii":
+                cols.pop((src.get("sheet"), col), None)
     return [(sh, col, info) for (sh, col), info in cols.items()]
 
 
