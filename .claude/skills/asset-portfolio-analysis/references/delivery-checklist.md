@@ -31,7 +31,7 @@
 
 | # | المخرج (الموجّه) | الملف | المحتوى والمصدر |
 |---|---|---|---|
-| 1 [§13.1] | رسالة مختصرة بالتقييم العام، وأهم الأرقام الممكن حسابها، وأبرز الفجوات والتوصيات | `$RUN/09_message.md` + ردك في المحادثة | قالب الرسالة في `SKILL.md`. الأرقام منسوخة من `05_metrics.json` مع نطاق كل رقم وأساسه وتسميته الدقيقة (`metrics.md` §4.2). ونتيجة الفحوص كما هي |
+| 1 [§13.1] | رسالة مختصرة بالتقييم العام، وأهم الأرقام الممكن حسابها، وأبرز الفجوات والتوصيات | `$RUN/09_message.md` + ردك في المحادثة | قالب الرسالة في `SKILL.md`. الأرقام منسوخة من `05_metrics.json` (أو حقائق `facts.py`) بالتقريب المعروض، مع نطاق كل رقم وأساسه وتسميته الدقيقة (`metrics.md` §4.2)، والنسبة الجزئية تُسمى «عائد الجزء القابل للاحتساب». ونتيجة الفحوص كما هي. ويفحص التحقق الرسالة: الخصوصية (`pii_text_patterns` مانع، و`pii_review_patterns` تحذير) وأرقامها (`message_numbers` تحذير) |
 | 2 [§13.2] | الداشبورد التفاعلي الفعلي | `$RUN/dashboard.html` | `build_dashboard.py` بعد تحقق ناجح (`dashboard-spec.md`) |
 | 3 [§13.3] | الدراسة التفصيلية، وسجل الحسابات والأصول والمستبعدات ومشكلات البيانات، داخل تبويبات الداشبورد أو مرفق داعم قابل للمراجعة | أقسام التفاصيل في الداشبورد + `$RUN/supporting_workbook.xlsx` | `export_workbook.py`، وأوراقه: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «الافتراضات والمصادر»؛ وعند الحاجة «المطابقة مع الإجماليات» (عند حفظ قيم صفوف الإجمالي في 03)، و«متابعة التوصيات» و«مقارنة الإصدارات» (عند وجودهما في 06). ويخرج بالرمز 2 ويحذف الملف إن وجد فحص الخصوصية بعد الحفظ جوالًا أو هاتفًا أو بريدًا أو آيبان |
 | 4 [§13.4] | خطة تنفيذ مرتبة بالأولوية، وقائمة مختصرة بالبيانات الإضافية المؤثرة والمؤشرات التي ستتيحها | `plan` و`recommendations[].priority` و`data_requests[]` | `recommendations-and-scenarios.md`. وتظهر في الداشبورد والمرفق والرسالة |
@@ -46,7 +46,8 @@
 | تطابق البسط والمقام والفترة في العوائد [§13.6] | `validate_analysis.py`: `pairwise_sets` و`valuation_years_mixed` و`label_before_expenses` و`label_net` و`label_vat_basis` و`label_years` و`period_fields` و`growth_comparability_basis` و`yield_zero_revenue_scope` و`growth_comparability` | لا خطأ مانع. وكل تحذير معالج أو مبرر في `methodology_notes` |
 | عدم ازدواج الأصول والإيرادات [§13.7] | `validate_analysis.py`: `duplicate_record_ids` و`total_rows_in_scope` و`total_like_in_scope` و`duplicate_ids_in_scope` و`unit_double_count` و`overlapping_rows` و`sheet_scope` و`isolated_in_metrics`، وتحذير `totals_reconciliation` (مطابقة صفوف الإجمالي المستبعدة في 07). ومشكلات `possible_duplicate_name` و`shared_deed` في `03` مراجَعة | لا معرّف مكرر، ولا صف إجمالي أو معزول في المؤشرات. وكل تشابه أسماء محسوم أو موثق |
 | وضوح النواقص والافتراضات [§13.8] | `token_null_value` و`data_coverage_low` و`unknown_classification`. ومراجعتك لـ`exclusions` و`assumptions` و`data_issues_extra` | كل مؤشر ناقص له سبب ظاهر. وكل افتراض له `basis` |
-| ربط التوصيات بالأدلة [§13.9] | `gap_evidence` و`recommendation_links` و`recommendation_fields` و`plan_links` و`plan_completeness` و`top_lists` و`evidence_refs_other` و`drastic_without_study` و`drastic_recommendations` و`narrative_scores` | لا خطأ مانع |
+| ربط التوصيات بالأدلة [§13.9] | `gap_evidence` و`recommendation_links` و`recommendation_fields` و`plan_links` و`plan_completeness` و`top_lists` و`evidence_refs_other` و`drastic_without_study` و`drastic_recommendations` و`narrative_scores` و`fact_tokens` و`metric_tokens` | لا خطأ مانع |
+| الرسالة والمرفق [§13.1، §13.3] | `validate_analysis.py` بعد `export_workbook.py` وكتابة `09_message.md`: `pii_export_patterns` (كل خلايا المرفق؛ والمرفق الأقدم من 03 أو 06 يُوسم بأنه قد يكون قديمًا)، و`pii_text_patterns` (الرسالة)، و`message_numbers` | لا خطأ مانع، وكل رقم في الرسالة يطابق `05` أو الحقائق أو الملف |
 | عمل التفاعل والطباعة [§13.10] | `check_dashboard.mjs`: `buttons` و`table_search` و`table_sort` و`table_detail` و`table_cells` و`print` و`mobile_overflow` و`draft`، ثم مراجعتك البصرية للقطات | خروج 0. واللقطات سليمة (`dashboard-spec.md` §9) |
 
 ## 4. تسلسل فحص الجودة (نفّذه بالترتيب)
@@ -61,12 +62,16 @@ python3 $SKILL_DIR/scripts/export_workbook.py   --run-dir "$RUN"                
 python3 $SKILL_DIR/scripts/validate_analysis.py --run-dir "$RUN" --xlsx "$SRC" --html "$RUN/dashboard.html"
 ```
 
-- [ ] **(1) و(3) و(6):** `07_validation.md` بلا أخطاء مانعة. وكل تحذير إما مُصلح، أو مبرر بجملة في `methodology_notes`، أو مُقرّ به في `06.acknowledged_warnings` بسبب من ثماني كلمات على الأقل (يظهر مستقلًا ولا يُعد في التحذيرات). ولا تتجاهل التحذيرات بصمت. وراجع جدول «المطابقة مع الإجماليات» في `07_validation.md`.
+- [ ] **(1) و(3) و(6):** `07_validation.md` بلا أخطاء مانعة. وكل تحذير إما مُصلح، أو مبرر بجملة في `methodology_notes`، أو مُقرّ به في `06.acknowledged_warnings`:
+  - الصيغة `{"check_id": "<id من 07_validation.json>", "reason": "<سبب من ثماني كلمات على الأقل>"}`. يصبح التحذير بمستوى `acknowledged`، فيظهر في قسم مستقل ولا يُعد في `warning_count` (ويُكتب في `acknowledged_count`).
+  - لا يُقرّ إلا بتحذير قائم: المعرّف المجهول أو المانع أو السبب القصير يُرفع تحذيرًا (`acknowledged_warnings`)، والإقرار بتحذير غير قائم يُذكر ملاحظةً لحذفه. **الخطأ المانع لا يُقرّ به أبدًا.**
+  - مثال مقبول: تحذير `growth_comparability` حين تبقى قابلية المقارنة «غير متحققة» لغياب وصف الضريبة في المصدر، مع ذكر ذلك في السرد دون حكم بالنمو.
+  - ولا تتجاهل التحذيرات بصمت. وراجع جدول «المطابقة مع الإجماليات» في `07_validation.md`.
 - [ ] **(4):** `08_dashboard_check.json` فيه `"passed": true` (والمسودة تفشل الفحص `draft` ما لم يُمرَّر `--allow-draft`؛ لا تسلّم مسودة). وراجع مصفوفة `warnings` فيه (أرقام تشبه الهوية الوطنية). وقرأتَ بأداة Read `screens/desktop.png` و`screens/desktop_01.png`… و`screens/details_open.png` و`screens/mobile.png` و`screens/mobile_full.png` و`screens/mobile_360.png` و`screens/mobile_detail.png` وصفحات `screens/print.pdf`، وراجعتها بقائمة `dashboard-spec.md` §9.
 - [ ] **الخلاصة:** بين 120 و180 كلمة، وعناصرها الخمسة حاضرة، وتسميات العائد حرفية، ولا «صافي» ولا «كلي» بلا مدخلات.
 - [ ] **الأسئلة والبيانات:** الأسئلة ثلاثة على الأكثر. و`data_requests` تذكر ما ستتيحه.
 - [ ] **الخصوصية:** لا بيانات شخصية في أي مخرج، ويثبت ذلك `pii_*` و`pii_export_patterns` و`privacy` (الأنماط المشتركة في `assets/pii_patterns.json`).
-- [ ] **الرسالة:** `09_message.md` مكتوبة، وأرقامها مطابقة لـ`05`، وحالة كل فحص مذكورة كما هي.
+- [ ] **الرسالة:** `09_message.md` مكتوبة، وأرقامها مطابقة لـ`05` أو الحقائق (تحذير `message_numbers` يذكر كل رقم لا يطابق، والسنوات وترقيم القوائم و«30/60/90 يومًا» والتواريخ والمسارات لا تُعد)، ولا بيانات اتصال فيها، وحالة كل فحص مذكورة كما هي (ومعها عدد التحذيرات المُقرّ بها).
 - [ ] **بعد أي تعديل:** أعد الخطوات من (1). فالداشبورد الذي يُسلَّم هو الناتج عن آخر تحقق ناجح.
 
 ## 5. عند تعذر فحص أو مخرج [§13.12]

@@ -53,45 +53,45 @@
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
 | 2.1 | ابدأ بالفحص واستمر حتى المخرجات، ولا تكتفِ بخطة أو وصف | DL §1 | تسلسل DL §4؛ `build`؛ `C:` |
-| 2.2 | الجهة والفترة وتاريخ الدراسة والعملة وتواريخ التقييم، ولا افتراض أن سنة التحليل هي سنة البيانات | SC §1 | حقول السياق في `02`؛ `inspect` (`title_cells`، `years_in_header`) |
+| 2.2 | الجهة والفترة وتاريخ الدراسة والعملة وتواريخ التقييم، ولا افتراض أن سنة التحليل هي سنة البيانات | SC §1 | حقول السياق في `02` (إلزامية في `schema` بدليل لكل منها، وتُنسخ إلى `03.context`)؛ `V:mapping_context` (مانع)؛ `inspect` (`title_cells`، `years_in_header`) |
 | 2.3 | حفظ الأصل، مخرجات مستقلة، لا نشر ولا إرسال | DL §1 | فتح للقراءة فقط؛ `V:source_hash`؛ حكم المحلل (لا Artifact) |
 | 2.4 | أنجز الممكن، وبيّن أثر النقص، ولا يعطل نقص مؤشر الدراسة | DL §1 | `compute` (حالة وسبب لكل مؤشر مستقل)؛ `data_requests` |
 | 2.5 | ثلاثة أسئلة مؤثرة كحد أقصى في كل دفعة | DL §1 | `V:questions_max` (مانع)؛ `schema` (`maxItems 3`) |
-| 2.6 | ميّز المعلومة والحساب والاستنتاج والافتراض، ولا تختلق | DA §2 | `kind` و`evidence`؛ `V:gap_evidence` (مانع)، `V:metric_tokens` (مانع)، `V:evidence_refs_other`، `V:hand_typed_numbers` |
+| 2.6 | ميّز المعلومة والحساب والاستنتاج والافتراض، ولا تختلق | DA §2 | `kind` و`evidence`؛ `V:gap_evidence` (مانع)، `V:metric_tokens` و`V:fact_tokens` (مانعان)، `V:evidence_refs_other`، `V:hand_typed_numbers` |
 
 ## 3. فهم الملف وتحديد النطاق
 
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
-| 3.1 | فحص كل الأوراق (المخفية والجداول والصيغ والملاحظات) وخريطتها | SC §2 | `inspect` (`hidden_sheet`، الجداول، الصيغ، التعليقات)؛ `sheets[]` في `02`؛ `build` (قسم `workbook`) |
-| 3.2 | لا جمع تلقائي للأوراق، وتحقق انتمائها | SC §3 | `decision` و`default_scope: isolated`؛ `base_where` في `compute` |
-| 3.3 | مطابقة الأصول بالمعرّفات والخصائص قبل استخدام إيراداتها ومصروفاتها | SC §3 | `links[]` (المؤكد وحده)؛ `inspect:cross_sheet_name_match` تلميح |
-| 3.4 | عزل غير المتحقق من نطاقه مع السبب | SC §3 | `scope_reason` و`exclusions`؛ `V:isolated_in_metrics`؛ `export` («المستبعدات») |
-| 3.5 | تحديد ما يمثله الصف | SC §4 | `record_type`؛ `inspect` (`row_kinds`)؛ `normalize:total_like_row` |
-| 3.6 | لا جمع مزدوج للأصل ووحداته ولا للمجاميع وتفاصيلها | SC §4 | `exclude_rows`؛ `V:total_rows_in_scope` (مانع)؛ `V:duplicate_record_ids` (مانع) |
+| 3.1 | فحص كل الأوراق (المخفية والجداول والصيغ والملاحظات) وخريطتها | SC §2 | `inspect` (`hidden_sheet`، الجداول، الصيغ، التعليقات)؛ `sheets[]` لكل ورقة في `02` و`V:mapping_context` (مانع)؛ `build` (قسم `workbook`) |
+| 3.2 | لا جمع تلقائي للأوراق، وتحقق انتمائها | SC §3 | `decision` و`default_scope`؛ `normalize:sheet_scope_mismatch`؛ `V:sheet_scope` (مانع)، `V:hidden_sheet_in_scope`؛ `base_where` في `compute` |
+| 3.3 | مطابقة الأصول بالمعرّفات والخصائص قبل استخدام إيراداتها ومصروفاتها | SC §3 | `links[]` (المؤكد وحده)؛ النقل بمصدر `join` برابط `confirmed` وإلا خروج 2 (`normalize:join_unmatched` و`join_conflict` و`join_ambiguous`)؛ `inspect:cross_sheet_name_match` تلميح |
+| 3.4 | عزل غير المتحقق من نطاقه مع السبب | SC §3 | `scope_reason` و`exclusions`؛ `V:isolated_in_metrics`؛ `V:hidden_sheet_in_scope`؛ `export` («المستبعدات»)؛ `build` (تنبيه التغطية للمعزول الشبيه بالأصول) |
+| 3.5 | تحديد ما يمثله الصف | SC §4 | `record_type`؛ `inspect` (`row_kinds`)؛ `normalize:total_like_row` و`blank_rows_skipped` و`row_skipped_with_content` |
+| 3.6 | لا جمع مزدوج للأصل ووحداته ولا للمجاميع وتفاصيلها | SC §4 | `exclude_rows` والاستبعاد الآلي للإجماليات؛ مؤشرات الإيراد بمستوى الأصل (`compute`)؛ `V:total_rows_in_scope` و`V:total_like_in_scope` و`V:unit_double_count` و`V:duplicate_ids_in_scope` و`V:overlapping_rows` و`V:duplicate_record_ids` (مانعة)؛ `V:unit_levels_mixed` |
 | 3.7 | الملكية والحقوق غير حصرية، والوقف مستقل | SC §5 | `schema` (`ownership` قائمة، `waqf` مستقل)؛ `compute` (توزيع «قد تتداخل الفئات») |
-| 3.8 | الاستخدام بفئاته الخمس | SC §5 | `vocab`؛ `V:unknown_classification`؛ `normalize:missing_classification` |
-| 3.9 | طبيعة الدخل بفئاتها | SC §5 | `vocab`؛ `V:unknown_classification` |
+| 3.8 | الاستخدام بفئاته الخمس | SC §5 | `vocab`؛ `normalize:dim_out_of_vocabulary` و`missing_classification`؛ `V:dims_vocabulary` (مانع)؛ `V:unknown_classification` |
+| 3.9 | طبيعة الدخل بفئاتها | SC §5 | `vocab`؛ `normalize:dim_out_of_vocabulary`؛ `V:dims_vocabulary` (مانع)؛ `V:unknown_classification` |
 | 3.10 | النوع والموقع والحالة وتخصيص الريع والقيود المثبتة | SC §5 | أعمدة `dim`؛ `breakdowns`؛ `filters` |
 | 3.11 | إيرادات المدارس والأنشطة ليست إيجارًا | SC §6 | `operating_activity` و`operating`؛ `compute` (`activity_revenue`، واستبعاد التشغيلي من العائد) |
-| 3.12 | إيراد العقار المدار للغير ليس دخلًا للجمعية | SC §6 | `managed_for_others`؛ `compute` (مستبعد من كل المؤشرات القياسية) |
+| 3.12 | إيراد العقار المدار للغير ليس دخلًا للجمعية | SC §6 | `managed_for_others`؛ `compute` (مستبعد من كل المؤشرات القياسية، ويُعد في `managed_records_count`)؛ `normalize:managed_unflagged` و`V:sheet_scope` (مانع)؛ `build` (وسم «مدار للغير») |
 | 3.13 | الأصل كاملًا أم الحصة، قبل نسب الملكية | SC §7 | `partial` و`derived_fields` صريحة؛ `assumptions`؛ حكم المحلل |
 
 ## 4. تنظيف البيانات
 
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
-| 4.1 | معرّف ثابت ومصدر (ملف، ورقة، صف أو خلية) | DC §1 | `normalize` (`id_rule`، `ref`، `source`)؛ `V:duplicate_record_ids` (مانع) |
-| 4.2 | توحيد الأرقام والتواريخ والعملات والمساحات والمسميات مع حفظ الأصل | DC §2 | `parse_number` و`normalize_arabic`؛ `raw` |
-| 4.3 | التحقق من التقويم قبل تحويل التواريخ | DC §3 | `calendar`؛ `parse_date` (أم القرى)؛ `inspect:hijri_date_text`؛ `normalize:hijri_conversion` و`date_unparsed` |
-| 4.4 | فصل الصفر المؤكد والفارغ وغير المتاح وغير المنطبق، ولا صفر للمجهول | DC §4 | حالات TV و`zero_policy`؛ `V:tv_status_consistency` (مانع) |
+| 4.1 | معرّف ثابت ومصدر (ملف، ورقة، صف أو خلية) | DC §1 | `normalize` (`id_rule`، `ref`، `source`، `duplicate_id`)؛ `V:duplicate_ids_in_scope` و`V:duplicate_record_ids` (مانعان) |
+| 4.2 | توحيد الأرقام والتواريخ والعملات والمساحات والمسميات مع حفظ الأصل | DC §2 | `parse_number` و`normalize_arabic`؛ `raw`؛ `normalize:percent_in_amount` و`numeric_text_converted` |
+| 4.3 | التحقق من التقويم قبل تحويل التواريخ | DC §3 | `calendar`؛ `parse_date` (أم القرى، وملاحظة التاريخ الملتبس)؛ `inspect:hijri_date_text` و`mixed_calendar`؛ `normalize:hijri_conversion` و`date_note` و`date_unparsed` |
+| 4.4 | فصل الصفر المؤكد والفارغ وغير المتاح وغير المنطبق، ولا صفر للمجهول | DC §4 | حالات TV و`zero_policy` ورموز «غير متاح»؛ `inspect:formula_blank_inputs`؛ `normalize:zero_from_blank_inputs`؛ `V:tv_status_consistency` (مانع) |
 | 4.5 | لا حذف للأسماء المتشابهة، ومطابقة المعرّف والصك والموقع والمساحة، والصك المشترك | DC §5 | `inspect:duplicate_name` و`shared_deed`؛ `normalize:possible_duplicate_name` و`shared_deed` |
-| 4.6 | محتوى الحقل لا عنوانه: «غير مقيد» ليست مبالغ، والأدوار ليست وحدات | DC §6 | `kind: text` و`count_mixed`؛ `inspect:text_in_numeric` و`mixed_types`؛ `normalize:count_mixed_text` |
+| 4.6 | محتوى الحقل لا عنوانه: «غير مقيد» ليست مبالغ، والأدوار ليست وحدات | DC §6 | `kind: text` و`count_mixed`؛ `inspect:text_in_numeric` و`mixed_types` (وعناوين التصنيف ليست مبالغ)؛ `normalize:count_mixed_text` و`percent_in_amount` |
 | 4.7 | مراجعة الصيغ وقيمها المخزنة وأخطاء المراجع | DC §7 | `inspect:formula_year_mismatch`، `cached_value_mismatch`، `cached_missing`، `excel_error`؛ `normalize:formula_no_cache` |
-| 4.8 | إعادة حساب المجاميع ومطابقتها مع المدونة وإظهار الفروق | DC §7 | `compute` (`sum`)؛ `inspect:total_mismatch`، `hardcoded_total`، `count_mismatch`؛ `normalize:valuation_total_mismatch` |
+| 4.8 | إعادة حساب المجاميع ومطابقتها مع المدونة وإظهار الفروق | DC §7 | `compute` (`sum`)؛ `inspect:total_mismatch`، `hardcoded_total`، `count_mismatch`؛ `normalize:valuation_total_mismatch`؛ قيم صفوف الإجمالي المستبعدة و`V:totals_reconciliation`؛ `export` («المطابقة مع الإجماليات») |
 | 4.9 | فصل الضريبة بحسب البيانات، ولا نسبة واحدة، ولا تعديل بالاسم | DC §8 | `vat` في `field_meta`؛ `compute` (اختيار `excl`)؛ `inspect:vat_identical`؛ `normalize:vat_incl_lt_excl` |
 | 4.10 | فعلي أم متوقع، مستحق أم محصل، سنوي أم جزئي، ولا وصف غير مثبت | DC §9 | `basis`، `cash_basis`، `completeness`؛ `compute` (قابلية المقارنة)؛ `inspect:partial_period_header` |
-| 4.11 | سجل مشكلات البيانات (المشكلة، الموضع، الأثر، المعالجة) | DC §10 | `normalize` (`DQ-xxx`)؛ `data_issues_extra`؛ `export`؛ `build` (قسم `issues`) |
+| 4.11 | سجل مشكلات البيانات (المشكلة، الموضع، الأثر، المعالجة) | DC §10 | `normalize` (`DQ-xxx`، والأثر بحسب نطاق السجل)؛ `data_issues_extra`؛ `export`؛ `build` (قسم `issues`) |
 | 4.12 | فصل جودة البيانات عن أداء المحفظة | DC §10 | `schema` (بُعد `data_quality` مستقل)؛ حكم المحلل |
 
 ## 5. ضوابط الملف المرجعي
@@ -103,7 +103,7 @@
 | 5.2 | فصل المقيّم عن المجمع والمدارس، ولا إيراد في البسط بلا مقام | RF §2 | `leased_land_project` و`operating_activity`؛ النسبة الزوجية؛ `V:pairwise_sets` (مانع) |
 | 5.3 | حدود إيراد المجمع والمدارس، والإيجارات الداخلية، ولا ازدواج بلا دليل | RF §2 | `field_overrides` و`where`؛ `data_issues_extra`؛ حكم المحلل |
 | 5.4 | أجرة الأرض بند تكلفة محتمل، وطلب بيان مستقل | RF §2 | لا ربط بـ`exp.*`؛ `data_requests` |
-| 5.5 | فحص الورقتين المخفيتين، و«المنسدلات» ليست سجل أصول | RF §2 | `decision` (`isolated`/`excluded`)؛ `links` المؤكدة |
+| 5.5 | فحص الورقتين المخفيتين، و«المنسدلات» ليست سجل أصول | RF §2 | `decision` (`isolated`/`excluded`)؛ `links` المؤكدة ومصدر `join`؛ `V:sheet_scope` |
 | 5.6 | «صافي الأصول» نصي، فلا يكون مقامًا | RF §2 | `kind: text` (`data-contract` §3)؛ `inspect:text_in_numeric` |
 | 5.7 | «عدد الوحدات التأجيرية» مختلط، فلا جمع ولا إشغال منه | RF §2 | `count_mixed`؛ `normalize:count_mixed_text` |
 | 5.8 | التحقق من إجمالي 2024 وأساس الضريبة والاكتمال قبل المقارنة | RF §2 | `compute` (`sum`، `comparable_with_prev`)؛ `V:growth_comparability` |
@@ -122,7 +122,7 @@
 | 6.6 | فصل غير المقيم والمدار للغير وحقوق الانتفاع والمشروعات التشغيلية | MT §2 | `excluded[]`؛ شروط `where` |
 | 6.7 | «القيمة المسجلة للأصول المقيمة» ولا إيحاء بالقيمة الكاملة | MT §2 | التسمية القياسية؛ حكم المحلل |
 | 6.8 | توزيع القيمة والإيراد حسب الأبعاد عند كفاية البيانات | MT §2 | `compute` (`breakdowns`)؛ `C:charts` |
-| 6.9 | إجمالي الإيراد غير المكرر: الإيجارات منفصلة عن الأنشطة، والمتكرر عن الاستثنائي | MT §3 | `property_revenue` و`activity_revenue`؛ عزل المصدر المكرر؛ حقل `one_off` |
+| 6.9 | إجمالي الإيراد غير المكرر: الإيجارات منفصلة عن الأنشطة، والمتكرر عن الاستثنائي | MT §3 | `property_revenue` و`activity_revenue` بمستوى الأصل؛ عزل المصدر المكرر؛ حقل `one_off` |
 | 6.10 | تعريف عائد الدخل الإجمالي | MT §4.1 | `gross_yield_*`؛ اختيار حقل `excl` |
 | 6.11 | صافي الدخل التشغيلي، وفصل الإهلاك والتمويل والرأسمالي، وأساس توزيع المشترك | MT §4.3 | `noi`؛ `exp_field`؛ `field_meta.note` |
 | 6.12 | عائد الدخل التشغيلي الصافي | MT §4.3 | حقل `noi.<P>` المشتق ثم نسبة |
@@ -138,7 +138,7 @@
 | 6.22 | فصل تحسن القائم عن الإضافة والتخارج | MT §5 | `growth` على `I`؛ `only_curr` و`only_prev` |
 | 6.23 | «بدء إيراد» دون نسبة عند صفر الفترة السابقة | MT §5 | `revenue_start_ids` و`start_change` لكل سجل خارج النسبة؛ `V:pairwise_sets` |
 | 6.24 | تغير التقييم منفصل وليس ربحًا نقديًا | MT §5 | `diff` على التقييم؛ التسمية؛ حكم المحلل |
-| 6.25 | لا عائد كلي إلا بمدخلاته، والمعادلة المبسطة | MT §5 | `V:label_total_return` (مانع)؛ `V:narrative_claims` |
+| 6.25 | لا عائد كلي إلا بمدخلاته، والمعادلة المبسطة | MT §5 | `V:label_total_return` (مانع؛ يقرأ `num`/`den` النسبة وحدهما، فالمكونات تُعرض منفصلة)؛ `V:narrative_claims` |
 | 6.26 | منهج يراعي التدفقات وتوقيتها، وإلا ذكر التعذر | MT §5 | `derived_fields` للبسط والمقام؛ حكم المحلل |
 | 6.27 | لا جمع لدخل سنة مع تغير تقييم فترة أخرى | MT §5 | `V:label_total_return`؛ حكم المحلل |
 | 6.28 | لا تحويل للجزئي إلى سنوي محقق، والتقدير منفصل | MT §5 | `completeness: partial` يجعلها `not_comparable`؛ `V:growth_comparability_basis`؛ `assumptions` |
@@ -159,7 +159,7 @@
 | 7.4 | وزن الأصل في القيمة مقابل مساهمته في الإيراد | DA §4 | رسم مقارنة الأصول؛ `C:charts` |
 | 7.5 | ضعف التأجير والتحصيل والمصروفات والعقود، عند وجود أدلة | DA §4 | مؤشرات مخصصة مشروطة؛ حكم المحلل |
 | 7.6 | فرص الاستخدام والتأجير والترميم والتطوير المرحلي والشراكات | DA §4 | حكم المحلل؛ RS §7 |
-| 7.7 | قدم التقييمات، ونقص البيانات، والتعارضات | DA §4 | `noi` غير قابل للاحتساب؛ `normalize:missing_classification` و`shared_deed` |
+| 7.7 | قدم التقييمات، ونقص البيانات، والتعارضات | DA §4 | `noi` غير قابل للاحتساب؛ `normalize:missing_classification` و`shared_deed`؛ `V:totals_reconciliation` |
 | 7.8 | عناصر سجل الفجوة | DA §5 | `schema` (`gap`)؛ `V:gap_evidence` (مانع)، `V:narrative_ids`، `V:top_lists`؛ `V:gap_completeness` |
 | 7.9 | الاحتمال ليس حقيقة | DA §6 | `is_proven_problem` و`proven_cause`؛ `V:proven_problem_cause`، `V:gap_unsupported_claims`؛ `build` (الأحمر للمثبت فقط) |
 | 7.10 | لا حكم بتدني الإيجار دون مقارنة مناسبة | DA §6 | حكم المحلل؛ `sources` |
@@ -193,11 +193,11 @@
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
 | 10.1 | ثلاثة سيناريوهات عند توافر المدخلات | RS §7.1 | `schema` (`prepared` أو `not_prepared`) |
-| 10.2 | افتراض بمصدر، وفصل التقديري عن المحقق | RS §7.2 | `V:scenarios` (مانع)؛ `build` (قسم السيناريوهات منفصل) |
+| 10.2 | افتراض بمصدر، وفصل التقديري عن المحقق | RS §7.2 | `V:scenarios` (مانع: افتراض بلا مصدر أو بمصدر عام، ورقم بلا مرجع في `sources[]`)؛ `build` (قسم السيناريوهات منفصل) |
 | 10.3 | الإيراد والمصروف الإضافيان، وصافي الأثر، والرأسمالي، والتوقيت | RS §7.2 | `schema` (`scenario_case`)؛ `V:scenarios` (صافي الأثر)؛ `V:scenario_consistency` |
-| 10.4 | أثر السنة الأولى مقابل الأثر السنوي | RS §7.2 | `year1_effect` و`run_rate_effect` |
-| 10.5 | المتكرر منفصل عن التحصيل لمرة أو البيع | RS §7.2 | `recurring`؛ حكم المحلل |
-| 10.6 | منع ازدواج الفرص على الأصل نفسه | RS §7.2 | `V:scenarios` (مانع)؛ `scenario_overlap_cross_type` |
+| 10.4 | أثر السنة الأولى مقابل الأثر السنوي | RS §7.2 | `year1_effect` و`run_rate_effect`؛ `V:scenario_consistency` |
+| 10.5 | المتكرر منفصل عن التحصيل لمرة أو البيع | RS §7.2 | `recurring`؛ `V:scenario_consistency`؛ حكم المحلل |
+| 10.6 | منع ازدواج الفرص على الأصل نفسه | RS §7.2 | `V:scenarios` (مانع: فرصتان على أصل مشترك دون `overlaps_with`) |
 | 10.7 | لا مبالغ اعتباطية، وتحديد المعلومات المطلوبة | RS §7.1 | `required_inputs` (`schema`)؛ `data_requests` |
 | 10.8 | لا وعد مؤكد دون سند | RS §7.3 | `V:promised_outcomes`؛ حكم المحلل |
 
@@ -218,7 +218,7 @@
 | 11.11 | خطة 30 و60 و90 | DS §4 | `C:structure` |
 | 11.12 | أقسام تفاصيل قابلة للفتح | DS §4 | `C:details_sections` |
 | 11.13 | تحت بطاقة العائد: النطاق والأساس وتاريخ التقييم | DS §5 | `build`؛ `V:label_before_expenses` |
-| 11.14 | «غير قابل للاحتساب بالبيانات الحالية» مع السبب، لا صفر | DS §5 | `V:metric_status_value` (مانع)؛ `C:cards`؛ `C:no_raw_tokens` |
+| 11.14 | «غير قابل للاحتساب بالبيانات الحالية» مع السبب، لا صفر | DS §5 | `V:metric_status_value` (مانع)؛ `compute` (`empty_cause` و`empty_text` و`empty_as_zero`)؛ `C:cards`؛ `C:no_raw_tokens` |
 | 11.15 | المرشحات: النوع والموقع والاستخدام والفترة | DS §6 | `filters`؛ `C:filters`؛ `C:period_filter` |
 | 11.16 | مصدر حسابي واحد، ونطاق التصفية، وزر الإعادة | DS §6 | `C:parity`؛ `C:filters` |
 | 11.17 | رسوم بسيطة بعناوين ووحدات، بلا ثلاثي الأبعاد | DS §7 | `build`؛ مراجعة اللقطات |
@@ -237,23 +237,23 @@
 | 12.3 | نسخة أحدث للسنة نفسها ليست نموًا | UV §4 | `compare` (`data_correction`، `growth_note`) |
 | 12.4 | اختفاء صف لا يعني البيع | UV §4 | `compare` (`scope_change` «لا يُفترض بيعه») |
 | 12.5 | لا ادعاء لذاكرة أو نسخة سابقة غير متاحة | UV §2 | `version_comparison: null`؛ حكم المحلل |
-| 12.6 | تحديث متابعة التوصيات بالدليل أو الإفادة | UV §6 | `compare` («لم يبدأ» افتراضيًا، غير متحقق)؛ `recommendation_followup`؛ `export` (ورقة «متابعة التوصيات») |
+| 12.6 | تحديث متابعة التوصيات بالدليل أو الإفادة | UV §6 | `compare` («لم يبدأ» افتراضيًا، غير متحقق؛ المفردات «لم يبدأ» و«قيد التنفيذ» و«منجز» و«متعثر» في `schema`)؛ `recommendation_followup`؛ `build` (جدول المتابعة)؛ `export` (ورقة «متابعة التوصيات» بقائمة منسدلة) |
 | 12.7 | لا تنفيذ لمجرد تحسن رقم | UV §6 | `V:followup_status` |
 
 ## 13. المخرجات ومعيار الاكتمال
 
 | # | القاعدة | الملف | الإنفاذ |
 |---|---|---|---|
-| 13.1 | رسالة مختصرة بالتقييم والأرقام والفجوات والتوصيات | DL §2 | `09_message.md`؛ قالب SK |
+| 13.1 | رسالة مختصرة بالتقييم والأرقام والفجوات والتوصيات | DL §2 | `09_message.md`؛ قالب SK؛ `V:message_numbers`؛ `V:pii_text_patterns` (مانع) |
 | 13.2 | الداشبورد التفاعلي الفعلي | DL §2 | `build`؛ `check_dashboard.mjs` |
-| 13.3 | الدراسة التفصيلية والسجلات، في التبويبات أو مرفق | DL §2 | `export`؛ أقسام التفاصيل |
+| 13.3 | الدراسة التفصيلية والسجلات، في التبويبات أو مرفق | DL §2 | `export` (ويُفحص بعد التصدير: `V:pii_export_patterns`، مانع)؛ أقسام التفاصيل |
 | 13.4 | خطة مرتبة بالأولوية، وقائمة البيانات الإضافية ومؤشراتها | DL §2 | `plan`؛ `data_requests` (`enables` في `schema`) |
-| 13.5 | مطابقة البطاقات والرسوم والجداول للحسابات | DL §3 | `C:parity`، `C:cards`، `C:charts`؛ `V:metrics_reproducible` |
+| 13.5 | مطابقة البطاقات والرسوم والجداول للحسابات | DL §3 | `C:parity`، `C:cards`، `C:charts`، `C:table_cells`؛ `V:metrics_reproducible` |
 | 13.6 | تطابق البسط والمقام والفترة | DL §3 | `V:pairwise_sets`، `V:valuation_years_mixed`، `V:label_*` |
-| 13.7 | عدم ازدواج الأصول والإيرادات | DL §3 | `V:duplicate_record_ids`، `V:total_rows_in_scope`، `V:isolated_in_metrics` |
+| 13.7 | عدم ازدواج الأصول والإيرادات | DL §3 | `V:duplicate_record_ids`، `V:duplicate_ids_in_scope`، `V:total_rows_in_scope`، `V:total_like_in_scope`، `V:unit_double_count`، `V:overlapping_rows`، `V:sheet_scope`، `V:isolated_in_metrics`؛ `V:totals_reconciliation` |
 | 13.8 | وضوح النواقص والافتراضات | DL §3 | `V:token_null_value`، `V:data_coverage_low`، `V:unknown_classification` |
 | 13.9 | ربط التوصيات بالأدلة | DL §3 | `V:gap_evidence`، `V:recommendation_links`، `V:evidence_refs_other` |
-| 13.10 | عمل التفاعل والطباعة | DL §3 | `C:buttons`، `C:table_*`، `C:print`، `C:mobile_overflow` |
+| 13.10 | عمل التفاعل والطباعة | DL §3 | `C:buttons`، `C:table_*`، `C:print`، `C:mobile_overflow`، `C:draft` |
 | 13.11 | أدوات قراءة وحساب فعلية | DL §1 | حكم المحلل (السكربتات وPython) |
 | 13.12 | ذكر العائق والبديل، ولا ادعاء | DL §5 | حكم المحلل (قوالب العائق) |
 | 13.13 | البدء عند الاستلام وتنفيذ الدورة كاملة | DL §1 | تسلسل DL §4 |
