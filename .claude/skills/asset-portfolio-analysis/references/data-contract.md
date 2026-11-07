@@ -46,8 +46,8 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
     "data_validations": [...]
   }],
   "anomalies": [{
-    "id": "WB-001", "type": "formula_year_mismatch|cached_value_mismatch|total_mismatch|hardcoded_total|excel_error|cached_missing|mixed_types|text_in_numeric|duplicate_name|shared_deed|serial_gap|pii_column|partial_period_header|garbled_header|filler_block|derived_from_total|count_mismatch",
-    "severity": "high|medium|low",
+    "id": "WB-001", "type": "formula_year_mismatch|cached_value_mismatch|total_mismatch|row_total_mismatch|hardcoded_total|excel_error|cached_missing|mixed_types|text_in_numeric|numeric_text|duplicate_name|shared_deed|serial_gap|pii_column|partial_period_header|garbled_header|filler_block|derived_from_total|count_mismatch|vat_identical|vat_inconsistent|hijri_date_text|zero_valuation|unlabeled_column|outside_table_rows|hidden_sheet|hidden_rows|hidden_columns|cross_sheet_name_match",
+    "severity": "high|medium|low|info",
     "where": "عقارات الجمعية !AA3",
     "detail": "Arabic explanation with numbers",
     "evidence": {"formula": "...", "cached": 1100000, "recomputed": 823356}
@@ -55,7 +55,14 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
   "pii_columns": [{"sheet": "...", "col": "AH", "header": "رقم التواصل", "reason": "header|pattern"}]
 }
 ```
-PII **values are never written** to any output; only the column location.
+PII **values are never written** to any output; only the column location. Redacted samples and person-like file
+properties (creator / last_modified_by) appear as «<محجوب>». The map is an internal working file (it shows asset
+names): only `workbook_map_summary` goes into `analysis.json`. Extra keys (`register_candidates`, `regions`,
+`key_columns`, `summary`, …) are additive hints — Claude still decides the mapping.
+
+**Converted inputs (.xls / .ods / .xlsb):** `file.converted.path` (RUN/_converted/<stem>.xlsx) is the copy every later
+step reads (`normalize.py --xlsx`, `validate_analysis.py --xlsx`); the original stays untouched. LibreOffice may have
+recalculated its formulas — say so in `methodology_notes`.
 
 ## 2. Typed value (`TV`) — used in every record field
 
@@ -267,7 +274,21 @@ Parity cases: default; each period; for each filter dim up to `parity_max_values
   "methodology_notes": ["..."]
 }
 ```
-Scenario items (only when `status = "prepared"`): `{"id", "opportunity", "asset_ids", "assumptions": [{"text", "source"}], "conservative|base|optimistic": {"extra_revenue", "extra_expense", "net_effect", "capex", "start", "year1_effect", "run_rate_effect"}, "recurring": true, "overlaps_with": []}`.
+Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py`:
+- `assessment` has exactly 4 items, one per dimension. `criterion` null ⇒ descriptive judgment, no score.
+- Gap `evidence` entries are objects `{ref, kind}`; refs are `m:<metric_id>` (also `m:<id>.<field>`, `m:<breakdown id>`,
+  `m:trend`), `DQ-…` (03 issues), `WB-…` (01 anomalies), record ids, or a cell `Sheet!A1` (exact sheet name, incl. trailing
+  spaces; quoting allowed). Unresolved gap refs are **blocking**; elsewhere they are warnings.
+- `ranking.urgency|feasibility|cost_level` ∈ high|medium|low. Plan items may carry `status`
+  («لم يبدأ» | «قيد التنفيذ» | «منجز» | «متعثر»); `recommendation_followup` items are `{rec_id, status, evidence, note}` —
+  copy them from `compare_versions.py` output and mark «منجز» only with evidence or the user's word. `sources` has ≥ 1 item.
+- Unknown top-level keys are rejected; deliberate extensions use the `x_` prefix.
+- Gap `scope`: a record id, `portfolio`, or `group:<dim>=<value>`; record ids anywhere in gaps/recommendations are
+  auto-linked in the dashboard. Set `opportunity_type` on scenario items so overlaps are detected.
+- Any ratio label/short_label/basis shown on a card must contain «قبل المصروفات»; affirmative «صافي» or «العائد
+  الاستثماري الكلي» without the required inputs is blocking.
+
+Scenario items (only when `status = "prepared"`, listed under `scenarios.items`): `{"id", "opportunity", "asset_ids", "assumptions": [{"text", "source"}], "conservative|base|optimistic": {"extra_revenue", "extra_expense", "net_effect", "capex", "start", "year1_effect", "run_rate_effect"}, "recurring": true, "overlaps_with": []}`.
 
 ## 7. `analysis.json` (build_dashboard.py → embedded in HTML)
 

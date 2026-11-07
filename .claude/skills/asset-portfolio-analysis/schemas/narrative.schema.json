@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "apa/narrative.schema.json",
+  "title": "06_narrative.json — executive summary, assessment, gaps, recommendations, plan (data-contract.md §6)",
+  "description": "Structure only. Cross-file rules (evidence refs resolve, recommendations cite existing gaps, word count, metric tokens, PII...) are enforced by scripts/validate_analysis.py. Extra top-level keys are rejected to catch typos; use an 'x_' prefix for deliberate extensions.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "executive_summary",
+    "assessment",
+    "gaps",
+    "recommendations",
+    "top_gaps",
+    "top_actions",
+    "plan",
+    "scenarios",
+    "data_requests",
+    "questions",
+    "assumptions",
+    "sources"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": {}
+  },
+  "properties": {
+    "contract_version": {"const": "1.0"},
+    "executive_summary": {"$ref": "#/$defs/text"},
+    "assessment": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/assessment_item"},
+      "allOf": [
+        {"contains": {"type": "object", "required": ["dimension"], "properties": {"dimension": {"const": "income_generation"}}}},
+        {"contains": {"type": "object", "required": ["dimension"], "properties": {"dimension": {"const": "income_stability"}}}},
+        {"contains": {"type": "object", "required": ["dimension"], "properties": {"dimension": {"const": "asset_utilization"}}}},
+        {"contains": {"type": "object", "required": ["dimension"], "properties": {"dimension": {"const": "data_quality"}}}}
+      ]
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["text", "evidence", "kind"],
+        "properties": {
+          "text": {"$ref": "#/$defs/text"},
+          "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+          "kind": {"enum": ["fact", "derived", "inference"]}
+        }
+      }
+    },
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "recommendations": {"type": "array", "items": {"$ref": "#/$defs/recommendation"}},
+    "top_gaps": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+    "top_actions": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+    "plan": {
+      "type": "object",
+      "required": ["d30", "d60", "d90"],
+      "additionalProperties": false,
+      "properties": {
+        "d30": {"type": "array", "items": {"$ref": "#/$defs/plan_item"}},
+        "d60": {"type": "array", "items": {"$ref": "#/$defs/plan_item"}},
+        "d90": {"type": "array", "items": {"$ref": "#/$defs/plan_item"}}
+      }
+    },
+    "scenarios": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["status", "reason", "required_inputs"],
+          "properties": {
+            "status": {"const": "not_prepared"},
+            "reason": {"$ref": "#/$defs/text"},
+            "required_inputs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["status", "items"],
+          "properties": {
+            "status": {"const": "prepared"},
+            "reason": {"type": ["string", "null"]},
+            "required_inputs": {"type": "array", "items": {"type": "string"}},
+            "items": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scenario_item"}}
+          }
+        }
+      ]
+    },
+    "data_issues_extra": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "where", "detail", "impact", "treatment"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^DQ-\\S+$"},
+          "where": {"$ref": "#/$defs/text"},
+          "detail": {"$ref": "#/$defs/text"},
+          "impact": {"$ref": "#/$defs/text"},
+          "treatment": {"$ref": "#/$defs/text"},
+          "severity": {"$ref": "#/$defs/severity"},
+          "record_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "exclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["what", "where", "reason"],
+        "properties": {
+          "what": {"$ref": "#/$defs/text"},
+          "where": {"$ref": "#/$defs/text"},
+          "reason": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "kind", "basis"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^A\\S*$"},
+          "text": {"$ref": "#/$defs/text"},
+          "kind": {"enum": ["inference", "assumption"]},
+          "basis": {"$ref": "#/$defs/text"}
+        }
+      }
+    },
+    "data_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item", "enables", "priority"],
+        "properties": {
+          "item": {"$ref": "#/$defs/text"},
+          "enables": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+          "priority": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "questions": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/text"}},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type", "ref"],
+        "properties": {
+          "type": {"enum": ["file", "web", "user"]},
+          "ref": {"$ref": "#/$defs/text"},
+          "date": {"type": ["string", "null"]},
+          "limits": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "version_comparison": {"type": ["object", "null"]},
+    "recommendation_followup": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rec_id", "status"],
+        "properties": {
+          "rec_id": {"$ref": "#/$defs/text"},
+          "status": {"$ref": "#/$defs/text"},
+          "evidence": {"type": ["array", "string", "null"]},
+          "note": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "methodology_notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "severity": {"enum": ["high", "medium", "low"]},
+    "level": {"enum": ["high", "medium", "low"]},
+    "assessment_item": {
+      "type": "object",
+      "required": ["dimension", "judgment", "criterion", "evidence", "kind"],
+      "properties": {
+        "dimension": {"enum": ["income_generation", "income_stability", "asset_utilization", "data_quality"]},
+        "judgment": {"$ref": "#/$defs/text"},
+        "criterion": {"type": ["string", "null"]},
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "kind": {"enum": ["fact", "derived", "inference"]}
+      }
+    },
+    "gap": {
+      "type": "object",
+      "required": ["id", "title", "scope", "evidence", "impact", "proven_cause", "possible_causes",
+                   "verification_needed", "proposed_action", "severity", "is_proven_problem"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^G\\S*$"},
+        "title": {"$ref": "#/$defs/text"},
+        "scope": {"$ref": "#/$defs/text"},
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["ref", "kind"],
+            "properties": {
+              "ref": {"$ref": "#/$defs/text"},
+              "kind": {"enum": ["fact", "derived"]},
+              "note": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "impact": {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "metric": {"type": ["string", "null"], "pattern": "^m:\\S+$"},
+            "text": {"$ref": "#/$defs/text"}
+          }
+        },
+        "proven_cause": {"type": ["string", "null"]},
+        "possible_causes": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "verification_needed": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "proposed_action": {"$ref": "#/$defs/text"},
+        "severity": {"$ref": "#/$defs/severity"},
+        "is_proven_problem": {"type": "boolean"}
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "required": ["id", "gap_ids", "target", "problem", "evidence", "first_action", "alternatives",
+                   "recommended_option", "rationale", "owner_role", "duration", "cost", "expected_impact",
+                   "success_kpi", "approval_required", "ranking", "priority"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^R\\S*$"},
+        "gap_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+        "target": {"type": "string"},
+        "problem": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "first_action": {"type": "string"},
+        "alternatives": {"type": "array", "items": {"type": "string"}},
+        "recommended_option": {"type": "string"},
+        "rationale": {"type": "string"},
+        "owner_role": {"type": "string"},
+        "duration": {"type": "string"},
+        "cost": {"type": "string"},
+        "expected_impact": {"type": "string"},
+        "success_kpi": {"type": "string"},
+        "approval_required": {"type": ["string", "null"]},
+        "ranking": {
+          "type": "object",
+          "required": ["impact", "urgency", "evidence_strength", "feasibility", "cost_level"],
+          "properties": {
+            "impact": {"$ref": "#/$defs/level"},
+            "urgency": {"$ref": "#/$defs/level"},
+            "evidence_strength": {"enum": ["strong", "moderate", "weak"]},
+            "feasibility": {"$ref": "#/$defs/level"},
+            "cost_level": {"$ref": "#/$defs/level"}
+          }
+        },
+        "priority": {"type": "integer", "minimum": 1}
+      }
+    },
+    "plan_item": {
+      "type": "object",
+      "required": ["rec_id", "action", "deliverable", "owner_role"],
+      "properties": {
+        "rec_id": {"$ref": "#/$defs/text"},
+        "action": {"$ref": "#/$defs/text"},
+        "deliverable": {"$ref": "#/$defs/text"},
+        "owner_role": {"$ref": "#/$defs/text"},
+        "status": {"enum": ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]}
+      }
+    },
+    "scenario_case": {
+      "type": "object",
+      "required": ["extra_revenue", "extra_expense", "net_effect", "capex", "start", "year1_effect", "run_rate_effect"],
+      "properties": {
+        "extra_revenue": {"type": ["number", "null"]},
+        "extra_expense": {"type": ["number", "null"]},
+        "net_effect": {"type": ["number", "null"]},
+        "capex": {"type": ["number", "null"]},
+        "start": {"type": ["string", "null"]},
+        "year1_effect": {"type": ["number", "null"]},
+        "run_rate_effect": {"type": ["number", "null"]}
+      }
+    },
+    "scenario_item": {
+      "type": "object",
+      "required": ["id", "opportunity", "asset_ids", "assumptions", "conservative", "base", "optimistic",
+                   "recurring", "overlaps_with"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "opportunity": {"$ref": "#/$defs/text"},
+        "opportunity_type": {"type": "string"},
+        "asset_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "assumptions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["text", "source"],
+            "properties": {
+              "text": {"$ref": "#/$defs/text"},
+              "source": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "conservative": {"$ref": "#/$defs/scenario_case"},
+        "base": {"$ref": "#/$defs/scenario_case"},
+        "optimistic": {"$ref": "#/$defs/scenario_case"},
+        "recurring": {"type": "boolean"},
+        "overlaps_with": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

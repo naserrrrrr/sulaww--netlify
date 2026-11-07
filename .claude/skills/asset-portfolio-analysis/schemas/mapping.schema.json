@@ -1,0 +1,884 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "apa/mapping.schema.json",
+  "title": "02_mapping.json — scope decisions, column roles and record classification (data-contract.md §3)",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "sources",
+    "field_meta"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "source_file": {
+      "type": "string"
+    },
+    "entity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_period": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "study_date": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "basis": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "analysis_date": {
+      "type": "string"
+    },
+    "valuation_dates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "year"
+        ],
+        "properties": {
+          "year": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "sheets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sheet",
+          "role",
+          "decision"
+        ],
+        "properties": {
+          "sheet": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "asset_register",
+              "activity_register",
+              "allocation",
+              "managed_properties",
+              "lookup",
+              "notes",
+              "other"
+            ]
+          },
+          "decision": {
+            "enum": [
+              "primary",
+              "supplementary",
+              "isolated",
+              "excluded"
+            ]
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reliability": {
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              null
+            ]
+          },
+          "relation_to_register": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "field_meta": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/fieldName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/fieldMeta"
+      }
+    },
+    "dim_rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dimRule"
+      }
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/recordOverride"
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "record",
+          "match"
+        ],
+        "properties": {
+          "record": {
+            "type": "string"
+          },
+          "other_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "match": {
+            "enum": [
+              "probable",
+              "confirmed",
+              "rejected"
+            ]
+          },
+          "basis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "used": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "derived_fields": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/derivedField"
+      }
+    }
+  },
+  "$defs": {
+    "col": {
+      "type": "string",
+      "pattern": "^[A-Z]{1,3}$"
+    },
+    "fieldName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"
+    },
+    "rowList": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "minimum": 1
+          },
+          {
+            "type": "string",
+            "pattern": "^[0-9]+\\s*-\\s*[0-9]+$"
+          }
+        ]
+      }
+    },
+    "kind": {
+      "enum": [
+        "money",
+        "number",
+        "area",
+        "count",
+        "count_mixed",
+        "percent",
+        "date",
+        "text",
+        "pii",
+        "url",
+        "ignore"
+      ]
+    },
+    "columnSpec": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "kind": {
+          "$ref": "#/$defs/kind"
+        },
+        "zero_policy": {
+          "enum": [
+            "recorded",
+            "missing"
+          ]
+        },
+        "calendar": {
+          "enum": [
+            "auto",
+            "hijri",
+            "gregorian"
+          ]
+        },
+        "dim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pii_ok": {
+          "type": "boolean",
+          "description": "Set true only when a header looks personal but the column holds no personal data."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "enum": [
+                    "pii",
+                    "ignore"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "field"
+            ]
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "id",
+        "sheet",
+        "data_rows",
+        "columns"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "sheet": {
+          "type": "string",
+          "minLength": 1
+        },
+        "header_row": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data_rows": {
+          "type": "object",
+          "required": [
+            "from"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "to": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            }
+          }
+        },
+        "exclude_rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "rows",
+              "reason"
+            ],
+            "properties": {
+              "rows": {
+                "$ref": "#/$defs/rowList"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "skip_if_blank": {
+          "$ref": "#/$defs/col"
+        },
+        "default_record_type": {
+          "enum": [
+            "asset",
+            "land_parcel",
+            "unit",
+            "contract",
+            "operating_activity",
+            "total",
+            "other"
+          ]
+        },
+        "default_scope": {
+          "enum": [
+            "in_scope",
+            "isolated",
+            "excluded"
+          ]
+        },
+        "scope_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id_rule": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "column": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/col"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prefix": {
+              "type": "string"
+            }
+          }
+        },
+        "name_column": {
+          "$ref": "#/$defs/col"
+        },
+        "columns": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/col"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/columnSpec"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "fieldMeta": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "group": {
+          "enum": [
+            "revenue",
+            "expense",
+            "valuation",
+            "area",
+            "count",
+            "units",
+            "date",
+            "text",
+            "identifier",
+            "deed",
+            "location",
+            "classification",
+            "other"
+          ]
+        },
+        "period": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "year": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vat": {
+          "enum": [
+            "excl",
+            "incl",
+            "none_evidenced",
+            "unknown"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "actual",
+            "expected",
+            "recorded",
+            "contract",
+            "unknown"
+          ]
+        },
+        "cash_basis": {
+          "enum": [
+            "collected",
+            "accrued",
+            "unknown"
+          ]
+        },
+        "completeness": {
+          "enum": [
+            "full_year",
+            "partial",
+            "unknown"
+          ]
+        },
+        "valuation_basis": {
+          "enum": [
+            "market",
+            "book",
+            "cost",
+            "unknown"
+          ]
+        },
+        "valuation_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "component": {
+          "enum": [
+            "total",
+            "land",
+            "building",
+            "other"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "label"
+      ]
+    },
+    "dimRule": {
+      "type": "object",
+      "required": [
+        "dim",
+        "from_field",
+        "map"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "map": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "match": {
+          "enum": [
+            "exact",
+            "contains"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "dims": {
+      "type": "object",
+      "properties": {
+        "use": {
+          "enum": [
+            "investment",
+            "service",
+            "admin",
+            "development",
+            "unknown"
+          ]
+        },
+        "income_nature": {
+          "enum": [
+            "rent",
+            "operating",
+            "other",
+            "none",
+            "unknown"
+          ]
+        },
+        "ownership": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "owned",
+              "partial",
+              "usufruct",
+              "leased_land_project",
+              "managed_for_others",
+              "unknown"
+            ]
+          }
+        },
+        "waqf": {
+          "enum": [
+            "yes",
+            "no",
+            "unknown"
+          ]
+        },
+        "managed_for_others": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "fieldOverride": {
+      "type": "object",
+      "required": [
+        "s",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "s": {
+          "enum": [
+            "value",
+            "derived",
+            "zero_recorded",
+            "zero_confirmed",
+            "zero_as_missing",
+            "blank",
+            "filler",
+            "text",
+            "error",
+            "not_applicable",
+            "not_available"
+          ]
+        },
+        "v": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "s": {
+                "enum": [
+                  "value",
+                  "derived"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "v"
+            ],
+            "properties": {
+              "v": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "recordOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "enum": [
+            "asset",
+            "land_parcel",
+            "unit",
+            "contract",
+            "operating_activity",
+            "total",
+            "other"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "in_scope",
+            "isolated",
+            "excluded"
+          ]
+        },
+        "scope_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dims": {
+          "$ref": "#/$defs/dims"
+        },
+        "dims_evidence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "field_overrides": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/fieldName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/fieldOverride"
+          }
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "derivedField": {
+      "type": "object",
+      "required": [
+        "field",
+        "formula",
+        "when",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/fieldName"
+        },
+        "formula": {
+          "type": "string",
+          "minLength": 1
+        },
+        "when": {
+          "enum": [
+            "always",
+            "if_unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

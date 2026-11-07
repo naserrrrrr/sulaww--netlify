@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "apa/metrics_config.schema.json",
+  "title": "04_metrics_config.json — metric DSL (data-contract.md §5)",
+  "type": "object",
+  "required": ["contract_version", "periods", "valuation", "base_where", "metrics"],
+  "properties": {
+    "contract_version": {"type": "string", "const": "1.0"},
+    "currency": {"type": "string"},
+    "periods": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/period"}
+    },
+    "valuation": {
+      "type": "object",
+      "required": ["field"],
+      "properties": {
+        "field": {"anyOf": [{"$ref": "#/$defs/fieldName"}, {"type": "null"}]},
+        "year": {"type": ["string", "null"]},
+        "basis": {"type": ["string", "null"]},
+        "basis_code": {"type": ["string", "null"]},
+        "date_text": {"type": ["string", "null"]},
+        "label": {"type": ["string", "null"]},
+        "note": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "base_where": {"$ref": "#/$defs/where"},
+    "metrics": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/metric"}
+    },
+    "breakdowns": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/breakdown"}
+    },
+    "trend": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "label": {"type": ["string", "null"]},
+        "unit": {"type": "string"},
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["period", "field"],
+            "properties": {
+              "period": {"type": "string"},
+              "field": {"$ref": "#/$defs/fieldName"},
+              "label": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "where": {"$ref": "#/$defs/whereOrNull"},
+        "comparable": {"$ref": "#/$defs/comparable"},
+        "note": {"type": ["string", "null"]}
+      }
+    },
+    "filters": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1, "not": {"const": "period"}},
+      "uniqueItems": true
+    },
+    "parity_max_values_per_dim": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "fieldName": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"},
+    "fieldRef": {
+      "description": "A literal field name or a whole-string placeholder {REV} {REV_PREV} {EXP} {VAL}",
+      "anyOf": [
+        {"$ref": "#/$defs/fieldName"},
+        {"enum": ["{REV}", "{REV_PREV}", "{EXP}", "{VAL}"]}
+      ]
+    },
+    "scalar": {"type": ["string", "number", "boolean", "null"]},
+    "comparable": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["confirmed", "unverified", "not_comparable"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "period": {
+      "type": "object",
+      "required": ["id", "label", "rev_field"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "label": {"type": "string"},
+        "rev_field": {"anyOf": [{"$ref": "#/$defs/fieldName"}, {"type": "null"}]},
+        "exp_field": {"anyOf": [{"$ref": "#/$defs/fieldName"}, {"type": "null"}]},
+        "prev_id": {"type": ["string", "null"]},
+        "prev_rev_field": {"anyOf": [{"$ref": "#/$defs/fieldName"}, {"type": "null"}]},
+        "comparable_with_prev": {"$ref": "#/$defs/comparable"},
+        "meta": {"type": "object"}
+      }
+    },
+    "whereOrNull": {"anyOf": [{"$ref": "#/$defs/where"}, {"type": "null"}]},
+    "where": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "all": {"type": "array", "items": {"$ref": "#/$defs/where"}},
+        "any": {"type": "array", "items": {"$ref": "#/$defs/where"}},
+        "not": {"$ref": "#/$defs/where"},
+        "eq": {"type": "array", "prefixItems": [{"type": "string"}, {"$ref": "#/$defs/scalar"}], "minItems": 2, "maxItems": 2},
+        "in": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "array", "items": {"$ref": "#/$defs/scalar"}}], "minItems": 2, "maxItems": 2},
+        "has": {"type": "array", "prefixItems": [{"type": "string"}, {"$ref": "#/$defs/scalar"}], "minItems": 2, "maxItems": 2},
+        "known": {"$ref": "#/$defs/fieldRef"},
+        "status": {"type": "array", "prefixItems": [{"$ref": "#/$defs/fieldRef"}, {"type": "array", "items": {"enum": ["value", "derived", "zero_recorded", "zero_confirmed", "zero_as_missing", "blank", "filler", "text", "error", "not_applicable", "not_available"]}}], "minItems": 2, "maxItems": 2},
+        "gt": {"type": "array", "prefixItems": [{"$ref": "#/$defs/fieldRef"}, {"type": "number"}], "minItems": 2, "maxItems": 2}
+      },
+      "additionalProperties": false
+    },
+    "texts": {
+      "type": "object",
+      "properties": {
+        "label": {"type": ["string", "null"]},
+        "short_label": {"type": ["string", "null"]},
+        "definition": {"type": ["string", "null"]},
+        "scope_text": {"type": ["string", "null"]},
+        "basis": {"type": ["string", "null"]},
+        "valuation_date": {"type": ["string", "null"]},
+        "period_text": {"type": ["string", "null"]},
+        "source_text": {"type": ["string", "null"]},
+        "unavailable_reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "metric": {
+      "type": "object",
+      "required": ["id", "label", "kind", "unit"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "label": {"type": "string", "minLength": 1},
+        "short_label": {"type": ["string", "null"]},
+        "card": {"type": "boolean"},
+        "card_order": {"type": ["integer", "null"]},
+        "card_group": {"type": ["string", "null"]},
+        "kind": {"enum": ["count", "sum", "ratio", "diff", "growth", "concentration", "coverage"]},
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "num": {"$ref": "#/$defs/fieldRef"},
+        "den": {"$ref": "#/$defs/fieldRef"},
+        "a": {"$ref": "#/$defs/fieldRef"},
+        "b": {"$ref": "#/$defs/fieldRef"},
+        "prev": {"$ref": "#/$defs/fieldRef"},
+        "curr": {"$ref": "#/$defs/fieldRef"},
+        "fields": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/fieldRef"}},
+        "top": {"type": "integer", "minimum": 1},
+        "scale": {"type": "number"},
+        "where": {"$ref": "#/$defs/whereOrNull"},
+        "unit": {"enum": ["SAR", "%", "count", "asset"]},
+        "definition": {"type": ["string", "null"]},
+        "scope_text": {"type": ["string", "null"]},
+        "basis": {"type": ["string", "null"]},
+        "valuation_date": {"type": ["string", "null"]},
+        "period_text": {"type": ["string", "null"]},
+        "source_text": {"type": ["string", "null"]},
+        "unavailable_reason": {"type": ["string", "null"]},
+        "kind_tag": {"enum": ["fact", "derived"]},
+        "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"enum": ["sum", "concentration"]}}}, "then": {"required": ["field"]}},
+        {"if": {"properties": {"kind": {"const": "ratio"}}}, "then": {"required": ["num", "den"]}},
+        {"if": {"properties": {"kind": {"const": "diff"}}}, "then": {"required": ["a", "b"]}},
+        {"if": {"properties": {"kind": {"const": "coverage"}}}, "then": {"required": ["fields"]}}
+      ]
+    },
+    "breakdown": {
+      "type": "object",
+      "required": ["id", "label", "field", "by"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "label": {"type": "string"},
+        "short_label": {"type": ["string", "null"]},
+        "field": {"$ref": "#/$defs/fieldRef"},
+        "by": {"type": "string", "minLength": 1},
+        "where": {"$ref": "#/$defs/whereOrNull"},
+        "unit": {"type": "string"},
+        "definition": {"type": ["string", "null"]},
+        "scope_text": {"type": ["string", "null"]},
+        "basis": {"type": ["string", "null"]},
+        "valuation_date": {"type": ["string", "null"]},
+        "period_text": {"type": ["string", "null"]},
+        "source_text": {"type": ["string", "null"]},
+        "unavailable_reason": {"type": ["string", "null"]},
+        "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
+      }
+    }
+  }
+}

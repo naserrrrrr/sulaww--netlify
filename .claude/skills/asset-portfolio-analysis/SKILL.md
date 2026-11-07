@@ -55,18 +55,18 @@ RUN="outputs/portfolio-analysis/${STEM// /_}_$(date +%Y%m%d-%H%M)"; mkdir -p "$R
 
 | # | الخطوة | الأمر / ما تكتبه أنت | اقرأ قبلها |
 |---|---|---|---|
-| 1 | **فحص المصنف** | `python3 $SKILL_DIR/scripts/inspect_workbook.py "$SRC" --out "$RUN"` ثم اقرأ `01_workbook_map.md` كاملًا، وافتح الخلايا الغامضة بنفسك (openpyxl) قبل أي حكم | — |
+| 1 | **فحص المصنف** | `python3 $SKILL_DIR/scripts/inspect_workbook.py "$SRC" --out "$RUN"` ثم اقرأ `01_workbook_map.md` كاملًا، وافتح الخلايا الغامضة بنفسك (openpyxl) قبل أي حكم. إن حُوّل الملف (‎.xls/.ods) فاستخدم `file.converted.path` من `01_workbook_map.json` بدل `$SRC` في كل الخطوات التالية | — |
 | 2 | **السياق** | الجهة، وفترة البيانات، وتاريخ إعداد الدراسة (خصائص الملف أو العنوان)، والعملة، وتواريخ التقييمات وأساسها، مع مرجع لكل منها. لا تفترض أن سنة اليوم هي سنة البيانات | — |
 | 3 | **مطابقة الملف المرجعي** | إذا طابقت البنية «دراسة أصول الجمعية» كليًا أو جزئيًا، فطبّق ضوابطها بعد إعادة التحقق، واذكر ما لم يوجد منها | `references/reference-file-controls.md` |
-| 4 | **خريطة النطاق والتصنيف** | اكتب `$RUN/02_mapping.json`: قرار لكل ورقة (role/decision/reason)، والمصادر والأعمدة، و`field_meta` (الفترة، أساس الضريبة، فعلي أو متوقع، محصل أو مستحق، كامل أو جزئي)، وتصنيف كل سجل بدليله، والروابط المرفوضة أو المحتملة، والحقول المشتقة بسببها | `scope-and-classification.md`، `data-cleaning.md`، `data-contract.md` §3 |
+| 4 | **خريطة النطاق والتصنيف** | اكتب `$RUN/02_mapping.json`: قرار لكل ورقة (role/decision/reason)، والمصادر والأعمدة، و`field_meta` (الفترة، أساس الضريبة، فعلي أو متوقع، محصل أو مستحق، كامل أو جزئي)، وتصنيف كل سجل بدليله، والروابط المرفوضة أو المحتملة، والحقول المشتقة بسببها. **قواعد الكتابة:** اسم حقل واحد للمفهوم نفسه عبر المصادر (مثل `rev.2025.excl_vat`)؛ `field_meta` لكل حقل `rev.*`/`val.*`/`exp.*`؛ `data_rows.to` صريح؛ `id_rule.column = null` إذا كان الترقيم يُعاد في كل قسم؛ `exclude_rows` لصفوف الأقسام والإجماليات؛ أعمدة البيانات الشخصية `kind: "pii"` | `scope-and-classification.md`، `data-cleaning.md`، `data-contract.md` §3 |
 | 5 | **التطبيع** | `python3 $SKILL_DIR/scripts/normalize.py --xlsx "$SRC" --mapping "$RUN/02_mapping.json" --out "$RUN/03_records.json"` ثم راجع `issues` وكرر الخطوة 4 حتى تعكس السجلات الملف بأمانة | `data-cleaning.md` |
-| 6 | **المؤشرات** | `compute_metrics.py --init-config ...` ثم عدّل `04_metrics_config.json`: تسميات الفترات والتقييم، وقرار قابلية المقارنة مع سببه، ومؤشرات إضافية إن سمحت البيانات (الإشغال، التحصيل، الإيراد للمتر). بعدها `compute_metrics.py --records ... --config ... --out "$RUN/05_metrics.json"`، واستعمل `--filters '{...}' --print` لتحليل المجموعات | `metrics.md` |
+| 6 | **المؤشرات** | `compute_metrics.py --init-config --records "$RUN/03_records.json" --out "$RUN/04_metrics_config.json"` ثم **راجع** الإعداد وعدّله: حقل الإيراد المختار لكل فترة (لا تخلط حقل فترة جزئية مثل «حتى 2024/10» بحقل سنة كاملة)، وحقل التقييم وتاريخه، وتسميات البطاقات، وقرار قابلية المقارنة مع سببه (الافتراضي «غير متحقق» حين يغيب أساس الضريبة أو الاكتمال)، ومؤشرات إضافية إن سمحت البيانات (الإشغال، التحصيل، الإيراد للمتر). بعدها `compute_metrics.py --records ... --config ... --out "$RUN/05_metrics.json"`، واستعمل `--filters '{...}' --print` لتحليل المجموعات | `metrics.md` |
 | 7 | **التشخيص العميق** | تحليل على مستوى المحفظة، وكل مجموعة متجانسة، وكل أصل مؤثر: التركز، والأصول غير المدرة، والفرق بين الوزن والمساهمة، وقدم التقييمات، والنواقص، والتعارضات. لكل فجوة دليلها وأثرها وأسبابها، المثبت منها والمحتمل | `diagnosis-and-assessment.md` |
-| 8 | **السرد والتوصيات** | اكتب `$RUN/06_narrative.json`: خلاصة تنفيذية من 120 إلى 180 كلمة، وتقييم بأبعاد أربعة منفصلة دون درجات بلا معيار، وفجوات، وتوصيات بحقولها الكاملة، وخطة 30/60/90، وسيناريوهات أو سبب عدم إعدادها، وأسئلة لا تتجاوز ثلاثة، وطلبات بيانات | `recommendations-and-scenarios.md` |
+| 8 | **السرد والتوصيات** | اكتب `$RUN/06_narrative.json`: خلاصة تنفيذية من 120 إلى 180 كلمة، وتقييم بأبعاد أربعة منفصلة دون درجات بلا معيار، وفجوات، وتوصيات بحقولها الكاملة، وخطة 30/60/90، وسيناريوهات أو سبب عدم إعدادها، وأسئلة لا تتجاوز ثلاثة، وطلبات بيانات. التزم بالقواعد الصارمة في `data-contract.md` §6: أربعة بنود تقييم بالضبط، وأدلة الفجوات كائنات `{ref, kind}`، والسيناريوهات تحت `scenarios.items`، والامتدادات ببادئة `x_` | `recommendations-and-scenarios.md`، `data-contract.md` §6 |
 | 9 | **التحقق** | `python3 $SKILL_DIR/scripts/validate_analysis.py --run-dir "$RUN"`: أصلح حتى تصبح الأخطاء المانعة صفرًا. عالج كل تحذير أو برّره في `methodology_notes` | `delivery-checklist.md` |
-| 10 | **الداشبورد** | `build_dashboard.py --run-dir "$RUN"` ثم `validate_analysis.py --run-dir "$RUN" --xlsx "$SRC" --html "$RUN/dashboard.html"` ثم `node $SKILL_DIR/scripts/check_dashboard.mjs --html "$RUN/dashboard.html" --out "$RUN"`. **انظر بنفسك** إلى `screens/*.png` بأداة Read (سطح المكتب والجوال)، وأصلح ما يلزم ثم أعد البناء | `dashboard-spec.md` |
+| 10 | **الداشبورد** | `build_dashboard.py --run-dir "$RUN"` ثم `validate_analysis.py --run-dir "$RUN" --xlsx "$SRC" --html "$RUN/dashboard.html"` ثم `node $SKILL_DIR/scripts/check_dashboard.mjs --html "$RUN/dashboard.html" --out "$RUN"`. **انظر بنفسك** إلى `screens/*.png` بأداة Read (سطح المكتب والجوال)، وأصلح ما يلزم. بعد أي تعديل في 02 أو 04 أو 06 أعد السلسلة من الخطوة المعدّلة: (normalize ←) compute ← validate ← build ← validate --html ← check | `dashboard-spec.md` |
 | 11 | **المرفق الداعم** | `python3 $SKILL_DIR/scripts/export_workbook.py --run-dir "$RUN"` | — |
-| 12 | **نسخة سابقة** (إن وُجدت فعلًا) | `compare_versions.py --prev <RUN_OLD> --curr "$RUN" --out "$RUN/version_comparison.json"`، ثم أدرج النتيجة ومتابعة التوصيات في السرد وأعد البناء. لا تدّعِ نسخة سابقة غير متاحة | `updates-and-versioning.md` |
+| 12 | **نسخة سابقة** (إن وُجدت فعلًا) | `compare_versions.py --prev <RUN_OLD> --curr "$RUN" --out "$RUN/version_comparison.json"`، ثم انسخ `recommendation_followup` منه إلى `06_narrative.json`، ولا تغيّر حالة توصية إلى «منجز» إلا بدليل أو إفادة المستخدم، ولخّص المقارنة في `version_comparison`، ثم أعد التحقق والبناء. لا تدّعِ نسخة سابقة غير متاحة | `updates-and-versioning.md` |
 | 13 | **التسليم** | اكتب `$RUN/09_message.md` ورد على المستخدم بالقالب أدناه | `delivery-checklist.md` |
 
 **الأسئلة أثناء التشغيل:** في الجلسة الرئيسية اسأل بحد أقصى ثلاثة أسئلة مؤثرة دفعة واحدة، وتابع ما لا يعتمد على الإجابة. في وضع الوكيل الفرعي لا يمكنك السؤال أثناء التشغيل: أكمل بافتراضات موثقة في `assumptions`، وأعد الأسئلة في تقريرك النهائي.
@@ -91,6 +91,10 @@ RUN="outputs/portfolio-analysis/${STEM// /_}_$(date +%Y%m%d-%H%M)"; mkdir -p "$R
 - **صيغ بلا قيم مخزنة:** اذكر ذلك، ولا تعتمد الإجماليات قبل إعادة حسابها. أعد حساب التفاصيل من السجلات.
 - **فشل اختبار المتصفح:** أصلح الخلل. إن تعذر الإصلاح فسلّم الداشبورد مع ذكر ما لم يُختبر صراحة.
 - **مؤشر لا تكفي بياناته:** يظهر «غير قابل للاحتساب بالبيانات الحالية» مع السبب. لا صفر ولا تقدير.
+
+## صيانة المهارة
+
+`bash $SKILL_DIR/tests/run_tests.sh` يشغّل السلسلة كاملة على مصنف وهمي، مع مطابقة يدوية للأرقام واختبارات سلبية وتطابق محركي Python وJavaScript. شغّله بعد أي تعديل في السكربتات أو القالب.
 
 ## فهرس المراجع
 

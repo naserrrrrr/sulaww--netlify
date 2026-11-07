@@ -1,0 +1,2303 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex, nofollow">
+<title>لوحة محفظة الأصول</title>
+<style>
+/* ===== Tokens ===================================================================== */
+:root {
+  --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #FAFBFC;
+  --ink: #142230; --ink-2: #44546A; --muted: #626E7C;
+  --line: #E2E6EB; --line-2: #CBD3DC;
+  --navy: #12324A; --navy-2: #1D4A6B; --navy-soft: #EBF1F6;
+  --green: #0F5C4A; --green-soft: #E7F2EE;
+  --val: #2C6A9E; --val-2: #6F9BC4; --val-3: #A9C4DE;
+  --rev: #1F9A72; --rev-2: #62B99B; --rev-3: #A3D6C3;
+  --rest: #DDE2E8;
+  --red: #B42318; --red-bg: #FEF3F2; --red-line: #F2C4BE;
+  --na: #8A94A6; --na-ink: #556070; --na-bg: #F1F3F6;
+  --warn-ink: #7A4A00; --warn-bg: #FFF5E1; --warn-line: #EED6A6;
+  --ok-ink: #0F5C4A; --ok-bg: #E7F2EE;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(18, 50, 74, .05), 0 2px 8px rgba(18, 50, 74, .04);
+  --font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, "Noto Sans Arabic", "Geeza Pro", "DejaVu Sans", system-ui, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
+  font-size: 15px; line-height: 1.75; overflow-x: hidden;
+}
+h1, h2, h3, h4 { margin: 0; line-height: 1.4; color: var(--navy); }
+p { margin: 0; }
+button, select, input { font: inherit; color: inherit; }
+a { color: var(--navy-2); }
+bdi, .ltr { unicode-bidi: isolate; }
+.ltr { direction: ltr; }
+code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: .86em; background: var(--na-bg); border-radius: 4px; padding: 0 4px; direction: ltr; unicode-bidi: isolate; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 32px; }
+.skip { position: absolute; inset-inline-start: 8px; top: -60px; background: var(--navy); color: #fff; padding: 8px 14px; border-radius: 8px; z-index: 100; }
+.skip:focus { top: 8px; }
+:focus-visible { outline: 3px solid #3E7CB1; outline-offset: 2px; border-radius: 4px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.num { unicode-bidi: isolate; }
+
+/* ===== Buttons, pills, tags ======================================================= */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 16px;
+  border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); cursor: pointer;
+  font-weight: 600; font-size: 14px; color: var(--navy); white-space: nowrap;
+}
+.btn:hover { background: var(--navy-soft); }
+.btn-primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+.btn-primary:hover { background: var(--navy-2); }
+.btn-ghost { background: transparent; }
+.btn-link { border: 0; background: none; padding: 0; min-height: 0; color: var(--navy-2); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: inherit; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 10px;
+  font-size: 12.5px; font-weight: 600; line-height: 1.6; border: 1px solid transparent; max-width: 100%;
+}
+.kpi, .kpi-sub, .item, .chart-card, .plan-col, .assess, .summary-text, .dsec, .asset-detail, .meta-grid dd { overflow-wrap: anywhere; }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.tone-ok { color: var(--ok-ink); background: var(--ok-bg); }
+.tone-warn { color: var(--warn-ink); background: var(--warn-bg); border-color: var(--warn-line); }
+.tone-na { color: var(--na-ink); background: var(--na-bg); }
+.tone-na .dot { background: var(--na); }
+.tone-red { color: var(--red); background: var(--red-bg); border-color: var(--red-line); }
+.tone-neutral { color: var(--ink-2); background: var(--na-bg); }
+.tone-navy { color: var(--navy); background: var(--navy-soft); }
+.kind { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--ink-2); background: var(--surface); line-height: 1.7; vertical-align: middle; }
+.kind-fact { border-color: #BCD0E2; color: var(--navy-2); }
+.kind-derived { border-color: #B8DCCF; color: var(--green); }
+.kind-inference { border-color: #D9CFE6; color: #5B4A7A; }
+.kind-assumption { border-color: var(--warn-line); color: var(--warn-ink); }
+.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 1px 9px; border-radius: 7px; background: var(--na-bg); color: var(--ink-2); font-size: 12.5px; line-height: 1.8; }
+.chip .btn-link { font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ===== Draft banner =============================================================== */
+.draft-banner { background: var(--warn-bg); color: var(--warn-ink); border-bottom: 1px solid var(--warn-line); text-align: center; padding: 10px 16px; font-weight: 700; }
+
+/* ===== Identity header ============================================================ */
+.identity { background: var(--surface); border-top: 4px solid var(--navy); border-bottom: 1px solid var(--line); }
+.identity-in { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding-top: 28px; padding-bottom: 8px; }
+.eyebrow { color: var(--green); font-weight: 700; font-size: 13.5px; letter-spacing: 0; }
+.identity h1 { font-size: 30px; font-weight: 700; margin-top: 4px; }
+.identity h1.na { color: var(--na-ink); font-weight: 600; }
+.identity-sub { color: var(--ink-2); margin-top: 4px; }
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0; margin: 16px 0 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.meta-grid > div { padding: 12px 16px; border-inline-start: 1px solid var(--line); min-width: 0; }
+.meta-grid > div:first-child { border-inline-start: 0; }
+.meta-grid dt { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.meta-grid dd { margin: 2px 0 0; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; font-size: 14px; }
+.meta-grid dd .sub { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.meta-grid dd .fname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: right; }
+
+/* ===== Filter bar ================================================================= */
+.filterbar { position: sticky; top: 0; z-index: 30; background: rgba(255, 255, 255, .97); border-bottom: 1px solid var(--line); box-shadow: 0 2px 10px rgba(18, 50, 74, .05); }
+.filterbar-in { display: flex; align-items: flex-end; gap: 12px; padding-top: 10px; padding-bottom: 4px; flex-wrap: wrap; }
+.filter-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; flex: 1 1 auto; }
+.field { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+.field-label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.field.inline { flex-direction: row; align-items: center; gap: 8px; min-width: 0; }
+select, input[type="search"] {
+  min-height: 40px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); padding: 6px 12px; max-width: 100%;
+}
+select { padding-inline-end: 32px; }
+.filter-toggle { display: none; }
+.filter-scope { font-size: 13px; color: var(--ink-2); padding: 2px 0 10px; }
+.filter-scope strong { color: var(--navy); }
+
+/* ===== Sections =================================================================== */
+main { padding-bottom: 48px; }
+.section { margin-top: 36px; }
+.section > h2, .section-head h2 { font-size: 21px; font-weight: 700; padding-bottom: 10px; margin-bottom: 18px; border-bottom: 1px solid var(--line); position: relative; }
+.section > h2::after, .section-head h2::after { content: ""; position: absolute; inset-inline-start: 0; bottom: -1px; width: 56px; height: 3px; background: var(--green); border-radius: 2px; }
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+.section-head h2 { border-bottom: 0; margin-bottom: 0; }
+.section-head .field { margin-bottom: 10px; }
+.section-note { color: var(--ink-2); font-size: 13.5px; margin: -8px 0 16px; }
+.sub-h { font-size: 16px; font-weight: 700; margin: 22px 0 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+/* ===== Executive summary ========================================================== */
+.summary-text { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 26px; box-shadow: var(--shadow); }
+.summary-text p { font-size: 17px; line-height: 2; color: var(--ink); max-width: 82ch; }
+.summary-text p + p { margin-top: 10px; }
+.strengths { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.assess-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.assess { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; }
+.assess h4 { font-size: 15px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.assess p { font-size: 14px; color: var(--ink); }
+.assess .crit { font-size: 12.5px; color: var(--muted); }
+
+/* ===== KPI cards ================================================================== */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; min-width: 0; break-inside: avoid; }
+.kpi-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; min-width: 0; }
+.kpi-status { display: flex; flex-wrap: wrap; gap: 6px; }
+.kpi-status .pill { white-space: normal; }
+.kpi-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+.kpi-label { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.kpi-eyebrow { font-size: 12.5px; font-weight: 700; color: var(--warn-ink); }
+.kpi-value { font-size: 32px; font-weight: 700; color: var(--ink); line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.kpi-value .unit { font-size: 15px; font-weight: 600; color: var(--ink-2); margin-inline-start: 6px; }
+.kpi-value.is-na { font-size: 17px; font-weight: 700; color: var(--na-ink); display: flex; align-items: center; gap: 8px; line-height: 1.5; }
+.kpi-value.is-na::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; }
+.kpi-reason { font-size: 13px; color: var(--na-ink); }
+.kpi-def { font-size: 12.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kpi-meta { font-size: 12.5px; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.kpi-meta b { color: var(--ink); font-weight: 600; }
+.kpi-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 12px; }
+.kpi-sub { min-width: 0; }
+.kpi-sub + .kpi-sub { border-inline-start: 1px solid var(--line); padding-inline-start: 12px; }
+.kpi-sub .kpi-sub-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.kpi-sub .kpi-value { font-size: 30px; }
+.kpi-sub .kpi-value.is-na { font-size: 15px; }
+.kpi-substatus { font-size: 12px; color: var(--na-ink); line-height: 1.5; margin-top: 2px; }
+.kpi-substatus.warn { color: var(--warn-ink); }
+
+/* ===== Gaps & actions ============================================================= */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.col-h { font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; border-inline-start: 4px solid var(--line-2); break-inside: avoid; }
+.item.proven { border-inline-start-color: var(--red); }
+.item.action { border-inline-start-color: var(--green); }
+.item-head { display: flex; align-items: flex-start; gap: 10px; }
+.rank { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--navy-soft); color: var(--navy); font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.item h4 { font-size: 15.5px; font-weight: 700; color: var(--ink); }
+.item .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px; }
+.item p { font-size: 14px; color: var(--ink); margin-top: 4px; }
+.item .lbl { color: var(--muted); font-weight: 600; font-size: 13px; }
+.item .ev { margin-top: 8px; }
+.empty-note { color: var(--na-ink); background: var(--na-bg); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+
+/* ===== Charts ===================================================================== */
+.chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.chart-card { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; break-inside: avoid; }
+.chart-card.wide { grid-column: 1 / -1; }
+.chart-title { font-size: 15.5px; font-weight: 700; }
+.chart-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.chart-body { margin-top: 12px; min-width: 0; position: relative; }
+.chart-svg { display: block; width: 100%; height: auto; overflow: visible; direction: rtl; }
+.chart-svg text { font-family: var(--font); fill: var(--ink); }
+.chart-svg .lbl { font-size: 12.5px; fill: var(--ink); }
+.chart-svg .val { font-size: 12px; fill: var(--ink-2); font-weight: 600; }
+.chart-svg .na { fill: var(--na-ink); font-weight: 400; }
+.chart-svg .axis { stroke: var(--line-2); stroke-width: 1; }
+.chart-svg .grid { stroke: var(--line); stroke-width: 1; }
+.chart-svg .seg-txt { font-size: 12px; font-weight: 700; }
+.chart-svg .mark:hover path, .chart-svg .mark:hover rect.bar { opacity: .82; }
+.chart-empty { display: flex; gap: 10px; align-items: flex-start; background: var(--na-bg); color: var(--na-ink); border-radius: 10px; padding: 14px 16px; font-size: 14px; }
+.chart-empty::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; margin-top: 7px; }
+.chart-note { font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+.chart-note + .chart-note { margin-top: 2px; }
+.caveat { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-line); border-radius: 10px; padding: 8px 12px; font-size: 13px; margin-top: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.conc-block + .conc-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.conc-head { font-size: 13.5px; color: var(--ink); font-weight: 600; margin-bottom: 8px; }
+.conc-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 4px; font-size: 13px; }
+.conc-list li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.conc-list .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conc-list .cum { color: var(--muted); min-width: 92px; text-align: end; }
+.chart-data { margin-top: 12px; }
+.chart-data > summary { font-size: 13px; color: var(--navy-2); cursor: pointer; font-weight: 600; }
+.tip { position: fixed; z-index: 60; pointer-events: none; background: var(--navy); color: #fff; font-size: 12.5px; line-height: 1.6; padding: 6px 10px; border-radius: 8px; max-width: 280px; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); white-space: pre-line; }
+
+/* ===== Tables ===================================================================== */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-width: 100%; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 10px 12px; text-align: start; vertical-align: top; border-bottom: 1px solid var(--line); }
+thead th { background: var(--surface-2); color: var(--ink-2); font-weight: 700; font-size: 12.5px; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+tbody tr:last-child td { border-bottom: 0; }
+td.n, th.n { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.data-table td { color: var(--ink); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.search { position: relative; flex: 1 1 280px; max-width: 420px; }
+.search input { width: 100%; }
+.count-line { font-size: 13px; color: var(--ink-2); }
+th[data-sort] { padding: 0; }
+th[data-sort] .sort-btn { width: 100%; border: 0; background: none; cursor: pointer; padding: 10px 12px; text-align: start; font-weight: 700; font-size: 12.5px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+th.n[data-sort] .sort-btn { justify-content: flex-end; }
+th[data-sort] .sort-btn:hover { color: var(--navy); background: var(--navy-soft); }
+th[data-sort] .arr { font-size: 10px; color: var(--muted); width: 10px; }
+th[aria-sort="ascending"] .sort-btn, th[aria-sort="descending"] .sort-btn { color: var(--navy); }
+th .hsub { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+#asset-table th, #asset-table td { padding: 9px 10px; }
+#asset-table thead th { white-space: normal; }
+#asset-table td:first-child { min-width: 170px; }
+#asset-table th[data-sort] .sort-btn { white-space: normal; padding: 9px 10px; }
+tr[data-role="asset-row"] { cursor: pointer; }
+tr[data-role="asset-row"]:hover td { background: #F7F9FB; }
+tr[data-role="asset-row"]:focus-visible { outline: 3px solid #3E7CB1; outline-offset: -3px; }
+tr[data-role="asset-row"].is-selected td { background: var(--navy-soft); }
+.rname { font-weight: 600; color: var(--ink); }
+.rid { display: block; font-size: 11.5px; color: var(--muted); }
+.na-val { color: var(--na-ink); font-size: 12.5px; white-space: nowrap; }
+.na-val::before { content: "○ "; color: var(--na); }
+.zero-note { display: block; font-size: 11.5px; color: var(--muted); }
+.flag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 6px; background: var(--na-bg); color: var(--na-ink); margin: 1px 0 1px 4px; line-height: 1.7; }
+.flag.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.links-n { display: inline-flex; min-width: 24px; justify-content: center; border-radius: 999px; background: var(--navy-soft); color: var(--navy); font-weight: 700; font-size: 12px; padding: 0 8px; }
+
+/* ===== Assets layout + detail ===================================================== */
+.assets-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.asset-detail { background: var(--surface); border: 1px solid var(--line-2); border-top: 3px solid var(--navy); border-radius: var(--radius); box-shadow: 0 6px 24px rgba(18, 50, 74, .10); padding: 18px 22px 22px; min-width: 0; }
+.asset-detail[hidden] { display: none; }
+.detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.detail-head h3 { font-size: 18px; }
+.detail-sec { margin-top: 16px; }
+.detail-sec h4 { font-size: 14px; color: var(--navy); margin-bottom: 8px; }
+.kv { display: grid; grid-template-columns: minmax(96px, 170px) minmax(0, 1fr); gap: 4px 14px; font-size: 13.5px; margin: 0; }
+.kv dt { color: var(--muted); font-weight: 600; }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.kv dd .ev { display: block; font-size: 11.5px; color: var(--muted); }
+.mini-table { font-size: 12.5px; }
+.mini-table th, .mini-table td { padding: 6px 8px; }
+.cite { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.cite + .cite { margin-top: 8px; }
+.cite b { color: var(--ink); }
+
+/* ===== Plan ======================================================================= */
+.plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.plan-col { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); min-width: 0; }
+.plan-col > h3 { font-size: 15.5px; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.plan-badge { background: var(--navy); color: #fff; border-radius: 8px; padding: 0 10px; font-size: 13px; }
+.plan-col:nth-child(2) .plan-badge { background: var(--navy-2); }
+.plan-col:nth-child(3) .plan-badge { background: var(--green); }
+.plan-item { border-top: 1px solid var(--line); padding: 10px 0; break-inside: avoid; }
+.plan-item:first-of-type { border-top: 0; padding-top: 0; }
+.plan-item .act { font-weight: 700; font-size: 14px; color: var(--ink); }
+.plan-item .meta { font-size: 12.5px; color: var(--ink-2); }
+
+/* ===== Details ==================================================================== */
+.details-list { display: flex; flex-direction: column; gap: 10px; }
+details.dsec { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+details.dsec > summary { list-style: none; cursor: pointer; padding: 14px 18px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 10px; font-size: 15px; }
+details.dsec > summary::-webkit-details-marker { display: none; }
+details.dsec > summary::before { content: ""; width: 8px; height: 8px; border-left: 2px solid var(--navy-2); border-bottom: 2px solid var(--navy-2); transform: rotate(45deg); transition: transform .15s; flex: none; }
+details.dsec[open] > summary::before { transform: rotate(-45deg); margin-top: -4px; }
+details.dsec > summary .cnt { font-size: 12px; font-weight: 600; color: var(--ink-2); background: var(--na-bg); border-radius: 999px; padding: 0 9px; }
+details.dsec > summary .hint { font-weight: 400; font-size: 12.5px; color: var(--muted); margin-inline-start: auto; }
+.dbody { padding: 0 18px 18px; font-size: 14px; }
+.dbody h4 { font-size: 14.5px; margin: 18px 0 8px; }
+.dbody h4:first-child { margin-top: 4px; }
+.dbody ul, .dbody ol { margin: 4px 0; padding-inline-start: 22px; }
+.dbody li + li { margin-top: 3px; }
+.calc { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+.calc h5 { font-size: 14px; margin: 0; color: var(--ink); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.calc .kv { margin-top: 8px; }
+details.sub { margin-top: 8px; }
+details.sub > summary { cursor: pointer; font-size: 13px; color: var(--navy-2); font-weight: 600; }
+.legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; }
+.legend-grid > div { display: flex; gap: 8px; align-items: baseline; font-size: 13.5px; min-width: 0; }
+.legend-grid .pill { white-space: normal; }
+.narrow { max-width: 720px; }
+.id { white-space: nowrap; unicode-bidi: isolate; }
+footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; border-top: 1px solid var(--line); margin-top: 40px; }
+.fatal { margin: 40px auto; max-width: 720px; background: var(--red-bg); color: var(--red); border: 1px solid var(--red-line); border-radius: 12px; padding: 18px 20px; }
+
+/* ===== Responsive ================================================================= */
+@media (min-width: 1000px) {
+  .detail-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 28px; align-items: start; }
+}
+.section, .asset-detail { scroll-margin-top: 130px; }
+@media (max-width: 1100px) {
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .assess-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .chart-grid, .two-col, .plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .wrap { padding: 0 20px; }
+}
+@media (max-width: 720px) {
+  .filterbar { position: static; }
+  .filter-toggle { display: inline-flex; }
+  .filter-controls { display: none; flex-basis: 100%; }
+  .filterbar.open .filter-controls { display: flex; }
+  .filterbar-in { align-items: center; }
+  .field { min-width: 0; flex: 1 1 100%; }
+  .field select { width: 100%; }
+  .identity-in { flex-direction: column; gap: 12px; }
+}
+@media (max-width: 480px) {
+  body { font-size: 14.5px; }
+  .wrap { padding: 0 16px; }
+  .kpi-grid, .assess-grid { grid-template-columns: minmax(0, 1fr); }
+  .identity h1 { font-size: 23px; }
+  .meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .meta-grid > div { border-inline-start: 0; border-top: 1px solid var(--line); padding: 10px 12px; }
+  .meta-grid > div:nth-child(-n+2) { border-top: 0; }
+  .meta-grid > div:nth-child(even) { border-inline-start: 1px solid var(--line); }
+  .summary-text { padding: 16px; }
+  .summary-text p { font-size: 15.5px; line-height: 1.95; }
+  .kpi-value { font-size: 28px; }
+  .chart-card { padding: 14px; }
+  .section { margin-top: 28px; }
+  .kv { grid-template-columns: minmax(0, 1fr); }
+  .kv dt { margin-top: 6px; }
+  .conc-list li { grid-template-columns: 14px minmax(0, 1fr) auto; }
+  .conc-list .cum { display: none; }
+  .search { max-width: none; }
+}
+
+/* ===== Print ====================================================================== */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+  [data-print="hide"] { display: none !important; }
+  body { background: #fff; font-size: 12.5px; overflow: visible; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-shadow: none !important; }
+  .wrap { max-width: none; padding: 0; }
+  .filterbar { position: static; border: 0; background: #fff; box-shadow: none; }
+  .filter-scope { padding: 0 0 8px; }
+  .identity { border-top-width: 3px; }
+  .section { margin-top: 18px; }
+  .section > h2, .section-head h2 { break-after: avoid; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .assess-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chart-grid, .two-col { grid-template-columns: minmax(0, 1fr); }
+  .plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .kpi, .chart-card, .item, .plan-col, .assess, .summary-text { break-inside: avoid; page-break-inside: avoid; }
+  details:not([open]) { display: none; }
+  .chart-data { display: none; }
+  .tip { display: none !important; }
+  .kpi-def { -webkit-line-clamp: unset; display: block; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-print="hide">تخطَّ إلى المحتوى</a>
+<div class="draft-banner" id="draft-banner" role="status" hidden>مسودة — لم تجتز التحقق الآلي</div>
+
+<header class="identity" id="identity">
+  <div class="wrap identity-in">
+    <div>
+      <p class="eyebrow">دراسة محفظة الأصول — العرض التنفيذي لمجلس الإدارة</p>
+      <h1 id="entity-name">لوحة محفظة الأصول</h1>
+      <p class="identity-sub" id="identity-sub"></p>
+    </div>
+    <div data-print="hide">
+      <button type="button" class="btn btn-primary" data-action="print" aria-label="طباعة العرض التنفيذي">طباعة العرض التنفيذي</button>
+    </div>
+  </div>
+  <div class="wrap"><dl class="meta-grid" id="meta-grid"></dl></div>
+</header>
+
+<div class="filterbar" id="filterbar">
+  <div class="wrap filterbar-in">
+    <button type="button" class="btn btn-ghost filter-toggle" data-action="toggle-filters" aria-expanded="false" aria-controls="filter-controls" data-print="hide">المرشحات</button>
+    <div class="filter-controls" id="filter-controls" role="group" aria-label="مرشحات العرض" data-print="hide"></div>
+    <button type="button" class="btn btn-ghost" data-action="reset-filters" data-print="hide">إعادة ضبط المرشحات</button>
+  </div>
+  <div class="wrap"><p class="filter-scope" data-role="filter-scope" id="filter-scope" aria-live="polite"></p></div>
+</div>
+
+<main id="main" class="wrap" tabindex="-1">
+  <section class="section" id="sec-summary" aria-labelledby="h-summary">
+    <h2 id="h-summary">الخلاصة التنفيذية</h2>
+    <div class="summary-text" id="exec-summary"></div>
+    <h3 class="sub-h">التقييم العام حسب الأبعاد <span class="muted small">(وصف دون درجات)</span></h3>
+    <div class="assess-grid" id="assessment"></div>
+  </section>
+
+  <section class="section" id="sec-kpis" aria-labelledby="h-kpis">
+    <h2 id="h-kpis">المؤشرات الرئيسية</h2>
+    <p class="section-note" id="kpi-note"></p>
+    <div class="kpi-grid" id="kpi-grid"></div>
+  </section>
+
+  <section class="section" id="sec-priorities" aria-labelledby="h-priorities">
+    <h2 id="h-priorities">أهم الفجوات والإجراءات المطلوبة</h2>
+    <div class="two-col">
+      <div><h3 class="col-h">أهم ثلاث فجوات</h3><div class="stack" id="top-gaps"></div></div>
+      <div><h3 class="col-h">أهم ثلاثة إجراءات وقرارات</h3><div class="stack" id="top-actions"></div></div>
+    </div>
+  </section>
+
+  <section class="section" id="sec-charts" aria-labelledby="h-charts">
+    <div class="section-head">
+      <h2 id="h-charts">التوزيع والتركز والمقارنة</h2>
+      <label class="field inline" data-print="hide"><span class="field-label">توزيع القيمة والإيراد حسب</span>
+        <select id="bd-dim" data-role="breakdown-dim" aria-label="بُعد التوزيع"></select></label>
+    </div>
+    <div class="chart-grid" id="chart-grid"></div>
+  </section>
+
+  <section class="section" id="sec-assets" aria-labelledby="h-assets" data-print="hide">
+    <h2 id="h-assets">جدول الأصول والسجلات</h2>
+    <div class="toolbar">
+      <div class="search"><label class="sr-only" for="table-search">بحث في الجدول</label>
+        <input type="search" id="table-search" data-role="table-search" placeholder="ابحث بالاسم أو المعرف أو الموقع…" autocomplete="off"></div>
+      <p class="count-line" id="count-line" aria-live="polite"></p>
+    </div>
+    <div class="assets-layout" id="assets-layout">
+      <div class="table-wrap" id="asset-table-wrap">
+        <table data-role="asset-table" id="asset-table" aria-describedby="count-line"><caption class="sr-only">السجلات ضمن نطاق الدراسة والتصفية الحالية؛ اختر صفًا لعرض تفاصيله</caption><thead></thead><tbody></tbody></table>
+      </div>
+      <aside class="asset-detail" data-role="asset-detail" id="asset-detail" aria-labelledby="detail-title" tabindex="-1" hidden>
+        <div class="detail-head">
+          <h3 id="detail-title">تفاصيل السجل</h3>
+          <button type="button" class="btn btn-ghost" data-action="close-detail" aria-label="إغلاق التفاصيل">إغلاق</button>
+        </div>
+        <div id="detail-body"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section" id="sec-plan" aria-labelledby="h-plan">
+    <h2 id="h-plan">خطة التنفيذ: 30 و60 و90 يومًا</h2>
+    <div class="plan-grid">
+      <div class="plan-col" data-role="plan-30"><h3><span class="plan-badge">30 يومًا</span>المرحلة الأولى</h3><div class="plan-items"></div></div>
+      <div class="plan-col" data-role="plan-60"><h3><span class="plan-badge">60 يومًا</span>المرحلة الثانية</h3><div class="plan-items"></div></div>
+      <div class="plan-col" data-role="plan-90"><h3><span class="plan-badge">90 يومًا</span>المرحلة الثالثة</h3><div class="plan-items"></div></div>
+    </div>
+  </section>
+
+  <section class="section" id="sec-details" aria-labelledby="h-details">
+    <h2 id="h-details">التفاصيل والدراسة الكاملة</h2>
+    <div class="details-list" id="details-list"></div>
+  </section>
+</main>
+
+<footer class="foot"><div class="wrap" id="footer"></div></footer>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<noscript><p class="fatal">تحتاج هذه اللوحة إلى تفعيل JavaScript لعرض المؤشرات والرسوم. لا تتصل بأي خادم؛ كل البيانات مضمّنة في الملف.</p></noscript>
+
+<script>
+/*__APA_ENGINE__*/
+</script>
+<script>
+/*__APA_DATA__*/
+</script>
+<script>
+(function () {
+  'use strict';
+
+  // ---------------------------------------------------------------------------
+  // Bootstrap
+  // ---------------------------------------------------------------------------
+  var D = (typeof DATA !== 'undefined') ? DATA : null;
+  function fatal(msg) {
+    var main = document.getElementById('main');
+    var box = document.createElement('div');
+    box.className = 'fatal';
+    box.setAttribute('role', 'alert');
+    box.textContent = msg;
+    if (main) { main.textContent = ''; main.appendChild(box); } else document.body.appendChild(box);
+  }
+  if (!D || typeof D !== 'object') { fatal('لا توجد بيانات مضمّنة في اللوحة. ابنِ الملف عبر scripts/build_dashboard.py.'); return; }
+  if (typeof window.createEngine !== 'function') { fatal('محرك الحساب غير مضمّن في اللوحة (metric_engine.js).'); return; }
+
+  var hasOwn = Object.prototype.hasOwnProperty;
+  var ENG = window.createEngine(D);
+  var APA = {};
+  Object.keys(ENG).forEach(function (k) { APA[k] = ENG[k]; });
+  APA.data = D;
+  window.APA = APA;
+
+  var V = D.vocab || {};
+  var CFG = D.config || {};
+  var META = D.meta || {};
+  var NAR = D.narrative || {};
+  var FM = D.field_meta || {};
+  var M05 = (D.metrics && D.metrics.metrics) || {};
+  var RECORDS = Array.isArray(D.records) ? D.records : [];
+  var REC = {};
+  RECORDS.forEach(function (r) { if (r && r.id !== undefined) REC[r.id] = r; });
+  var ISSUES = Array.isArray(D.issues) ? D.issues : [];
+  var ISSUE = {};
+  ISSUES.forEach(function (x) { if (x && x.id) ISSUE[x.id] = x; });
+  var WB = D.workbook_map_summary || {};
+  var ANOM = {};
+  (WB.anomalies || []).forEach(function (a) { if (a && a.id) ANOM[a.id] = a; });
+  var KNOWN = ['value', 'derived', 'zero_recorded', 'zero_confirmed'];
+  var PERIODS = Array.isArray(CFG.periods) ? CFG.periods : [];
+  var FILTER_DIMS = Array.isArray(CFG.filters) ? CFG.filters.filter(function (d) { return typeof d === 'string' && d !== 'period'; }) : [];
+  var DEFAULT_PERIOD = ENG.defaultPeriod !== undefined ? ENG.defaultPeriod : (PERIODS[0] ? PERIODS[0].id : null);
+  var CUR = String(META.currency || CFG.currency || 'SAR').toUpperCase() === 'SAR' ? 'ر.س' : String(META.currency || CFG.currency);
+  var ASSET_TYPES = ['asset', 'land_parcel'];
+
+  // ---------------------------------------------------------------------------
+  // DOM helpers (text is always inserted with textContent)
+  // ---------------------------------------------------------------------------
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  // Bidi: a number that follows Arabic letters becomes an "Arabic number", so "47.0%" would show as "%47.0"
+  // and "-75,000" as "75,000-". Percentages and negative numbers are isolated for display only.
+  var NUM_RE = /-?\d[\d,]*(?:\.\d+)?%|-\d[\d,]*(?:\.\d+)?/g;
+  function numSpans(s) {
+    var out = [], last = 0, m;
+    NUM_RE.lastIndex = 0;
+    while ((m = NUM_RE.exec(s)) !== null) {
+      var tok = m[0], start = m.index;
+      if (tok.charAt(0) === '-' && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
+        if (tok.slice(-1) !== '%') continue;          // "REG-12", "2025-12-02": not a negative number
+        start += 1; tok = tok.slice(1);
+      }
+      out.push([start, start + tok.length]);
+    }
+    return out;
+  }
+  function isoNums(s) {
+    s = String(s);
+    var sp = numSpans(s);
+    if (!sp.length) return s;
+    var out = '', last = 0;
+    sp.forEach(function (x) { out += s.slice(last, x[0]) + '\u2066' + s.slice(x[0], x[1]) + '\u2069'; last = x[1]; });
+    return out + s.slice(last);
+  }
+  var NO_SPAN = { OPTION: 1, TITLE: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1 };
+  function addText(e, s) {
+    if (e.namespaceURI === 'http://www.w3.org/2000/svg') { e.appendChild(document.createTextNode(isoNums(s))); return; }
+    var sp = (NO_SPAN[e.tagName] || !/\d/.test(s)) ? [] : numSpans(s);
+    if (!sp.length) { e.appendChild(document.createTextNode(s)); return; }
+    var last = 0;
+    sp.forEach(function (x) {
+      if (x[0] > last) e.appendChild(document.createTextNode(s.slice(last, x[0])));
+      var b = document.createElement('span');
+      b.className = 'num';
+      b.textContent = s.slice(x[0], x[1]);
+      e.appendChild(b);
+      last = x[1];
+    });
+    if (last < s.length) e.appendChild(document.createTextNode(s.slice(last)));
+  }
+  function addOne(e, c) {
+    if (c === null || c === undefined || c === false || c === '') return;
+    if (Array.isArray(c)) { c.forEach(function (x) { addOne(e, x); }); return; }
+    if (typeof c === 'string' || typeof c === 'number') { addText(e, String(c)); return; }
+    e.appendChild(c);
+  }
+  function add(e) { for (var i = 1; i < arguments.length; i++) addOne(e, arguments[i]); }
+  function setAttrs(e, attrs, svg) {
+    if (!attrs) return;
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class' && !svg) e.className = v;
+      else if (k === 'text') { e.textContent = ''; addText(e, String(v)); }
+      else if (k.slice(0, 2) === 'on' && typeof v === 'function') e.addEventListener(k.slice(2), v);
+      else if (k === 'hidden' && !svg) e.hidden = !!v;
+      else e.setAttribute(k, v === true ? '' : String(v));
+    });
+  }
+  function h(tag, attrs) {
+    var e = document.createElement(tag);
+    setAttrs(e, attrs, false);
+    for (var i = 2; i < arguments.length; i++) add(e, arguments[i]);
+    return e;
+  }
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    setAttrs(e, attrs, true);
+    for (var i = 2; i < arguments.length; i++) add(e, arguments[i]);
+    return e;
+  }
+  function clear(e) { while (e && e.firstChild) e.removeChild(e.firstChild); return e; }
+  function str(x) {
+    if (x === null || x === undefined) return '';
+    if (typeof x === 'string') return x;
+    if (typeof x === 'number') return isFinite(x) ? fmtPlain(x) : '';
+    if (typeof x === 'boolean') return x ? 'نعم' : 'لا';
+    if (Array.isArray(x)) return x.map(str).filter(Boolean).join('، ');
+    if (typeof x === 'object') {
+      return str(x.text || x.label || x.title || x.item || x.reason || x.detail || x.ref || '');
+    }
+    return '';
+  }
+  function list(x) { return Array.isArray(x) ? x : (x === null || x === undefined || x === '' ? [] : [x]); }
+  function bdi(x) { return h('bdi', null, str(x)); }
+  function idc(x) { return h('bdi', { class: 'id' }, str(x)); }
+
+  // ---------------------------------------------------------------------------
+  // Formatting (Western digits, thousands separators; same rules as build_dashboard.py)
+  // ---------------------------------------------------------------------------
+  var NF = {};
+  function nf(d) { return NF[d] || (NF[d] = new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })); }
+  function fmtNumber(v, d) {
+    if (typeof v !== 'number' || !isFinite(v)) return '—';
+    var s = nf(d).format(v);
+    return /^-0(\.0+)?$/.test(s) ? s.slice(1) : s;
+  }
+  function fmtPlain(v) { return fmtNumber(v, Math.round(v) === v ? 0 : 2); }
+  function fmtMoneyNum(v) { return fmtNumber(v, (Math.abs(v) < 10 && Math.round(v) !== v) ? 2 : 0); }
+  function fmtMoney(v) { return fmtMoneyNum(v) + ' ' + CUR; }
+  function fmtPct(v) { return fmtNumber(v, Math.abs(v) < 10 ? 2 : 1) + '%'; }
+  function fmtShare(frac) { return fmtPct(frac * 100); }
+  function fmtCompact(v) {
+    var a = Math.abs(v);
+    if (a >= 1e9) return fmtNumber(v / 1e9, 2) + ' مليار';
+    if (a >= 1e6) return fmtNumber(v / 1e6, 2) + ' مليون';
+    if (a >= 1e4) return fmtNumber(v / 1e3, 1) + ' ألف';
+    return fmtMoneyNum(v);
+  }
+  function fmtUnit(v, unit) {
+    if (typeof v !== 'number' || !isFinite(v)) return '—';
+    if (unit === 'SAR') return fmtMoney(v);
+    if (unit === '%') return fmtPct(v);
+    return fmtPlain(v);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Vocabulary
+  // ---------------------------------------------------------------------------
+  var REASON_AR = {
+    num_unknown: 'البسط (الإيراد) غير معروف', den_unknown: 'المقام (التقييم) غير معروف', den_nonpositive: 'المقام صفر أو سالب',
+    a_unknown: 'الإيراد غير معروف', b_unknown: 'المصروف غير معروف', prev_unknown: 'إيراد الفترة السابقة غير معروف',
+    curr_unknown: 'إيراد الفترة الحالية غير معروف', both_unknown: 'الإيراد غير معروف في الفترتين',
+    nonpositive: 'قيمة صفرية أو سالبة (لا تدخل في التركز)', absent: 'الحقل غير موجود في السجل'
+  };
+  var DIM_AR = { income_generation: 'توليد الدخل', income_stability: 'استقرار الدخل', asset_utilization: 'كفاءة استخدام الأصول', data_quality: 'جودة البيانات' };
+  var LEVEL_AR = { high: 'مرتفع', medium: 'متوسط', low: 'منخفض', strong: 'قوي', moderate: 'متوسط', weak: 'ضعيف', info: 'معلوماتي' };
+  var RANKING_AR = { impact: 'الأثر', urgency: 'الإلحاح', evidence_strength: 'قوة الدليل', feasibility: 'قابلية التنفيذ', cost_level: 'التكلفة' };
+  var STATE_AR = { visible: 'ظاهرة', hidden: 'مخفية', veryHidden: 'مخفية بعمق' };
+  var DECISION_AR = { primary: 'رئيسية', supplementary: 'مكمّلة', isolated: 'معزولة', excluded: 'مستبعدة' };
+  var ROLE_AR = { asset_register: 'سجل أصول', activity_register: 'سجل أنشطة', allocation: 'تخصيص إيرادات', managed_properties: 'أملاك مدارة للغير', lookup: 'قوائم مرجعية', notes: 'ملاحظات', other: 'أخرى' };
+  var MATCH_AR = { probable: 'محتمل', confirmed: 'مؤكد', rejected: 'مرفوض' };
+  var SRC_AR = { file: 'ملف', web: 'مصدر ويب', user: 'إفادة المستخدم' };
+
+  function dimLabel(dim) { return (V.dims && V.dims[dim]) || (dim === 'record_type' ? 'نوع السجل' : dim); }
+  function dimValueLabel(dim, v) {
+    if (v === null || v === undefined || v === '__none__' || v === 'None') return 'غير مصنف';
+    if (typeof v === 'boolean') return v ? 'نعم' : 'لا';
+    var voc = V[dim];
+    if (voc && typeof voc === 'object' && !Array.isArray(voc) && typeof voc[v] === 'string') return voc[v];
+    return str(v);
+  }
+  function dimText(rec, dim) {
+    var v = rec && rec.dims ? rec.dims[dim] : null;
+    if (Array.isArray(v)) return v.length ? v.map(function (x) { return dimValueLabel(dim, x); }).join('، ') : 'غير مصنف';
+    return dimValueLabel(dim, v);
+  }
+  function statusAr(s) { return (V.status && V.status[s] && V.status[s].ar) || REASON_AR[s] || (s ? str(s) : 'غير متاح'); }
+  function metricStatus(st) {
+    var m = (V.metric_status && V.metric_status[st]) || null;
+    return { ar: m ? m.ar : (st ? str(st) : 'غير محدد'), tone: m ? m.tone : 'na' };
+  }
+  function reasonAr(r) { return REASON_AR[r] || statusAr(r); }
+  function fieldLabel(f) { return (FM[f] && FM[f].label) || str(f); }
+  function periodObj(id) { for (var i = 0; i < PERIODS.length; i++) if (PERIODS[i].id === id) return PERIODS[i]; return null; }
+  function periodLabel(id) { var p = periodObj(id); return p ? str(p.label || p.id) : str(id); }
+  function kindTag(kind) {
+    var k = V.statement_kind && V.statement_kind[kind];
+    if (!k) return null;
+    return h('span', { class: 'kind kind-' + kind, title: k.ar }, k.short || k.ar);
+  }
+  function pill(text, tone) { return h('span', { class: 'pill tone-' + (tone || 'neutral') }, h('span', { class: 'dot', 'aria-hidden': 'true' }), text); }
+  function statusPill(st) { var m = metricStatus(st); return pill(m.ar, m.tone); }
+  function levelAr(x) { return LEVEL_AR[x] || str(x); }
+  /** Arabic number-noun agreement for "record": 1 سجل واحد · 2 سجلان · 3–10 سجلات · otherwise سجلًا. */
+  function nRec(n) {
+    if (n === 1) return 'سجل واحد';
+    if (n === 2) return 'سجلان';
+    return n + ' ' + (n >= 3 && n <= 10 ? 'سجلات' : 'سجلًا');
+  }
+  function recNoun(n) { return n >= 3 && n <= 10 ? 'سجلات' : (n === 1 || n === 2 ? 'سجل' : 'سجلًا'); }
+
+  // ---------------------------------------------------------------------------
+  // Record helpers
+  // ---------------------------------------------------------------------------
+  function tvOf(rec, f) { var fl = rec && rec.fields; var t = (fl && f && hasOwn.call(fl, f)) ? fl[f] : null; return (t && typeof t === 'object') ? t : null; }
+  function isKnown(rec, f) { var t = tvOf(rec, f); return !!t && KNOWN.indexOf(t.s) >= 0 && typeof t.v === 'number'; }
+  function fv(rec, f) { return isKnown(rec, f) ? tvOf(rec, f).v : null; }
+  function recName(id) { var r = REC[id]; return r ? str(r.name || r.id) : str(id); }
+  function isAssetType(rec) { return rec && ASSET_TYPES.indexOf(rec.record_type) >= 0; }
+  var ID_TOKEN = /[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+/g;
+  function idsIn(s) {
+    var out = [];
+    String(s || '').replace(ID_TOKEN, function (m) { if (hasOwn.call(REC, m) && out.indexOf(m) < 0) out.push(m); return m; });
+    return out;
+  }
+
+  function fmtFieldValue(f, t) {
+    if (!t || typeof t !== 'object') return h('span', { class: 'na-val' }, 'غير موجود');
+    var m = FM[f] || {};
+    var v = t.v;
+    if (v === null || v === undefined || (KNOWN.indexOf(t.s) < 0 && typeof v === 'number')) {
+      return h('span', { class: 'na-val' }, statusAr(t.s));
+    }
+    if (typeof v === 'number') {
+      var grp = m.group;
+      if (m.unit === 'SAR' || grp === 'revenue' || grp === 'valuation' || grp === 'expense') return h('span', { class: 'num' }, fmtMoney(v));
+      if (m.unit === 'm2' || grp === 'area') return h('span', null, h('span', { class: 'num' }, fmtPlain(v)), ' م²');
+      if (m.unit === '%') return h('span', { class: 'num' }, fmtPct(v));
+      return h('span', { class: 'num' }, fmtPlain(v));
+    }
+    if (typeof v === 'boolean') return v ? 'نعم' : 'لا';
+    if (typeof v === 'string') {
+      if (t.calendar === 'hijri' && t.hijri) return v + ' (هجري ' + str(t.hijri) + ')';
+      return v;
+    }
+    return str(v);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Citations: which gaps / recommendations cite each record
+  // ---------------------------------------------------------------------------
+  var GAPS = list(NAR.gaps).filter(function (g) { return g && typeof g === 'object'; });
+  var RECS = list(NAR.recommendations).filter(function (r) { return r && typeof r === 'object'; });
+  var GAP = {}; GAPS.forEach(function (g) { if (g.id) GAP[g.id] = g; });
+  var RECO = {}; RECS.forEach(function (r) { if (r.id) RECO[r.id] = r; });
+  function evRefs(ev) { return list(ev).map(function (e) { return (e && typeof e === 'object') ? str(e.ref) : str(e); }); }
+  function groupScope(scope) {
+    var m = /^\s*group\s*:\s*([A-Za-z_]+)\s*=\s*(.+?)\s*$/.exec(str(scope));
+    return m ? { dim: m[1], value: m[2] } : null;
+  }
+  function inGroup(rec, g) {
+    var v = rec && rec.dims ? rec.dims[g.dim] : (g.dim === 'record_type' && rec ? rec.record_type : null);
+    if (g.dim === 'record_type') v = rec.record_type;
+    if (Array.isArray(v)) return v.map(String).indexOf(g.value) >= 0;
+    return v !== null && v !== undefined && String(v) === g.value;
+  }
+  var CITES = {};
+  function cite(id, entry) {
+    if (!CITES[id]) CITES[id] = [];
+    var dup = CITES[id].some(function (c) { return c.type === entry.type && c.item === entry.item; });
+    if (!dup) CITES[id].push(entry);
+  }
+  GAPS.forEach(function (g) {
+    var texts = [str(g.scope)].concat(evRefs(g.evidence));
+    texts.forEach(function (t) { idsIn(t).forEach(function (id) { cite(id, { type: 'gap', item: g, how: 'direct' }); }); });
+    var gs = groupScope(g.scope);
+    if (gs) RECORDS.forEach(function (r) { if (r.scope === 'in_scope' && inGroup(r, gs)) cite(r.id, { type: 'gap', item: g, how: 'group' }); });
+  });
+  RECS.forEach(function (rc) {
+    var texts = [str(rc.target), str(rc.scope)].concat(evRefs(rc.evidence)).concat(list(rc.asset_ids).map(str));
+    texts.forEach(function (t) { idsIn(t).forEach(function (id) { cite(id, { type: 'rec', item: rc, how: 'direct' }); }); });
+    list(rc.gap_ids).forEach(function (gid) {
+      Object.keys(CITES).forEach(function (id) {
+        if (CITES[id].some(function (c) { return c.type === 'gap' && c.item.id === gid && c.how === 'direct'; })) cite(id, { type: 'rec', item: rc, how: 'via_gap' });
+      });
+    });
+  });
+  function citeCount(id) { return (CITES[id] || []).length; }
+
+  // ---------------------------------------------------------------------------
+  // Evidence rendering
+  // ---------------------------------------------------------------------------
+  function metricShort(mid) { var r = M05[mid]; return r ? str(r.short_label || r.label || mid) : str(mid); }
+  function evidenceChip(e) {
+    var ref = (e && typeof e === 'object') ? str(e.ref) : str(e);
+    var kind = (e && typeof e === 'object') ? e.kind : null;
+    if (!ref) return null;
+    var chip = h('span', { class: 'chip' });
+    if (kind) add(chip, kindTag(kind));
+    var m = /^m:([A-Za-z0-9_\-]+)$/.exec(ref);
+    if (m) {
+      var r = M05[m[1]];
+      var val = r ? (r.value === null || r.value === undefined ? 'غير قابل للاحتساب' : fmtUnit(r.value, r.unit)) : 'غير متاح';
+      add(chip, 'مؤشر: ' + metricShort(m[1]) + ' — ');
+      add(chip, h('span', { class: 'num' }, val));
+      if (r && r.definition) chip.setAttribute('title', str(r.definition));
+      return chip;
+    }
+    if (ISSUE[ref]) { add(chip, bdi(ref)); chip.setAttribute('title', str(ISSUE[ref].detail)); add(chip, ' مشكلة بيانات'); return chip; }
+    if (ANOM[ref]) { add(chip, bdi(ref)); chip.setAttribute('title', str(ANOM[ref].detail)); add(chip, ' ملاحظة على المصنف'); return chip; }
+    if (REC[ref]) { add(chip, recButton(ref)); return chip; }
+    add(chip, bdi(ref));
+    return chip;
+  }
+  function evidenceChips(ev) {
+    var items = list(ev).map(evidenceChip).filter(Boolean);
+    return items.length ? h('div', { class: 'chips' }, items) : null;
+  }
+  function recButton(id, label) {
+    return h('button', { type: 'button', class: 'btn-link', 'data-action': 'open-record', 'data-record-ref': id,
+      onclick: function () { openDetail(id, null); } }, label || recName(id));
+  }
+  function scopeNodes(scope) {
+    var s = str(scope).trim();
+    if (!s) return 'غير محدد';
+    if (s === 'portfolio') return 'المحفظة كاملة';
+    var g = groupScope(s);
+    if (g) return 'مجموعة: ' + dimLabel(g.dim) + ' = ' + dimValueLabel(g.dim, g.value);
+    var ids = idsIn(s);
+    if (!ids.length) return s;
+    var out = [];
+    ids.forEach(function (id, i) { if (i) out.push('، '); out.push(recButton(id)); });
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // State & filters
+  // ---------------------------------------------------------------------------
+  var state = { filters: { period: DEFAULT_PERIOD }, search: '', sort: { key: 'value', dir: -1 }, bdDim: null, detailId: null, last: null, printing: false };
+  FILTER_DIMS.forEach(function (d) { state.filters[d] = null; });
+  var OPTS = {};  // dim -> [{key, value, label, n}]
+
+  function buildFilterOptions() {
+    var base = [];
+    try { base = ENG.filterRecords({ period: DEFAULT_PERIOD }); } catch (e) { base = RECORDS.filter(function (r) { return r.scope === 'in_scope'; }); }
+    FILTER_DIMS.forEach(function (dim) {
+      var seen = {};
+      var opts = [];
+      base.forEach(function (r) {
+        var v = r.dims ? r.dims[dim] : null;
+        list(v).forEach(function (x) {
+          if (x === null || x === undefined || typeof x === 'object') return;
+          var key = String(x);
+          if (!hasOwn.call(seen, key)) { seen[key] = { key: key, value: x, label: dimValueLabel(dim, x), n: 0 }; opts.push(seen[key]); }
+          seen[key].n += 1;
+        });
+      });
+      opts.sort(function (a, b) { return a.label.localeCompare(b.label, 'ar'); });
+      OPTS[dim] = opts;
+    });
+  }
+  function buildFilterControls() {
+    var box = clear($('#filter-controls'));
+    var ps = h('select', { 'data-filter': 'period', id: 'f-period', 'aria-label': 'الفترة' });
+    if (!PERIODS.length) add(ps, h('option', { value: '' }, 'لا توجد فترات إيراد'));
+    PERIODS.forEach(function (p) { add(ps, h('option', { value: str(p.id) }, str(p.label || p.id))); });
+    ps.addEventListener('change', function () { state.filters.period = ps.value || DEFAULT_PERIOD; render(); });
+    add(box, h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'الفترة'), ps));
+    FILTER_DIMS.forEach(function (dim) {
+      var sel = h('select', { 'data-filter': dim, id: 'f-' + dim, 'aria-label': dimLabel(dim) });
+      add(sel, h('option', { value: '' }, 'الكل'));
+      (OPTS[dim] || []).forEach(function (o) { add(sel, h('option', { value: o.key }, o.label + ' (' + o.n + ')')); });
+      sel.addEventListener('change', function () {
+        var o = (OPTS[dim] || []).filter(function (x) { return x.key === sel.value; })[0];
+        state.filters[dim] = o ? o.value : null;
+        render();
+      });
+      add(box, h('label', { class: 'field' }, h('span', { class: 'field-label' }, dimLabel(dim)), sel));
+    });
+  }
+  function syncSelects() {
+    var ps = $('select[data-filter="period"]');
+    if (ps) ps.value = state.filters.period === null || state.filters.period === undefined ? '' : String(state.filters.period);
+    FILTER_DIMS.forEach(function (dim) {
+      var sel = $('select[data-filter="' + dim + '"]');
+      if (sel) sel.value = state.filters[dim] === null || state.filters[dim] === undefined ? '' : String(state.filters[dim]);
+    });
+    var active = FILTER_DIMS.filter(function (d) { return state.filters[d] !== null && state.filters[d] !== undefined; }).length;
+    var tg = $('[data-action="toggle-filters"]');
+    if (tg) tg.textContent = active ? 'المرشحات (' + active + ' نشط)' : 'المرشحات';
+  }
+  function getFilters() {
+    var out = { period: state.filters.period };
+    FILTER_DIMS.forEach(function (d) { out[d] = state.filters[d] === undefined ? null : state.filters[d]; });
+    return out;
+  }
+  function setFilters(obj) {
+    obj = obj || {};
+    if (hasOwn.call(obj, 'period')) {
+      var p = obj.period;
+      state.filters.period = (p === null || p === undefined || p === '' || !periodObj(p)) ? DEFAULT_PERIOD : p;
+    }
+    FILTER_DIMS.forEach(function (d) {
+      if (!hasOwn.call(obj, d)) return;
+      var v = obj[d];
+      if (v === null || v === undefined || v === '') { state.filters[d] = null; return; }
+      var o = (OPTS[d] || []).filter(function (x) { return x.value === v || x.key === String(v); })[0];
+      state.filters[d] = o ? o.value : v;
+    });
+    syncSelects();
+    return getFilters();
+  }
+  function resetFilters() {
+    state.filters.period = DEFAULT_PERIOD;
+    FILTER_DIMS.forEach(function (d) { state.filters[d] = null; });
+    state.search = '';
+    var s = $('input[data-role="table-search"]');
+    if (s) s.value = '';
+    syncSelects();
+    render();
+  }
+  function scopeText(all) {
+    var f = all.filters || {};
+    var parts = ['الفترة ' + periodLabel(f.period)];
+    var any = false;
+    FILTER_DIMS.forEach(function (d) {
+      if (f[d] !== null && f[d] !== undefined) { any = true; parts.push(dimLabel(d) + ': ' + dimValueLabel(d, f[d])); }
+    });
+    if (!any) parts.push('جميع ' + (FILTER_DIMS.length ? FILTER_DIMS.map(dimLabel).join(' و') : 'السجلات') + ' (دون تصفية إضافية)');
+    var n = (all.record_ids || all.records || []).length;
+    var total = (META.counts && META.counts.in_scope !== undefined) ? META.counts.in_scope : RECORDS.filter(function (r) { return r.scope === 'in_scope'; }).length;
+    return { lead: 'نطاق التصفية: ', body: parts.join(' · '), tail: ' — ' + n + ' من ' + total + ' ' + recNoun(total) + ' ضمن نطاق الدراسة' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Static sections (rendered once)
+  // ---------------------------------------------------------------------------
+  function renderIdentity() {
+    var ent = META.entity;
+    var h1 = $('#entity-name');
+    if (ent) { h1.textContent = str(ent); h1.classList.remove('na'); }
+    else { h1.textContent = 'الجهة غير مذكورة في الملف'; h1.classList.add('na'); }
+    document.title = (ent ? str(ent) + ' — ' : '') + 'لوحة محفظة الأصول';
+    var vs = D.validation || {};
+    var sub = clear($('#identity-sub'));
+    add(sub, 'لوحة تفاعلية تعمل دون اتصال؛ كل رقم فيها محسوب من محرك واحد مضمّن من سجلات الملف. ');
+    if (META.draft) add(sub, pill('مسودة — لم تجتز التحقق الآلي', 'warn'));
+    else if (vs.available) add(sub, pill('اجتازت التحقق الآلي' + (vs.warning_count ? ' (' + (vs.warning_count === 1 ? 'تنبيه واحد' : vs.warning_count === 2 ? 'تنبيهان' : vs.warning_count + (vs.warning_count <= 10 ? ' تنبيهات' : ' تنبيهًا')) + ')' : ''), 'ok'));
+    if (META.draft) $('#draft-banner').hidden = false;
+
+    var dl = clear($('#meta-grid'));
+    function item(label, value, subText) {
+      add(dl, h('div', null, h('dt', null, label), h('dd', null, value, subText ? h('span', { class: 'sub' }, subText) : null)));
+    }
+    var counts = META.counts || {};
+    item('فترة البيانات', META.data_period ? str(META.data_period) : 'غير محددة في الملف', META.data_period_evidence ? 'المصدر: ' + str(META.data_period_evidence) : null);
+    item('تاريخ إعداد الدراسة', META.study_date ? h('span', { class: 'num' }, str(META.study_date)) : 'غير محدد', META.study_date_basis ? str(META.study_date_basis) : null);
+    item('تاريخ التحليل', h('span', { class: 'num' }, str(META.analysis_date || '')), 'لا يُفترض أنه سنة البيانات');
+    var vl = META.valuation || CFG.valuation || {};
+    item('التقييم المعتمد', vl.field ? str(vl.label || vl.year) : 'لا يوجد تقييم إجمالي', vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || ''));
+    item('نطاق العرض', (counts.in_scope !== undefined ? nRec(counts.in_scope) : '—') + ' ضمن نطاق الدراسة',
+      'خارج المؤشرات: معزول ' + (counts.isolated || 0) + ' · مستبعد ' + (counts.excluded || 0));
+    item('الملف المصدر', META.file_name ? h('span', { class: 'fname', title: str(META.file_name) }, str(META.file_name)) : 'غير معروف', META.sha256_short ? h('span', null, 'البصمة: ', h('code', null, str(META.sha256_short))) : null);
+  }
+
+  function renderSummary() {
+    var box = clear($('#exec-summary'));
+    var txt = str(NAR.executive_summary).trim();
+    if (!txt) add(box, h('p', { class: 'muted' }, 'لم تُكتب الخلاصة التنفيذية بعد.'));
+    else txt.split(/\n\s*\n/).forEach(function (p) { add(box, h('p', null, p.trim())); });
+    var st = list(NAR.strengths).filter(Boolean);
+    if (st.length) {
+      var sb = h('div', { class: 'strengths' }, h('span', { class: 'lbl small muted' }, 'نقاط القوة:'));
+      st.forEach(function (s) { add(sb, h('span', { class: 'chip' }, kindTag(s && s.kind), str(s && s.text !== undefined ? s.text : s))); });
+      add(box, sb);
+    }
+    var grid = clear($('#assessment'));
+    var byDim = {};
+    list(NAR.assessment).forEach(function (a) { if (a && a.dimension) byDim[a.dimension] = a; });
+    var dims = Object.keys(DIM_AR).concat(Object.keys(byDim).filter(function (k) { return !hasOwn.call(DIM_AR, k); }));
+    dims.forEach(function (dim) {
+      var a = byDim[dim];
+      add(grid, h('article', { class: 'assess' },
+        h('h4', null, DIM_AR[dim] || dim, a ? kindTag(a.kind) : null),
+        a ? h('p', null, str(a.judgment)) : h('p', { class: 'muted' }, 'لم يُقيَّم هذا البعد'),
+        a ? h('p', { class: 'crit' }, a.criterion ? 'المعيار: ' + str(a.criterion) : 'حكم وصفي — لا يوجد معيار معتمد للمقارنة') : null,
+        a ? evidenceChips(a.evidence) : null));
+    });
+  }
+
+  var SEV_ORDER = { high: 0, medium: 1, low: 2 };
+  function topGaps() {
+    var ids = list(NAR.top_gaps);
+    var out = ids.map(function (id) { return GAP[id]; }).filter(Boolean);
+    if (!out.length) out = GAPS.slice().sort(function (a, b) { return (SEV_ORDER[a.severity] || 3) - (SEV_ORDER[b.severity] || 3); });
+    return out.slice(0, 3);
+  }
+  function topActions() {
+    var ids = list(NAR.top_actions);
+    var out = ids.map(function (id) { return RECO[id]; }).filter(Boolean);
+    if (!out.length) out = RECS.slice().sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
+    return out.slice(0, 3);
+  }
+  function provenBadge(g) {
+    return g.is_proven_problem ? pill('مشكلة مثبتة', 'red') : pill('يحتاج تحقق', 'neutral');
+  }
+  function renderPriorities() {
+    var gbox = clear($('#top-gaps'));
+    var tg = topGaps();
+    if (!tg.length) add(gbox, h('p', { class: 'empty-note' }, 'لم تُحدد فجوات في السرد.'));
+    tg.forEach(function (g, i) {
+      var impact = g.impact && typeof g.impact === 'object' ? str(g.impact.text) : str(g.impact);
+      var causes = g.proven_cause ? ['السبب المثبت: ' + str(g.proven_cause)] :
+        (list(g.possible_causes).length ? ['أسباب محتملة: ' + list(g.possible_causes).map(str).join('؛ ')] : []);
+      add(gbox, h('article', { class: 'item' + (g.is_proven_problem ? ' proven' : ''), 'data-role': 'top-gap', 'data-gap-id': str(g.id) },
+        h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, str(g.title))),
+        h('div', { class: 'badges' }, provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
+        h('p', null, h('span', { class: 'lbl' }, 'النطاق: '), scopeNodes(g.scope)),
+        impact ? h('p', null, h('span', { class: 'lbl' }, 'الأثر: '), impact) : null,
+        causes.length ? h('p', null, causes[0]) : null,
+        list(g.verification_needed).length ? h('p', null, h('span', { class: 'lbl' }, 'يلزم للتحقق: '), list(g.verification_needed).map(str).join('؛ ')) : null,
+        g.proposed_action ? h('p', null, h('span', { class: 'lbl' }, 'الإجراء المقترح: '), str(g.proposed_action)) : null,
+        h('div', { class: 'ev' }, evidenceChips(g.evidence))));
+    });
+    var abox = clear($('#top-actions'));
+    var ta = topActions();
+    if (!ta.length) add(abox, h('p', { class: 'empty-note' }, 'لم تُحدد توصيات في السرد.'));
+    ta.forEach(function (r, i) {
+      var gl = list(r.gap_ids).map(function (gid) { return GAP[gid] ? str(gid) + ' — ' + str(GAP[gid].title) : str(gid); }).join('؛ ');
+      var rk = r.ranking && typeof r.ranking === 'object' ? r.ranking : {};
+      add(abox, h('article', { class: 'item action', 'data-role': 'top-action', 'data-rec-id': str(r.id) },
+        h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, str(r.first_action || r.target))),
+        h('div', { class: 'badges' }, r.target ? pill(str(r.target), 'navy') : null,
+          Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).slice(0, 3).map(function (k) { return pill(RANKING_AR[k] + ': ' + levelAr(rk[k]), 'neutral'); })),
+        r.problem ? h('p', null, h('span', { class: 'lbl' }, 'المشكلة: '), str(r.problem)) : null,
+        h('p', null, h('span', { class: 'lbl' }, 'المسؤول: '), str(r.owner_role || 'غير محدد'), r.duration ? ' · ' : null, r.duration ? h('span', { class: 'lbl' }, 'المدة: ') : null, r.duration ? str(r.duration) : null),
+        r.expected_impact ? h('p', null, h('span', { class: 'lbl' }, 'الأثر المتوقع: '), str(r.expected_impact)) : null,
+        r.approval_required ? h('p', null, h('span', { class: 'lbl' }, 'الاعتماد المطلوب: '), str(r.approval_required)) : null,
+        gl ? h('p', { class: 'small muted' }, 'مرتبطة بالفجوات: ' + gl) : null,
+        h('div', { class: 'ev' }, evidenceChips(r.evidence))));
+    });
+  }
+
+  function renderPlan() {
+    var plan = NAR.plan && typeof NAR.plan === 'object' ? NAR.plan : {};
+    [['d30', 'plan-30'], ['d60', 'plan-60'], ['d90', 'plan-90']].forEach(function (p) {
+      var col = $('[data-role="' + p[1] + '"] .plan-items');
+      clear(col);
+      var items = list(plan[p[0]]).filter(Boolean);
+      if (!items.length) add(col, h('p', { class: 'empty-note' }, 'لا توجد بنود لهذه المرحلة.'));
+      items.forEach(function (it) {
+        var rc = it.rec_id ? RECO[it.rec_id] : null;
+        add(col, h('div', { class: 'plan-item' },
+          h('p', { class: 'act' }, str(it.action)),
+          it.deliverable ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'المخرج: '), str(it.deliverable)) : null,
+          h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'المسؤول: '), str(it.owner_role || (rc && rc.owner_role) || 'غير محدد')),
+          it.rec_id ? h('p', { class: 'meta' }, h('span', { class: 'lbl' }, 'التوصية: '), str(it.rec_id) + (rc ? ' — ' + str(rc.target || rc.first_action) : '')) : null));
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // KPI cards
+  // ---------------------------------------------------------------------------
+  function cardGroups() {
+    var specs = list(CFG.metrics).filter(function (m) { return m && m.card === true; });
+    var groups = [];
+    var byKey = {};
+    specs.forEach(function (m, i) {
+      var key = m.card_group || m.id;
+      if (!byKey[key]) { byKey[key] = { key: key, specs: [], order: Infinity, idx: i }; groups.push(byKey[key]); }
+      byKey[key].specs.push(m);
+      var o = typeof m.card_order === 'number' ? m.card_order : 999;
+      if (o < byKey[key].order) byKey[key].order = o;
+    });
+    groups.forEach(function (g) { g.specs.sort(function (a, b) { return (a.card_order === null || a.card_order === undefined ? 999 : a.card_order) - (b.card_order === null || b.card_order === undefined ? 999 : b.card_order); }); });
+    groups.sort(function (a, b) { return a.order - b.order || a.idx - b.idx; });
+    return groups.slice(0, 8);
+  }
+  function naText(r) {
+    if (r.status === 'empty') return (V.metric_status && V.metric_status.empty && V.metric_status.empty.ar) || 'لا توجد سجلات ضمن التصفية الحالية';
+    if (r.status === 'not_comparable') return 'غير قابل للمقارنة';
+    return 'غير قابل للاحتساب بالبيانات الحالية';
+  }
+  function valueNode(r) {
+    var v = r.value;
+    var known = typeof v === 'number' && isFinite(v);
+    var el = h('div', { class: 'kpi-value' + (known ? '' : ' is-na'), 'data-role': 'kpi-value',
+      'data-value': known ? String(v) : '', 'data-status': str(r.status) });
+    if (known) {
+      if (r.unit === 'SAR') add(el, [h('span', { class: 'num' }, fmtMoneyNum(v)), h('span', { class: 'unit' }, CUR)]);
+      else if (r.unit === '%') add(el, h('span', { class: 'num' }, fmtPct(v)));
+      else add(el, h('span', { class: 'num' }, fmtPlain(v)));
+    } else {
+      add(el, naText(r));
+    }
+    return el;
+  }
+  function reasonLine(r) {
+    if (typeof r.value === 'number') return null;
+    var why = r.status === 'empty' ? 'لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر.' : str(r.reason || r.unavailable_reason || '');
+    return why ? h('p', { class: 'kpi-reason' }, why) : null;
+  }
+  function metaLines(r) {
+    var lines = [];
+    if (r.kind === 'ratio') {
+      if (r.scope_text) lines.push(h('span', null, h('b', null, 'النطاق: '), str(r.scope_text)));
+      var basis = [r.basis ? str(r.basis) : null, r.valuation_date ? 'تاريخ التقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ');
+      if (basis) lines.push(h('span', null, h('b', null, 'الأساس: '), basis));
+      var exc = list(r.excluded).length;
+      var cnt = 'مشمول ' + (r.n_included || 0) + ' · مستبعد ' + exc + ' من ' + (r.n_scope || 0);
+      if (typeof r.coverage_num_share === 'number') cnt += ' · تغطي ' + fmtShare(r.coverage_num_share) + ' من الإيراد المعروف';
+      lines.push(h('span', null, cnt));
+    } else if (r.kind === 'sum') {
+      var nu = r.n_unknown !== undefined ? r.n_unknown : list(r.excluded).length;
+      if (r.status === 'partial') lines.push(h('span', null, 'لا يشمل ' + nRec(nu) + ' ' + (nu === 1 ? 'قيمته' : 'قيمها') + ' غير معروفة (لا تُحسب صفرًا) · مشمول ' + (r.n_included || 0)));
+      else if (typeof r.value === 'number') lines.push(h('span', null, 'مشمول ' + nRec(r.n_included || 0)));
+      if (r.valuation_date) lines.push(h('span', null, h('b', null, 'التقييم: '), str(r.valuation_date)));
+      else if (r.period_text) lines.push(h('span', null, h('b', null, 'الفترة: '), str(r.period_text)));
+    } else if (r.kind === 'coverage') {
+      list(r.per_field).forEach(function (p) { lines.push(h('span', null, fieldLabel(p.field) + ': معروف في ' + (p.n_known || 0) + ' من ' + (p.n || 0))); });
+    } else if (r.kind === 'diff' && typeof r.value === 'number') {
+      lines.push(h('span', null, 'مشمول ' + (r.n_included || 0) + ' · مستبعد ' + list(r.excluded).length));
+    } else if (r.kind === 'growth') {
+      if (r.revenue_start) lines.push(h('span', null, 'بدء إيراد: لا تُحسب نسبة نمو'));
+      if (typeof r.abs_change === 'number') lines.push(h('span', null, 'التغير: ' + fmtMoney(r.abs_change)));
+    }
+    return lines.length ? h('p', { class: 'kpi-meta' }, lines.map(function (l) { return l; })) : null;
+  }
+  function renderCards(all) {
+    var grid = clear($('#kpi-grid'));
+    cardGroups().forEach(function (g) {
+      var rs = g.specs.map(function (s) { return all.metrics[s.id]; }).filter(Boolean);
+      if (!rs.length) return;
+      var card = h('article', { class: 'kpi', 'data-role': 'kpi-card', 'data-metric-id': str(rs[0].id), 'aria-label': str(rs.map(function (r) { return r.short_label || r.label; }).join(' و')) });
+      if (rs.length === 1) {
+        var r = rs[0];
+        var title = str(r.short_label || r.label || r.id);
+        add(card, h('div', { class: 'kpi-head' }, h('h3', { class: 'kpi-title' }, title)));
+        if (r.label && r.short_label && r.label !== r.short_label) add(card, h('p', { class: 'kpi-label' }, str(r.label)));
+        if (r.kind === 'ratio' && r.status === 'partial') add(card, h('p', { class: 'kpi-eyebrow' }, 'عائد الجزء القابل للاحتساب'));
+        add(card, h('div', { class: 'kpi-main', 'data-metric-id': str(r.id) }, valueNode(r)));
+        if (typeof r.value === 'number') add(card, h('div', { class: 'kpi-status' }, statusPill(r.status)));
+        add(card, reasonLine(r));
+        if (r.definition) add(card, h('p', { class: 'kpi-def', title: str(r.definition) }, str(r.definition)));
+        add(card, metaLines(r));
+      } else {
+        var gt = g.key === 'counts' ? 'عدد السجلات ضمن النطاق' : rs.map(function (x) { return str(x.short_label || x.label); }).join(' و');
+        add(card, h('div', { class: 'kpi-head' }, h('h3', { class: 'kpi-title' }, gt)));
+        var split = h('div', { class: 'kpi-split' });
+        rs.forEach(function (x) {
+          add(split, h('div', { class: 'kpi-sub', 'data-metric-id': str(x.id) },
+            h('p', { class: 'kpi-sub-label' }, str(x.short_label || x.label)),
+            valueNode(x),
+            (x.status !== 'complete' && typeof x.value === 'number') ? h('p', { class: 'kpi-substatus' + (metricStatus(x.status).tone === 'warn' ? ' warn' : '') }, metricStatus(x.status).ar) : null,
+            reasonLine(x)));
+        });
+        add(card, split);
+        var defs = rs.map(function (x) { return str(x.definition).split(/[؛.]/)[0]; }).filter(Boolean);
+        if (defs.length) add(card, h('p', { class: 'kpi-def', title: rs.map(function (x) { return str(x.definition); }).join(' ') }, defs.join('. ') + '.'));
+      }
+      grid.appendChild(card);
+    });
+    if (!grid.children.length) add(grid, h('p', { class: 'empty-note' }, 'لا توجد بطاقات معرّفة (card: true) في إعدادات المؤشرات.'));
+    var note = clear($('#kpi-note'));
+    add(note, 'القيم تُحسب للفترة والتصفية المختارتين. الرمادي = بيانات غير متاحة، والمؤشر الجزئي يُحسب للجزء القابل للاحتساب فقط؛ المجهول لا يُحسب صفرًا.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Charts
+  // ---------------------------------------------------------------------------
+  var FONT_FAMILY = '';
+  var _ctx = null;
+  function textW(s, size, weight) {
+    try {
+      if (!_ctx) _ctx = document.createElement('canvas').getContext('2d');
+      if (!FONT_FAMILY) FONT_FAMILY = getComputedStyle(document.body).fontFamily || 'sans-serif';
+      _ctx.font = (weight || 400) + ' ' + size + 'px ' + FONT_FAMILY;
+      return _ctx.measureText(String(s)).width;
+    } catch (e) { return String(s).length * size * 0.6; }
+  }
+  function fit(s, maxW, size, weight) {
+    s = str(s);
+    if (textW(s, size, weight) <= maxW) return s;
+    var t = s;
+    while (t.length > 1 && textW(t + '…', size, weight) > maxW) t = t.slice(0, -1);
+    return t.trim() + '…';
+  }
+  function svgText(text, x, y, anchor, cls, extra) {
+    var a = { x: x.toFixed(1), y: y.toFixed(1), 'text-anchor': anchor || 'start', class: cls || '' };
+    if (extra) Object.keys(extra).forEach(function (k) { a[k] = extra[k]; });
+    return sv('text', a, text);
+  }
+  function barPathH(x0, y, len, bh) {
+    // horizontal bar growing leftwards from baseline x0 (square at the baseline, 4px rounded data-end)
+    var x1 = x0 - len, r = Math.min(4, len, bh / 2);
+    return 'M' + x0 + ',' + y + 'H' + (x1 + r) + 'Q' + x1 + ',' + y + ' ' + x1 + ',' + (y + r) + 'V' + (y + bh - r) +
+      'Q' + x1 + ',' + (y + bh) + ' ' + (x1 + r) + ',' + (y + bh) + 'H' + x0 + 'Z';
+  }
+  function barPathV(x, y0, w, len) {
+    // vertical column growing upwards from baseline y0
+    var y1 = y0 - len, r = Math.min(4, len, w / 2);
+    return 'M' + x + ',' + y0 + 'V' + (y1 + r) + 'Q' + x + ',' + y1 + ' ' + (x + r) + ',' + y1 + 'H' + (x + w - r) +
+      'Q' + (x + w) + ',' + y1 + ' ' + (x + w) + ',' + (y1 + r) + 'V' + y0 + 'Z';
+  }
+  var PRINT_W = 660;  // A4 content width (186 mm) minus the chart card padding, in CSS px
+  function chartWidth(el) {
+    if (state.printing) return PRINT_W;
+    var w = el && el.clientWidth ? el.clientWidth : 0;
+    if (!w) { var g = $('#chart-grid'); w = g && g.clientWidth ? Math.min(g.clientWidth, 640) - 40 : 560; }
+    return Math.max(240, Math.floor(w));
+  }
+  function emptyState(reason) { return h('div', { class: 'chart-empty', 'data-role': 'chart-empty', role: 'note' }, h('span', null, str(reason) || 'لا توجد بيانات كافية لهذا الرسم')); }
+  function dataTable(cols, rows) {
+    var t = h('table', { class: 'data-table mini-table' });
+    add(t, h('thead', null, h('tr', null, cols.map(function (c) { return h('th', { class: c.num ? 'n' : null, scope: 'col' }, c.label); }))));
+    var tb = h('tbody');
+    rows.forEach(function (r) { add(tb, h('tr', null, cols.map(function (c) { return h('td', { class: c.num ? 'n' : null }, c.cell(r)); }))); });
+    add(t, tb);
+    return h('details', { class: 'chart-data' }, h('summary', null, 'عرض بيانات الرسم كجدول'), h('div', { class: 'table-wrap' }, t));
+  }
+  function figure(id, title, sub, wide) {
+    var body = h('div', { class: 'chart-body' });
+    var fig = h('figure', { class: 'chart-card' + (wide ? ' wide' : ''), 'data-role': 'chart', 'data-chart-id': id, 'aria-labelledby': 'ct-' + id },
+      h('figcaption', null, h('h3', { class: 'chart-title', id: 'ct-' + id }, title), sub ? h('p', { class: 'chart-sub' }, sub) : null),
+      body);
+    fig._body = body;
+    return fig;
+  }
+
+  /** Horizontal bars (one series). rows: [{label, value|null, text, tip, sub}] */
+  function hbars(rows, o) {
+    var W = o.width;
+    var narrow = W < 520;
+    var labelW = Math.round(Math.max(96, Math.min(220, W * (narrow ? 0.36 : 0.30))));
+    var valW = 0;
+    rows.forEach(function (r) { valW = Math.max(valW, textW(r.text, 12, 600)); });
+    valW = Math.min(Math.max(valW + 12, 40), W * 0.42);
+    var x0 = W - labelW - 10;
+    var maxLen = Math.max(30, x0 - valW);
+    var rowH = 34, barH = 14, top = 4;
+    var H = top * 2 + rows.length * rowH;
+    var max = 0;
+    rows.forEach(function (r) { if (typeof r.value === 'number' && r.value > max) max = r.value; });
+    if (!max) max = 1;
+    var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': o.aria || '' });
+    rows.forEach(function (r, i) {
+      var y = top + i * rowH, cy = y + rowH / 2;
+      var g = sv('g', { class: 'mark', 'data-tip': r.tip || '' });
+      add(g, sv('rect', { x: 0, y: y, width: W, height: rowH, fill: 'transparent' }));
+      add(g, svgText(fit(r.label, labelW - 4, 12.5), W - 2, cy + 4, 'start', 'lbl'));
+      var known = typeof r.value === 'number';
+      var len = known && r.value > 0 ? Math.max(2, r.value / max * maxLen) : 0;
+      if (len) add(g, sv('path', { d: barPathH(x0, cy - barH / 2, len, barH), fill: o.color }));
+      add(g, svgText(r.text, x0 - len - 6, cy + 4, 'start', 'val' + (known ? '' : ' na')));
+      add(g, sv('title', null, r.tip || ''));
+      add(svg, g);
+    });
+    add(svg, sv('line', { x1: x0, x2: x0, y1: top, y2: H - top, class: 'axis' }));
+    return svg;
+  }
+
+  function breakdownSpecs(kind) {
+    return list(CFG.breakdowns).filter(function (b) {
+      var f = str(b && b.field);
+      if (kind === 'value') return f === '{VAL}' || (FM[f] && FM[f].group === 'valuation');
+      return f === '{REV}' || (FM[f] && FM[f].group === 'revenue');
+    });
+  }
+  function breakdownDims() {
+    var dims = [];
+    list(CFG.breakdowns).forEach(function (b) { if (b && b.by && dims.indexOf(b.by) < 0) dims.push(b.by); });
+    return dims;
+  }
+  function chartBreakdown(all, kind, W) {
+    var id = kind === 'value' ? 'value-distribution' : 'revenue-distribution';
+    var dim = state.bdDim;
+    var spec = breakdownSpecs(kind).filter(function (b) { return b.by === dim; })[0];
+    var baseTitle = kind === 'value' ? 'توزيع القيمة المسجلة' : 'توزيع الإيراد المسجل';
+    if (!spec) {
+      var f0 = figure(id, baseTitle + ' حسب ' + dimLabel(dim), 'الوحدة: ' + CUR);
+      add(f0._body, emptyState('لا يوجد توزيع ' + (kind === 'value' ? 'للقيمة' : 'للإيراد') + ' حسب «' + dimLabel(dim) + '» في إعدادات المؤشرات.'));
+      return f0;
+    }
+    var r = all.breakdowns[spec.id] || {};
+    var sub = ['الوحدة: ' + CUR, kind === 'value' ? (r.valuation_date ? 'تاريخ التقييم: ' + str(r.valuation_date) : null) : (r.period_text ? str(r.period_text) : null)].filter(Boolean).join(' · ');
+    var fig = figure(id, str(r.label || spec.label || baseTitle), sub);
+    if (r.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية لهذا التوزيع.')); return fig; }
+    if (r.status === 'not_computable' || !list(r.rows).length) { add(fig._body, emptyState(str(r.reason || spec.unavailable_reason || 'لا توجد قيم معروفة ضمن النطاق'))); return fig; }
+    var rows = list(r.rows).map(function (x) {
+      var lbl = dimValueLabel(spec.by, x.key);
+      var known = typeof x.value === 'number';
+      var share = typeof x.share === 'number' ? x.share : null;
+      return {
+        label: lbl, value: known ? x.value : null,
+        text: known ? (W < 520 ? fmtCompact(x.value) : fmtMoney(x.value)) + (share !== null ? ' · ' + fmtShare(share) : '') : 'غير متاح (' + x.n_unknown + ' سجل)',
+        tip: lbl + '\n' + (known ? fmtMoney(x.value) + (share !== null ? ' — ' + fmtShare(share) + ' من المعروف' : '') : 'قيمة غير معروفة') +
+          '\nسجلات معروفة: ' + x.n_known + (x.n_unknown ? ' · غير معروفة: ' + x.n_unknown : ''),
+        raw: x
+      };
+    });
+    var shown = rows;
+    if (rows.length > 10) {
+      var head = rows.slice(0, 9), tail = rows.slice(9);
+      var tv = 0, tk = 0, tu = 0, anyKnown = false;
+      tail.forEach(function (t) { if (typeof t.value === 'number') { tv += t.value; anyKnown = true; } tk += t.raw.n_known; tu += t.raw.n_unknown; });
+      var tshare = (anyKnown && typeof r.total === 'number' && r.total) ? tv / r.total : null;
+      head.push({ label: 'فئات أخرى (' + tail.length + ')', value: anyKnown ? tv : null,
+        text: anyKnown ? (W < 520 ? fmtCompact(tv) : fmtMoney(tv)) + (tshare !== null ? ' · ' + fmtShare(tshare) : '') : 'غير متاح',
+        tip: 'فئات أخرى مجمّعة للعرض: ' + tail.length, raw: { n_known: tk, n_unknown: tu } });
+      shown = head;
+    }
+    add(fig._body, hbars(shown, { width: W, color: kind === 'value' ? '#2C6A9E' : '#1F9A72', aria: str(r.label) }));
+    add(fig._body, h('p', { class: 'chart-note' }, 'المجموع المعروف: ', h('span', { class: 'num' }, typeof r.total === 'number' ? fmtMoney(r.total) : '—'),
+      ' · سجلات معروفة ' + (r.n_known || 0) + (r.n_unknown ? ' · ' + nRec(r.n_unknown) + ' بقيمة غير معروفة لا تُحسب صفرًا' : '')));
+    if (r.overlap) add(fig._body, h('p', { class: 'chart-note' }, 'قد تتداخل الفئات: السجل الواحد قد يظهر في أكثر من فئة، فلا تُجمع الحصص.'));
+    add(fig._body, dataTable([
+      { label: dimLabel(spec.by), cell: function (x) { return x.label; } },
+      { label: 'القيمة', num: true, cell: function (x) { return typeof x.value === 'number' ? fmtMoney(x.value) : 'غير متاح'; } },
+      { label: 'الحصة', num: true, cell: function (x) { return typeof x.raw.share === 'number' ? fmtShare(x.raw.share) : '—'; } },
+      { label: 'معروفة', num: true, cell: function (x) { return String(x.raw.n_known); } },
+      { label: 'غير معروفة', num: true, cell: function (x) { return String(x.raw.n_unknown); } }
+    ], rows));
+    return fig;
+  }
+
+  function findMetricSpec(pred) { return list(CFG.metrics).filter(pred)[0] || null; }
+  function rankedValues(res) {
+    var f = res && res.resolved_fields ? res.resolved_fields.field : null;
+    if (!f) return [];
+    var items = list(res.included_ids).map(function (id) { return { id: id, v: fv(REC[id], f) }; }).filter(function (x) { return typeof x.v === 'number' && x.v > 0; });
+    items.sort(function (a, b) { return b.v - a.v || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    return items;
+  }
+  function chartConcentration(all, W) {
+    var vSpec = findMetricSpec(function (m) { return m.kind === 'concentration' && (m.field === '{VAL}' || (FM[m.field] && FM[m.field].group === 'valuation')); });
+    var rSpec = findMetricSpec(function (m) { return m.kind === 'concentration' && (m.field === '{REV}' || (FM[m.field] && FM[m.field].group === 'revenue')); });
+    var fig = figure('concentration', 'تركّز القيمة والإيراد في أكبر الأصول', 'الحصة من مجموع القيم الموجبة المعروفة، مع الحصة التراكمية');
+    var blocks = [[vSpec, 'value'], [rSpec, 'revenue']];
+    var any = false;
+    blocks.forEach(function (b) {
+      var spec = b[0], kind = b[1];
+      var label = kind === 'value' ? 'القيمة المسجلة' : 'الإيراد المسجل';
+      var blk = h('div', { class: 'conc-block' });
+      if (!spec) { add(blk, h('p', { class: 'conc-head' }, label), emptyState('لا يوجد مؤشر تركّز ' + (kind === 'value' ? 'للقيمة' : 'للإيراد') + ' في الإعدادات.')); add(fig._body, blk); return; }
+      var r = all.metrics[spec.id];
+      if (!r || typeof r.value !== 'number') {
+        add(blk, h('p', { class: 'conc-head' }, str(r && r.label || spec.label || label)),
+          emptyState(r && r.status === 'empty' ? 'لا توجد سجلات ضمن التصفية الحالية.' : str((r && (r.reason || r.unavailable_reason)) || 'غير قابل للاحتساب بالبيانات الحالية')));
+        add(fig._body, blk);
+        return;
+      }
+      any = true;
+      var items = rankedValues(r);
+      var total = typeof r.total === 'number' ? r.total : items.reduce(function (s, x) { return s + x.v; }, 0);
+      var top = Math.max(1, Math.min(r.top || 3, items.length || 1));
+      var shades = kind === 'value' ? ['#2C6A9E', '#5E8DBA', '#93B4D4', '#B9CEE3', '#D2E0EE'] : ['#1F9A72', '#4FB08D', '#86CDB4', '#AEDDCC', '#CDEBE0'];
+      var inkFor = function (i) { return i < 2 ? '#FFFFFF' : '#0B1F2E'; };
+      var segs = items.slice(0, top).map(function (x, i) { return { id: x.id, v: x.v, share: total ? x.v / total : 0, color: shades[Math.min(i, shades.length - 1)], ink: inkFor(i), rank: i + 1 }; });
+      var restV = items.slice(top).reduce(function (s, x) { return s + x.v; }, 0);
+      if (restV > 0) segs.push({ id: null, v: restV, share: total ? restV / total : 0, color: '#DDE2E8', ink: '#0B1F2E', rank: null, n: items.length - top });
+      add(blk, h('p', { class: 'conc-head' }, label + ': أكبر ' + top + ' = ', h('span', { class: 'num' }, fmtPct(r.value)),
+        ' من المجموع المعروف' + (typeof r.hhi === 'number' ? ' · مؤشر هيرفندال ' : ''), typeof r.hhi === 'number' ? h('span', { class: 'num' }, fmtNumber(r.hhi, 0)) : null));
+      var H = 30;
+      var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': label + ': حصة أكبر ' + top + ' سجلات ' + fmtPct(r.value) });
+      var x = W;
+      segs.forEach(function (s, i) {
+        var w = s.share * W;
+        var gap = i < segs.length - 1 ? 2 : 0;
+        var bw = Math.max(0, w - gap);
+        if (bw > 0) {
+          var nm = s.id ? recName(s.id) : 'بقية السجلات (' + s.n + ')';
+          var g = sv('g', { class: 'mark', 'data-tip': nm + '\n' + fmtMoney(s.v) + ' — ' + fmtShare(s.share) });
+          add(g, sv('rect', { class: 'bar', x: (x - bw).toFixed(1), y: 0, width: bw.toFixed(1), height: H, rx: Math.min(4, bw / 2), fill: s.color }));
+          var t = fmtShare(s.share);
+          if (textW(t, 12, 700) + 12 < bw) add(g, svgText(t, x - 6, H / 2 + 4, 'start', 'seg-txt', { fill: s.ink }));
+          add(g, sv('title', null, nm + ': ' + fmtShare(s.share)));
+          add(svg, g);
+        }
+        x -= w;
+      });
+      add(blk, svg);
+      var ol = h('ol', { class: 'conc-list' });
+      var cum = 0;
+      segs.forEach(function (s) {
+        cum += s.share;
+        add(ol, h('li', null, h('span', { class: 'sw', style: 'background:' + s.color, 'aria-hidden': 'true' }),
+          h('span', { class: 'nm', title: s.id ? recName(s.id) : '' }, s.id ? (s.rank + '. ' + recName(s.id)) : 'بقية السجلات (' + s.n + ')'),
+          h('span', { class: 'num' }, fmtShare(s.share)),
+          s.id ? h('span', { class: 'cum' }, 'تراكمي ', h('span', { class: 'num' }, fmtShare(cum))) : h('span', { class: 'cum' }, '')));
+      });
+      add(blk, ol);
+      if (items.length < 2) add(blk, h('p', { class: 'chart-note' }, 'سجل واحد فقط بقيمة موجبة معروفة ضمن النطاق؛ التركز كامل بطبيعته ولا يدل على مقارنة.'));
+      if (r.status === 'partial') add(blk, h('p', { class: 'chart-note' }, nRec(list(r.excluded).length) + ' خارج الحساب (قيمة غير معروفة أو غير موجبة).'));
+      add(fig._body, blk);
+    });
+    if (!any) {
+      var only = figure('concentration', 'تركّز القيمة والإيراد في أكبر الأصول', 'الحصة من مجموع القيم الموجبة المعروفة');
+      add(only._body, emptyState('لا توجد قيم موجبة معروفة لحساب التركز ضمن التصفية الحالية.'));
+      return only;
+    }
+    return fig;
+  }
+
+  function comparisonMetric(all) {
+    var pref = (CFG.dashboard && CFG.dashboard.comparison_metric) ? [CFG.dashboard.comparison_metric] : [];
+    pref = pref.concat(['gross_yield_owned', 'gross_yield_investment']);
+    for (var i = 0; i < pref.length; i++) if (all.metrics[pref[i]]) return all.metrics[pref[i]];
+    var spec = findMetricSpec(function (m) { return m.kind === 'ratio' && m.num === '{REV}' && m.den === '{VAL}'; });
+    return spec ? all.metrics[spec.id] : null;
+  }
+  function chartComparison(all, W) {
+    var r = comparisonMetric(all);
+    var fig = figure('asset-comparison', 'وزن الأصل في القيمة مقابل مساهمته في الإيراد',
+      r ? [str(r.period_text), r.valuation_date ? 'تقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ') : null, true);
+    if (!r) { add(fig._body, emptyState('لا يوجد مؤشر عائد (إيراد ÷ تقييم) في الإعدادات تُبنى عليه المقارنة.')); return fig; }
+    var numF = r.resolved_fields && r.resolved_fields.num, denF = r.resolved_fields && r.resolved_fields.den;
+    var ids = list(r.included_ids);
+    if (r.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية.')); return fig; }
+    if (!numF || !denF || ids.length < 2) {
+      add(fig._body, emptyState('تلزم أصول (اثنان على الأقل) يتوافر لها الإيراد والتقييم معًا للمقارنة؛ المتاح ضمن التصفية الحالية: ' + ids.length + '.'));
+      return fig;
+    }
+    var sumV = 0, sumR = 0;
+    var rows = ids.map(function (id) { var v = fv(REC[id], denF), rv = fv(REC[id], numF); sumV += v; sumR += rv; return { id: id, v: v, rv: rv }; });
+    rows.forEach(function (x) { x.vs = sumV ? x.v / sumV : 0; x.rs = sumR ? x.rv / sumR : 0; });
+    rows.sort(function (a, b) { return b.vs - a.vs || (a.id < b.id ? -1 : 1); });
+    var shown = rows.slice(0, 10);
+    add(fig._body, h('div', { class: 'legend', 'aria-hidden': 'true' },
+      h('span', null, h('i', { class: 'sw', style: 'background:#2C6A9E' }), 'حصة الأصل من القيمة المسجلة'),
+      h('span', null, h('i', { class: 'sw', style: 'background:#1F9A72' }), 'حصته من الإيراد المسجل')));
+    var narrow = W < 520;
+    var labelW = Math.round(Math.max(100, Math.min(240, W * (narrow ? 0.36 : 0.26))));
+    var valW = textW('100.0%', 12, 600) + 12;
+    var x0 = W - labelW - 10;
+    var maxLen = Math.max(30, x0 - valW);
+    var rowH = 42, bh = 12, top = 6;
+    var H = top * 2 + shown.length * rowH;
+    var max = 0;
+    shown.forEach(function (x) { max = Math.max(max, x.vs, x.rs); });
+    if (!max) max = 1;
+    var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': 'مقارنة حصة القيمة بحصة الإيراد لكل أصل' });
+    shown.forEach(function (x, i) {
+      var y = top + i * rowH;
+      var nm = recName(x.id);
+      var g = sv('g', { class: 'mark', 'data-tip': nm + '\nحصة القيمة: ' + fmtShare(x.vs) + ' (' + fmtMoney(x.v) + ')\nحصة الإيراد: ' + fmtShare(x.rs) + ' (' + fmtMoney(x.rv) + ')' });
+      add(g, sv('rect', { x: 0, y: y, width: W, height: rowH, fill: 'transparent' }));
+      add(g, svgText(fit(nm, labelW - 4, 12.5), W - 2, y + rowH / 2 + 4, 'start', 'lbl'));
+      [[x.vs, '#2C6A9E', y + 7], [x.rs, '#1F9A72', y + 7 + bh + 2]].forEach(function (b) {
+        var len = b[0] > 0 ? Math.max(2, b[0] / max * maxLen) : 0;
+        if (len) add(g, sv('path', { d: barPathH(x0, b[2], len, bh), fill: b[1] }));
+        add(g, svgText(fmtShare(b[0]), x0 - len - 5, b[2] + bh - 2, 'start', 'val'));
+      });
+      add(g, sv('title', null, nm));
+      add(svg, g);
+    });
+    add(svg, sv('line', { x1: x0, x2: x0, y1: top, y2: H - top, class: 'axis' }));
+    add(fig._body, svg);
+    add(fig._body, h('p', { class: 'chart-note' }, 'النطاق: ' + str(r.scope_text || '') + ' · ' + ids.length + ' أصول يتوافر لها الرقمان' +
+      (rows.length > shown.length ? ' (يُعرض أكبر ' + shown.length + ' قيمةً)' : '') + '. الأصول ذات القيمة أو الإيراد غير المعروف خارج المقارنة (' + list(r.excluded).length + ').'));
+    add(fig._body, h('p', { class: 'chart-note' }, 'الحصص قبل المصروفات؛ الفرق بين الحصتين يدل على وزن الأصل مقابل مساهمته ولا يثبت سببًا بعينه.'));
+    add(fig._body, dataTable([
+      { label: 'الأصل', cell: function (x) { return recName(x.id); } },
+      { label: 'القيمة', num: true, cell: function (x) { return fmtMoney(x.v); } },
+      { label: 'حصة القيمة', num: true, cell: function (x) { return fmtShare(x.vs); } },
+      { label: 'الإيراد', num: true, cell: function (x) { return fmtMoney(x.rv); } },
+      { label: 'حصة الإيراد', num: true, cell: function (x) { return fmtShare(x.rs); } },
+      { label: 'الفرق (نقطة مئوية)', num: true, cell: function (x) { return fmtNumber((x.rs - x.vs) * 100, 1); } }
+    ], rows));
+    return fig;
+  }
+
+  function chartTrend(all, W) {
+    var t = all.trend || {};
+    var fig = figure('revenue-trend', str(t.label || 'تطور الإيراد عبر الفترات'), 'الوحدة: ' + CUR + ' · مجموع السجلات المعروف إيرادها في كل فترة', true);
+    var comp = t.comparable || {};
+    if (t.status === 'not_computable' && !list(t.points).length) { add(fig._body, emptyState(str(t.reason || 'التطور الزمني غير مفعّل أو لا توجد فترات كافية'))); return fig; }
+    if (comp.status === 'not_comparable') { add(fig._body, emptyState('المقارنة الزمنية غير صالحة: ' + str(comp.reason || 'اختلاف أساس الفترات'))); return fig; }
+    if (t.status === 'empty') { add(fig._body, emptyState('لا توجد سجلات ضمن التصفية الحالية لهذا الرسم.')); return fig; }
+    if (t.status === 'not_computable') { add(fig._body, emptyState(str(t.reason || 'لا توجد قيم إيراد معروفة ضمن النطاق'))); return fig; }
+    var pts = list(t.points);
+    if (comp.status !== 'confirmed') add(fig._body, h('p', { class: 'caveat', role: 'note' }, 'تنبيه — مقارنة غير متحققة: ' + str(comp.reason || 'لم يثبت تماثل أساس الفترات؛ تُعرض القيم للاطلاع دون حكم بالنمو.')));
+    var H = 250, padTop = 26, axisH = 46;
+    var y0 = H - axisH;
+    var slot = W / Math.max(1, pts.length);
+    var bw = Math.min(24, slot * 0.4);
+    var max = 0;
+    pts.forEach(function (p) { if (typeof p.value === 'number' && p.value > max) max = p.value; });
+    if (!max) max = 1;
+    var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': str(t.label || 'تطور الإيراد') });
+    add(svg, sv('line', { x1: 0, x2: W, y1: y0, y2: y0, class: 'axis' }));
+    pts.forEach(function (p, i) {
+      var cx = W - slot * (i + 0.5);   // oldest period on the right (reading direction)
+      var known = typeof p.value === 'number';
+      var len = known && p.value > 0 ? Math.max(2, p.value / max * (y0 - padTop)) : 0;
+      var g = sv('g', { class: 'mark', 'data-tip': str(p.period) + '\n' + (known ? fmtMoney(p.value) : 'غير متاح') + '\nسجلات معروفة: ' + p.n_known + ' من ' + p.n });
+      add(g, sv('rect', { x: (cx - slot / 2).toFixed(1), y: 0, width: slot.toFixed(1), height: H, fill: 'transparent' }));
+      if (len) add(g, sv('path', { d: barPathV(cx - bw / 2, y0, bw, len), fill: '#1F9A72' }));
+      var lab = known ? (W < 560 || pts.length > 5 ? fmtCompact(p.value) : fmtMoneyNum(p.value)) : 'غير متاح';
+      add(g, svgText(lab, cx, y0 - len - 7, 'middle', 'val' + (known ? '' : ' na')));
+      add(g, svgText(str(p.period), cx, y0 + 18, 'middle', 'lbl', { 'font-weight': '700' }));
+      add(g, svgText(p.n_known + ' من ' + p.n + ' معروف', cx, y0 + 35, 'middle', 'val na'));
+      add(g, sv('title', null, str(p.period) + ': ' + (known ? fmtMoney(p.value) : 'غير متاح')));
+      add(svg, g);
+    });
+    add(fig._body, svg);
+    var gspec = findMetricSpec(function (m) { return m.kind === 'growth'; });
+    var gr = gspec ? all.metrics[gspec.id] : null;
+    if (gr) {
+      var gl;
+      if (gr.status === 'not_comparable') gl = 'تغير الإيراد بين الفترتين: غير قابل للمقارنة — ' + str(gr.reason || '');
+      else if (typeof gr.abs_change === 'number') {
+        gl = str(gr.short_label || gr.label) + ' للأصول نفسها المعروفة في الفترتين (' + (gr.n_included || 0) + '): ' + fmtMoney(gr.abs_change) +
+          (gr.revenue_start ? ' — بدء إيراد (لا تُحسب نسبة)' : (typeof gr.value === 'number' ? ' (' + fmtPct(gr.value) + ')' : '')) +
+          (list(gr.only_curr).length || list(gr.only_prev).length ? ' · معروفة في فترة واحدة فقط: ' + (list(gr.only_curr).length + list(gr.only_prev).length) + ' (تُعرض منفصلة)' : '');
+      } else gl = str(gr.short_label || gr.label) + ': ' + (gr.status === 'empty' ? 'لا توجد سجلات' : 'غير قابل للاحتساب — ' + str(gr.reason || ''));
+      add(fig._body, h('p', { class: 'chart-note' }, gl));
+    }
+    add(fig._body, h('p', { class: 'chart-note' }, 'عدد السجلات المعروف إيرادها قد يختلف بين الفترات، ولا تُقرأ الفروق نموًا إلا لأصول متطابقة وبأساس موحد.'));
+    add(fig._body, dataTable([
+      { label: 'الفترة', cell: function (p) { return str(p.period); } },
+      { label: 'الإيراد المعروف', num: true, cell: function (p) { return typeof p.value === 'number' ? fmtMoney(p.value) : 'غير متاح'; } },
+      { label: 'سجلات معروفة', num: true, cell: function (p) { return p.n_known + ' من ' + p.n; } },
+      { label: 'الحقل', cell: function (p) { return fieldLabel(p.field); } }
+    ], pts));
+    return fig;
+  }
+
+  function renderCharts(all) {
+    var grid = $('#chart-grid');
+    var probe = h('div', { class: 'chart-card' }, h('div', { class: 'chart-body' }));
+    clear(grid);
+    add(grid, probe);
+    var Wn = chartWidth(probe.firstChild);
+    clear(grid);
+    var probeWide = h('div', { class: 'chart-card wide' }, h('div', { class: 'chart-body' }));
+    add(grid, probeWide);
+    var Ww = chartWidth(probeWide.firstChild);
+    clear(grid);
+    var figs = [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn), chartComparison(all, Ww), chartConcentration(all, Wn), chartTrend(all, Wn)];
+    // keep the grid tidy: the trend chart shares a row with concentration
+    figs[4].classList.remove('wide');
+    figs.forEach(function (f) { add(grid, f); });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Asset table
+  // ---------------------------------------------------------------------------
+  function revField() { try { return ENG.resolveField('{REV}', getFilters()); } catch (e) { return null; } }
+  function valField() { try { return ENG.resolveField('{VAL}', getFilters()); } catch (e) { return null; } }
+  function yieldApplicable(rec) {
+    if (!isAssetType(rec)) return 'لا يُحسب لغير الأصول';
+    var d = rec.dims || {};
+    if (d.income_nature === 'operating') return 'نشاط تشغيلي: لا يُقسم إيراده على قيمة عقار';
+    if (d.managed_for_others === true) return 'مدار للغير: الإيراد ليس دخلًا للجمعية';
+    if (d.use === 'service' || d.use === 'admin') return 'أصل ' + dimValueLabel('use', d.use) + ': لا يُحكم عليه بالإيجار';
+    return null;
+  }
+  function rowData(rec, rf, vf) {
+    var v = vf ? fv(rec, vf) : null, rv = rf ? fv(rec, rf) : null;
+    var na = yieldApplicable(rec);
+    var y = (!na && typeof v === 'number' && v > 0 && typeof rv === 'number') ? rv / v * 100 : null;
+    var flags = [];
+    if (rf && !isKnown(rec, rf) && rec.record_type !== 'other') {
+      var tr = tvOf(rec, rf);
+      if (!(tr && tr.s === 'not_applicable')) flags.push('الإيراد: ' + statusAr(tr ? tr.s : 'absent'));
+    }
+    if (vf && !isKnown(rec, vf) && isAssetType(rec)) { var tv = tvOf(rec, vf); flags.push('التقييم: ' + statusAr(tv ? tv.s : 'absent')); }
+    var ni = list(rec.issue_ids).length;
+    return { rec: rec, v: v, rv: rv, y: y, yNa: na, flags: flags, issues: ni, links: citeCount(rec.id) };
+  }
+  var COLS = [
+    { key: 'name', label: 'الأصل / السجل', sort: function (d) { return str(d.rec.name); } },
+    { key: 'asset_type', label: function () { return dimLabel('asset_type'); }, sort: function (d) { return dimText(d.rec, 'asset_type'); } },
+    { key: 'location', label: function () { return dimLabel('location'); }, sort: function (d) { return dimText(d.rec, 'location'); } },
+    { key: 'use', label: function () { return dimLabel('use'); }, sort: function (d) { return dimText(d.rec, 'use'); } },
+    { key: 'income_nature', label: function () { return dimLabel('income_nature'); }, sort: function (d) { return dimText(d.rec, 'income_nature'); } },
+    { key: 'value', num: true, label: 'القيمة المسجلة', hsub: function () { var vl = CFG.valuation || {}; return str(vl.label || ''); }, sort: function (d) { return d.v; } },
+    { key: 'revenue', num: true, label: 'الإيراد المسجل', hsub: function () { return 'الفترة ' + str(state.filters.period); }, sort: function (d) { return d.rv; } },
+    { key: 'yield', num: true, label: 'العائد الإجمالي', hsub: function () { return 'قبل المصروفات'; }, sort: function (d) { return d.y; } },
+    { key: 'flags', label: 'حالة البيانات', sort: function (d) { return d.flags.length + d.issues; } },
+    { key: 'links', num: true, label: 'الروابط', hsub: function () { return 'فجوات وتوصيات'; }, sort: function (d) { return d.links; } }
+  ];
+  function buildTableHead() {
+    var thead = clear($('#asset-table thead'));
+    var tr = h('tr');
+    COLS.forEach(function (c) {
+      var th = h('th', { scope: 'col', 'data-sort': c.key, class: c.num ? 'n' : null, 'aria-sort': 'none' });
+      var btn = h('button', { type: 'button', class: 'sort-btn' }, h('span', null, h('span', { class: 'hl' }), h('span', { class: 'hsub' })), h('span', { class: 'arr', 'aria-hidden': 'true' }));
+      add(th, btn);
+      th.addEventListener('click', function () {
+        if (state.sort.key === c.key) state.sort.dir = -state.sort.dir;
+        else { state.sort.key = c.key; state.sort.dir = c.num ? -1 : 1; }
+        renderTable(state.last);
+      });
+      add(tr, th);
+    });
+    add(thead, tr);
+  }
+  function updateTableHead() {
+    $all('#asset-table thead th').forEach(function (th, i) {
+      var c = COLS[i];
+      th.querySelector('.hl').textContent = typeof c.label === 'function' ? c.label() : c.label;
+      var hs = th.querySelector('.hsub');
+      hs.textContent = c.hsub ? c.hsub() : '';
+      hs.style.display = c.hsub && c.hsub() ? '' : 'none';
+      var active = state.sort.key === c.key;
+      th.setAttribute('aria-sort', active ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
+      th.querySelector('.arr').textContent = active ? (state.sort.dir > 0 ? '▲' : '▼') : '';
+    });
+  }
+  function norm(s) {
+    return String(s || '').normalize('NFKC').replace(/[ً-ٰٟـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي')
+      .replace(/ة/g, 'ه').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/[٠-٩]/g, function (d) { return String(d.charCodeAt(0) - 0x660); })
+      .toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  function searchText(rec) {
+    var d = rec.dims || {};
+    return norm([rec.name, rec.id, dimText(rec, 'asset_type'), dimText(rec, 'location'), d.district, dimText(rec, 'use'), dimText(rec, 'income_nature')].map(str).join(' '));
+  }
+  function cmp(a, b) {
+    if (a === b) return 0;
+    if (a === null || a === undefined) return -1;
+    if (b === null || b === undefined) return 1;
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    return String(a).localeCompare(String(b), 'ar');
+  }
+  function moneyCell(v, t) {
+    if (typeof v === 'number') return h('span', null, h('span', { class: 'num' }, fmtMoney(v)), t && t.s === 'zero_recorded' ? h('span', { class: 'zero-note' }, 'صفر مسجل') : (t && t.s === 'zero_confirmed' ? h('span', { class: 'zero-note' }, 'صفر مؤكد') : null));
+    return h('span', { class: 'na-val', title: t ? statusAr(t.s) : 'الحقل غير موجود' }, t ? statusAr(t.s) : 'غير متاح');
+  }
+  function renderTable(all) {
+    if (!all) return;
+    updateTableHead();
+    var rf = revField(), vf = valField();
+    var ids = all.record_ids || all.records || [];
+    var q = norm(state.search);
+    var rows = ids.map(function (id) { return REC[id]; }).filter(Boolean)
+      .filter(function (r) { return !q || searchText(r).indexOf(q) >= 0; })
+      .map(function (r) { return rowData(r, rf, vf); });
+    var col = COLS.filter(function (c) { return c.key === state.sort.key; })[0] || COLS[0];
+    var dir = state.sort.dir;
+    rows.sort(function (a, b) {
+      var c = cmp(col.sort(a), col.sort(b));
+      if (!c) c = a.rec.id < b.rec.id ? -1 : (a.rec.id > b.rec.id ? 1 : 0);
+      return c * dir;
+    });
+    var tb = clear($('#asset-table tbody'));
+    rows.forEach(function (d) {
+      var rec = d.rec;
+      var tr = h('tr', { 'data-role': 'asset-row', 'data-record-id': str(rec.id), tabindex: '0', class: state.detailId === rec.id ? 'is-selected' : null,
+        'aria-label': str(rec.name) + ' — اضغط Enter لعرض التفاصيل' });
+      var typeTag = rec.record_type && rec.record_type !== 'asset' ? ' · ' + ((V.record_type && V.record_type[rec.record_type]) || rec.record_type) : '';
+      add(tr, h('td', null, h('span', { class: 'rname' }, str(rec.name || rec.id)), h('span', { class: 'rid' }, idc(rec.id), typeTag)));
+      add(tr, h('td', null, dimText(rec, 'asset_type')));
+      add(tr, h('td', null, dimText(rec, 'location')));
+      add(tr, h('td', null, dimText(rec, 'use')));
+      add(tr, h('td', null, dimText(rec, 'income_nature')));
+      add(tr, h('td', { class: 'n' }, vf ? moneyCell(d.v, tvOf(rec, vf)) : h('span', { class: 'na-val' }, 'لا يوجد تقييم')));
+      add(tr, h('td', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf)) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
+      add(tr, h('td', { class: 'n' }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y)) : h('span', { class: 'muted small', title: d.yNa || 'يلزم الإيراد والتقييم معًا' }, '—')));
+      var fl = h('td');
+      d.flags.forEach(function (f) { add(fl, h('span', { class: 'flag' }, f)); });
+      if (d.issues) add(fl, h('span', { class: 'flag' }, d.issues + ' ملاحظة بيانات'));
+      if (!d.flags.length && !d.issues) add(fl, h('span', { class: 'flag ok' }, 'مكتملة'));
+      add(tr, fl);
+      add(tr, h('td', { class: 'n' }, d.links ? h('span', { class: 'links-n', title: 'عدد الفجوات والتوصيات التي تستشهد بالسجل' }, String(d.links)) : h('span', { class: 'muted' }, '—')));
+      tr.addEventListener('click', function () { openDetail(rec.id, tr); });
+      tr.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDetail(rec.id, tr); }
+      });
+      add(tb, tr);
+    });
+    if (!rows.length) add(tb, h('tr', null, h('td', { colspan: String(COLS.length), class: 'muted' }, q ? 'لا توجد سجلات تطابق البحث.' : 'لا توجد سجلات ضمن التصفية الحالية.')));
+    var cl = $('#count-line');
+    cl.textContent = 'يعرض ' + rows.length + ' من ' + ids.length + ' ' + recNoun(ids.length) + ' ضمن التصفية الحالية' + (q ? ' (مع البحث)' : '') + '. اختر صفًا لعرض تفاصيله ودليله.';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Detail panel
+  // ---------------------------------------------------------------------------
+  var lastFocus = null;
+  var GROUP_ORDER = ['revenue', 'valuation', 'expense', 'area', 'units', 'count', 'date', 'deed', 'location', 'classification', 'text', 'other'];
+  function openDetail(id, fromEl) {
+    if (!REC[id]) return;
+    state.detailId = id;
+    lastFocus = fromEl || document.activeElement;
+    renderDetail();
+    var panel = $('#asset-detail');
+    panel.hidden = false;
+    $('#assets-layout').classList.add('has-detail');
+    $all('tr[data-role="asset-row"]').forEach(function (tr) { tr.classList.toggle('is-selected', tr.getAttribute('data-record-id') === id); });
+    var r = panel.getBoundingClientRect();
+    if (r.top < 0 || r.top > window.innerHeight - 80) panel.scrollIntoView({ block: 'start' });
+    try { panel.focus({ preventScroll: true }); } catch (e) { panel.focus(); }
+  }
+  function closeDetail() {
+    state.detailId = null;
+    $('#asset-detail').hidden = true;
+    $('#assets-layout').classList.remove('has-detail');
+    $all('tr[data-role="asset-row"].is-selected').forEach(function (tr) { tr.classList.remove('is-selected'); });
+    if (lastFocus && document.body.contains(lastFocus) && typeof lastFocus.focus === 'function') { try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+    lastFocus = null;
+  }
+  function renderDetail() {
+    var rec = REC[state.detailId];
+    if (!rec) return;
+    $('#detail-title').textContent = str(rec.name || rec.id);
+    var body = clear($('#detail-body'));
+    var scopeAr = (V.scope && V.scope[rec.scope]) || str(rec.scope);
+    add(body, h('div', { class: 'chips', style: 'margin-top:8px' },
+      h('span', { class: 'chip' }, idc(rec.id)),
+      h('span', { class: 'chip' }, (V.record_type && V.record_type[rec.record_type]) || str(rec.record_type)),
+      pill(scopeAr, rec.scope === 'in_scope' ? 'ok' : 'na')));
+    if (rec.scope_reason) add(body, h('p', { class: 'small muted', style: 'margin-top:6px' }, 'سبب النطاق: ' + str(rec.scope_reason)));
+    var src = rec.source || {};
+    add(body, h('p', { class: 'small', style: 'margin-top:6px' }, 'المصدر: ', bdi(src.ref_name || ((src.sheet || '') + (src.row ? ' — الصف ' + src.row : '')))));
+
+    var dsec = h('div', { class: 'detail-sec' }, h('h4', null, 'التصنيف'));
+    var dl = h('dl', { class: 'kv' });
+    var dims = rec.dims || {};
+    Object.keys(dims).forEach(function (k) {
+      var ev = rec.dims_evidence && rec.dims_evidence[k];
+      add(dl, [h('dt', null, dimLabel(k)), h('dd', null, dimText(rec, k), ev ? h('span', { class: 'ev' }, 'الدليل: ', bdi(ev)) : null)]);
+    });
+    add(dsec, dl);
+    var colA = h('div'), colB = h('div');
+    add(body, h('div', { class: 'detail-cols' }, colA, colB));
+    add(colA, dsec);
+
+    var fields = Object.keys(rec.fields || {});
+    fields.sort(function (a, b) {
+      var ga = GROUP_ORDER.indexOf((FM[a] || {}).group), gb = GROUP_ORDER.indexOf((FM[b] || {}).group);
+      ga = ga < 0 ? 99 : ga; gb = gb < 0 ? 99 : gb;
+      return ga - gb || (a < b ? -1 : a > b ? 1 : 0);
+    });
+    var fsec = h('div', { class: 'detail-sec' }, h('h4', null, 'الحقول وحالتها ومرجعها'));
+    var t = h('table', { class: 'data-table mini-table' }, h('thead', null, h('tr', null, h('th', null, 'الحقل'), h('th', null, 'القيمة'), h('th', null, 'الحالة'), h('th', null, 'الخلية'))));
+    var tb = h('tbody');
+    fields.forEach(function (f) {
+      var tvv = rec.fields[f];
+      add(tb, h('tr', null, h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, str(tvv.note)) : null),
+        h('td', null, fmtFieldValue(f, tvv)), h('td', null, tvv ? statusAr(tvv.s) : '—'), h('td', null, tvv && tvv.ref ? bdi(tvv.ref) : '—')));
+    });
+    add(t, tb);
+    add(fsec, h('div', { class: 'table-wrap' }, t));
+    add(colB, fsec);
+
+    var iss = [];
+    list(rec.issue_ids).forEach(function (i) { if (ISSUE[i] && iss.indexOf(ISSUE[i]) < 0) iss.push(ISSUE[i]); });
+    ISSUES.forEach(function (x) { if (list(x.record_ids).indexOf(rec.id) >= 0 && iss.indexOf(x) < 0) iss.push(x); });
+    var isec = h('div', { class: 'detail-sec' }, h('h4', null, 'ملاحظات البيانات على السجل (' + iss.length + ')'));
+    if (!iss.length) add(isec, h('p', { class: 'small muted' }, 'لا توجد ملاحظات مسجلة.'));
+    iss.forEach(function (x) {
+      add(isec, h('div', { class: 'cite' }, h('b', null, h('bdi', null, str(x.id))), ' · ', levelAr(x.severity), ' — ', str(x.detail),
+        x.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(x.impact)) : null, x.treatment ? h('p', { class: 'small muted' }, 'المعالجة: ' + str(x.treatment)) : null));
+    });
+    add(colA, isec);
+
+    var cs = CITES[rec.id] || [];
+    var csec = h('div', { class: 'detail-sec' }, h('h4', null, 'الفجوات والتوصيات المرتبطة (' + cs.length + ')'));
+    if (!cs.length) add(csec, h('p', { class: 'small muted' }, 'لا تستشهد به فجوة أو توصية.'));
+    cs.forEach(function (c) {
+      var it = c.item;
+      var how = c.how === 'group' ? ' (عبر نطاق مجموعة)' : (c.how === 'via_gap' ? ' (عبر فجوة مرتبطة)' : '');
+      if (c.type === 'gap') {
+        add(csec, h('div', { class: 'cite' }, h('b', null, 'فجوة ' + str(it.id) + ': ' + str(it.title)), how, ' ', it.is_proven_problem ? pill('مشكلة مثبتة', 'red') : pill('يحتاج تحقق', 'neutral'),
+          it.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(it.impact && it.impact.text !== undefined ? it.impact.text : it.impact)) : null,
+          h('div', { class: 'ev' }, evidenceChips(it.evidence))));
+      } else {
+        add(csec, h('div', { class: 'cite' }, h('b', null, 'توصية ' + str(it.id) + ': ' + str(it.first_action || it.target)), how,
+          it.problem ? h('p', { class: 'small' }, 'المشكلة: ' + str(it.problem)) : null,
+          h('div', { class: 'ev' }, evidenceChips(it.evidence))));
+      }
+    });
+    add(colA, csec);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Details sections
+  // ---------------------------------------------------------------------------
+  var SECTIONS = [
+    ['methodology', 'المنهجية ودليل القراءة', 'أنواع العبارات، حالات القيم، الألوان'],
+    ['calculations', 'سجل الحسابات', 'يتبع الفترة والتصفية الحالية'],
+    ['recommendations', 'الفجوات والتوصيات كاملة', null],
+    ['issues', 'سجل مشكلات البيانات', null],
+    ['exclusions', 'المستبعدات والبيانات المعزولة', null],
+    ['workbook', 'خريطة المصنف وقرارات النطاق', null],
+    ['assumptions', 'الافتراضات', null],
+    ['sources', 'المصادر', null],
+    ['questions', 'طلبات البيانات والأسئلة', null],
+    ['scenarios', 'السيناريوهات وفرص التحسين', null],
+    ['versions', 'مقارنة الإصدارات ومتابعة التوصيات', null],
+    ['records', 'جميع السجلات', 'ضمن النطاق والمعزولة والمستبعدة']
+  ];
+  var SEC = {};
+  function buildDetailsShell() {
+    var box = clear($('#details-list'));
+    SECTIONS.forEach(function (s) {
+      var cnt = h('span', { class: 'cnt' });
+      var d = h('details', { class: 'dsec', 'data-role': 'details-section', 'data-section': s[0], id: 'd-' + s[0] },
+        h('summary', null, h('span', null, s[1]), cnt, s[2] ? h('span', { class: 'hint' }, s[2]) : null),
+        h('div', { class: 'dbody' }));
+      SEC[s[0]] = { el: d, body: d.querySelector('.dbody'), cnt: cnt };
+      add(box, d);
+    });
+  }
+  function setCount(key, n) { var c = SEC[key].cnt; c.textContent = (n === null || n === undefined) ? '' : String(n); c.style.display = (n === null || n === undefined) ? 'none' : ''; }
+  function simpleTable(cols, rows, cls) {
+    var t = h('table', { class: 'data-table ' + (cls || '') });
+    add(t, h('thead', null, h('tr', null, cols.map(function (c) { return h('th', { scope: 'col', class: c.num ? 'n' : null }, c.label); }))));
+    var tb = h('tbody');
+    rows.forEach(function (r) { add(tb, h('tr', null, cols.map(function (c) { return h('td', { class: c.num ? 'n' : null }, c.cell(r)); }))); });
+    add(t, tb);
+    return h('div', { class: 'table-wrap' }, t);
+  }
+  function kvList(pairs) {
+    var dl = h('dl', { class: 'kv' });
+    pairs.forEach(function (p) { if (p && p[1] !== null && p[1] !== undefined && p[1] !== '') add(dl, [h('dt', null, p[0]), h('dd', null, p[1])]); });
+    return dl;
+  }
+  var KEY_AR = { status: 'الحالة', summary: 'الملخص', added: 'أُضيفت', removed: 'غابت عن الملف', changed: 'تغيرت', unchanged: 'دون تغيير', performance: 'تغير الأداء', scope: 'تغير النطاق',
+    valuation: 'تغير التقييم', corrections: 'تصحيحات البيانات', prev: 'النسخة السابقة', curr: 'النسخة الحالية', note: 'ملاحظة', notes: 'ملاحظات', id: 'المعرف', rec_id: 'التوصية',
+    evidence: 'الدليل', reason: 'السبب', text: 'النص', metric: 'المؤشر', value: 'القيمة', detail: 'التفاصيل', records: 'السجلات', name: 'الاسم' };
+  function renderAny(x, depth) {
+    depth = depth || 0;
+    if (x === null || x === undefined) return '—';
+    if (typeof x === 'string') return x;
+    if (typeof x === 'number') return h('span', { class: 'num' }, fmtPlain(x));
+    if (typeof x === 'boolean') return x ? 'نعم' : 'لا';
+    if (depth > 4) return '…';
+    if (Array.isArray(x)) {
+      if (!x.length) return 'لا يوجد';
+      var ul = h('ul');
+      x.slice(0, 80).forEach(function (y) { add(ul, h('li', null, renderAny(y, depth + 1))); });
+      if (x.length > 80) add(ul, h('li', { class: 'muted' }, 'و' + (x.length - 80) + ' عنصرًا آخر'));
+      return ul;
+    }
+    if (typeof x === 'object') {
+      var dl = h('dl', { class: 'kv' });
+      Object.keys(x).forEach(function (k) { add(dl, [h('dt', null, KEY_AR[k] || k), h('dd', null, renderAny(x[k], depth + 1))]); });
+      return dl;
+    }
+    return '';
+  }
+
+  function renderMethodology() {
+    var b = clear(SEC.methodology.body);
+    add(b, h('h4', null, 'أنواع العبارات'));
+    var lg = h('div', { class: 'legend-grid' });
+    Object.keys(V.statement_kind || {}).forEach(function (k) { add(lg, h('div', null, kindTag(k), V.statement_kind[k].ar)); });
+    add(b, lg);
+    add(b, h('h4', null, 'الألوان والحالات'));
+    add(b, h('div', { class: 'legend-grid' },
+      h('div', null, pill('مشكلة مثبتة', 'red'), 'الأحمر لمشكلة ثبتت بدليل فقط'),
+      h('div', null, pill('يحتاج تحقق', 'neutral'), 'فجوة محتملة لم يثبت سببها'),
+      h('div', null, pill('غير قابل للاحتساب', 'na'), 'الرمادي لبيانات غير متاحة؛ لا تُعرض صفرًا'),
+      h('div', null, pill('جزئي', 'warn'), 'محسوب للجزء القابل للاحتساب فقط'),
+      h('div', null, h('span', { class: 'sw', style: 'background:#2C6A9E' }), 'القيمة المسجلة في الرسوم'),
+      h('div', null, h('span', { class: 'sw', style: 'background:#1F9A72' }), 'الإيراد المسجل في الرسوم')));
+    add(b, h('h4', null, 'حالات القيم في السجلات'));
+    add(b, h('div', { class: 'narrow' }, simpleTable([{ label: 'الحالة', cell: function (k) { return statusAr(k); } }, { label: 'تدخل الحساب؟', cell: function (k) { return V.status[k].known ? 'نعم' : 'لا — لا تُحسب صفرًا'; } }], Object.keys(V.status || {}))));
+    add(b, h('h4', null, 'حالات المؤشرات'));
+    add(b, h('div', { class: 'legend-grid' }, Object.keys(V.metric_status || {}).map(function (k) { return h('div', null, statusPill(k)); })));
+    add(b, h('h4', null, 'قواعد الحساب'));
+    add(b, h('ul', null,
+      h('li', null, 'المؤشرات تُحسب للسجلات «ضمن نطاق الدراسة» فقط؛ المعزولة والمستبعدة تظهر في قسمها ولا تدخل الأرقام.'),
+      h('li', null, 'المجهول لا يُحسب صفرًا؛ الصفر المسجل في الإيراد يدخل صفرًا لكنه لا يثبت الشغور أو تعثر التحصيل.'),
+      h('li', null, 'العائد = مجموع الإيراد ÷ مجموع التقييم للأصول نفسها التي يتوافر لها الرقمان × 100، قبل المصروفات؛ لا متوسط عوائد.'),
+      h('li', null, 'تغطية العائد الجزئي تُذكر بحصة الإيراد المعروف، لا بالقيمة.'),
+      h('li', null, 'البطاقات والرسوم والجدول تُحسب جميعها من نتيجة واحدة لمحرك الحساب المضمّن وفق المرشحات الحالية.')));
+    var vl = CFG.valuation || {};
+    if (vl.note) add(b, h('p', { class: 'small muted' }, 'التقييم: ' + str(vl.note)));
+    var notes = list(NAR.methodology_notes).map(str).filter(Boolean);
+    if (notes.length) { add(b, h('h4', null, 'ملاحظات منهجية')); add(b, h('ul', null, notes.map(function (n) { return h('li', null, n); }))); }
+    var vs = D.validation || {};
+    add(b, h('h4', null, 'التحقق الآلي'));
+    if (!vs.available) add(b, h('p', { class: 'small' }, 'لا توجد نتيجة تحقق مرفقة؛ هذه مسودة.'));
+    else {
+      add(b, h('p', { class: 'small' }, 'الأخطاء المانعة: ' + (vs.blocking_count || 0) + ' · التنبيهات: ' + (vs.warning_count || 0) + (vs.checked_at ? ' · ' + str(vs.checked_at) : '')));
+      var msgs = list(vs.blocking).concat(list(vs.warnings));
+      if (msgs.length) add(b, h('ul', { class: 'small' }, list(vs.blocking).map(function (m) { return h('li', null, pill('مانع', 'red'), ' ', str(m)); })
+        .concat(list(vs.warnings).map(function (m) { return h('li', null, str(m)); }))));
+    }
+    setCount('methodology', null);
+  }
+
+  function formulaWords(spec, r) {
+    var rf = r.resolved_fields || {};
+    var F = function (k) { return rf[k] ? '«' + fieldLabel(rf[k]) + '»' : 'الحقل'; };
+    switch (spec.kind) {
+      case 'count': return 'عدد السجلات المطابقة لشروط النطاق والتصفية.';
+      case 'sum': return 'مجموع ' + F('field') + ' للسجلات المعروفة قيمتها؛ السجلات غير المعروفة تظهر مستبعدة ولا تُحسب صفرًا.';
+      case 'ratio': return 'مجموع ' + F('num') + ' ÷ مجموع ' + F('den') + ' × ' + (spec.scale || 1) + ' لنفس السجلات التي يتوافر لها الرقمان والمقام موجب (مجاميع متطابقة لا متوسط عوائد).';
+      case 'diff': return 'مجموع (' + F('a') + ' − ' + F('b') + ') للسجلات التي يتوافر لها الرقمان.';
+      case 'growth': return '(مجموع ' + F('curr') + ' − مجموع ' + F('prev') + ') ÷ مجموع ' + F('prev') + ' × 100 للأصول المعروفة في الفترتين؛ إذا كان السابق صفرًا يُعرض «بدء إيراد» دون نسبة.';
+      case 'concentration': return 'مجموع أكبر ' + (spec.top || 3) + ' قيم موجبة من ' + F('field') + ' ÷ مجموع القيم الموجبة المعروفة × 100؛ مؤشر هيرفندال = مجموع مربعات الحصص × 10000.';
+      case 'coverage': return 'لكل حقل: عدد السجلات المعروفة ÷ عدد السجلات؛ القيمة = الأدنى × 100 (تغطية بالعدد لا بالقيمة).';
+      default: return str(spec.kind);
+    }
+  }
+  function namesList(ids) {
+    var ul = h('ul', { class: 'small' });
+    ids.slice(0, 200).forEach(function (x) {
+      var id = typeof x === 'object' ? x.id : x;
+      add(ul, h('li', null, recButton(id), typeof x === 'object' && x.reason ? ' — ' + reasonAr(x.reason) : null));
+    });
+    if (ids.length > 200) add(ul, h('li', { class: 'muted' }, 'و' + (ids.length - 200) + ' سجلًا آخر'));
+    if (!ids.length) add(ul, h('li', { class: 'muted' }, 'لا يوجد'));
+    return ul;
+  }
+  function renderCalculations(all) {
+    var b = clear(SEC.calculations.body);
+    var sc = scopeText(all);
+    add(b, h('p', { class: 'small muted' }, sc.lead + sc.body + sc.tail));
+    list(CFG.metrics).forEach(function (spec) {
+      var r = all.metrics[spec.id];
+      if (!r) return;
+      var rf = r.resolved_fields || {};
+      var fieldsTxt = Object.keys(rf).map(function (k) {
+        var v = rf[k];
+        return list(v).map(function (f) { return fieldLabel(f) + ' [' + f + ']'; }).join('، ');
+      }).filter(Boolean).join(' · ');
+      var pairs = [
+        ['القيمة', typeof r.value === 'number' ? h('span', { class: 'num' }, fmtUnit(r.value, r.unit)) : naText(r) + (r.reason ? ' — ' + str(r.reason) : '')],
+        ['التعريف', str(r.definition)],
+        ['طريقة الحساب', formulaWords(spec, r)],
+        ['الحقول المستخدمة', fieldsTxt || '—'],
+        ['النطاق', str(r.scope_text)],
+        ['الأساس', str(r.basis)],
+        ['الفترة', str(r.period_text)],
+        ['تاريخ التقييم', str(r.valuation_date)],
+        ['المصدر', str(r.source_text)],
+        ['السجلات', 'في النطاق ' + (r.n_scope || 0) + ' · مشمولة ' + (r.n_included || 0) + ' · مستبعدة ' + list(r.excluded).length]
+      ];
+      if (r.kind === 'ratio' && typeof r.value === 'number') {
+        pairs.push(['البسط ÷ المقام', h('span', { class: 'num' }, fmtMoney(r.num || 0) + ' ÷ ' + fmtMoney(r.den || 0))]);
+        if (typeof r.coverage_num_share === 'number') pairs.push(['تغطية البسط', 'تغطي ' + fmtShare(r.coverage_num_share) + ' من الإيراد المعروف (' + fmtMoney(r.num_known_total || 0) + ')']);
+      }
+      if (r.kind === 'growth') {
+        if (typeof r.prev_sum === 'number') pairs.push(['المجموعان', 'السابق ' + fmtMoney(r.prev_sum) + ' · الحالي ' + fmtMoney(r.curr_sum) + ' · التغير ' + fmtMoney(r.abs_change) + (r.revenue_start ? ' · بدء إيراد' : '')]);
+        if (r.comparability) pairs.push(['قابلية المقارنة', str(r.comparability.reason || r.comparability.status)]);
+        if (list(r.only_curr).length || list(r.only_prev).length) pairs.push(['معروفة في فترة واحدة', list(r.only_curr).concat(list(r.only_prev)).map(recName).join('، ')]);
+      }
+      if (r.kind === 'concentration' && list(r.top_ids).length) pairs.push(['الأكبر', list(r.top_ids).map(recName).join('، ') + (typeof r.hhi === 'number' ? ' · هيرفندال ' + fmtNumber(r.hhi, 0) : '')]);
+      if (r.kind === 'coverage') pairs.push(['لكل حقل', list(r.per_field).map(function (p) { return fieldLabel(p.field) + ': ' + p.n_known + ' من ' + p.n; }).join(' · ')]);
+      if (r.kind === 'diff' && typeof r.a_sum === 'number') pairs.push(['المجموعان', fmtMoney(r.a_sum) + ' − ' + fmtMoney(r.b_sum)]);
+      var art = h('article', { class: 'calc' },
+        h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), statusPill(r.status)),
+        kvList(pairs),
+        h('details', { class: 'sub' }, h('summary', null, 'السجلات المشمولة (' + list(r.included_ids).length + ') والمستبعدة (' + list(r.excluded).length + ')'),
+          h('p', { class: 'small lbl' }, 'المشمولة:'), namesList(list(r.included_ids)),
+          h('p', { class: 'small lbl' }, 'المستبعدة وسببها:'), namesList(list(r.excluded))),
+        h('details', { class: 'sub' }, h('summary', null, 'الشرط التقني (DSL)'), h('p', { class: 'small' }, h('code', null, JSON.stringify(spec.where || null)))));
+      add(b, art);
+    });
+    var der = list(WB.derived_fields);
+    if (der.length) {
+      add(b, h('h4', null, 'حقول مشتقة صراحةً في التصنيف'));
+      add(b, simpleTable([{ label: 'الحقل', cell: function (x) { return fieldLabel(x.field) + ' [' + str(x.field) + ']'; } }, { label: 'المعادلة', cell: function (x) { return h('code', null, str(x.formula)); } },
+        { label: 'متى', cell: function (x) { return x.when === 'if_unknown' ? 'إذا كان غير معروف' : 'دائمًا'; } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], der));
+    }
+    setCount('calculations', list(CFG.metrics).length);
+  }
+
+  function renderRecommendationsFull() {
+    var b = clear(SEC.recommendations.body);
+    add(b, h('h4', null, 'الفجوات (' + GAPS.length + ')'));
+    if (!GAPS.length) add(b, h('p', { class: 'muted' }, 'لا توجد فجوات في السرد.'));
+    GAPS.forEach(function (g) {
+      add(b, h('article', { class: 'calc' }, h('h5', null, str(g.id) + ' — ' + str(g.title), provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
+        kvList([['النطاق', scopeNodes(g.scope)], ['الأثر', g.impact && typeof g.impact === 'object' ? str(g.impact.text) : str(g.impact)],
+          ['السبب المثبت', g.proven_cause ? str(g.proven_cause) : 'لا يوجد سبب مثبت'], ['أسباب محتملة', list(g.possible_causes).map(str).join('؛ ')],
+          ['يلزم للتحقق', list(g.verification_needed).map(str).join('؛ ')], ['الإجراء المقترح', str(g.proposed_action)], ['الدليل', evidenceChips(g.evidence)]])));
+    });
+    add(b, h('h4', null, 'التوصيات (' + RECS.length + ')'));
+    if (!RECS.length) add(b, h('p', { class: 'muted' }, 'لا توجد توصيات في السرد.'));
+    RECS.slice().sort(function (a, c) { return (a.priority || 99) - (c.priority || 99); }).forEach(function (r) {
+      var rk = r.ranking && typeof r.ranking === 'object' ? r.ranking : {};
+      add(b, h('article', { class: 'calc' }, h('h5', null, str(r.id) + ' — ' + str(r.target), r.priority ? pill('الأولوية ' + r.priority, 'navy') : null),
+        kvList([['المشكلة', str(r.problem)], ['الفجوات', list(r.gap_ids).map(function (x) { return GAP[x] ? x + ' — ' + str(GAP[x].title) : str(x); }).join('؛ ')],
+          ['الإجراء الأول', str(r.first_action)], ['البدائل', list(r.alternatives).map(str).join('؛ ')], ['الخيار الموصى به', str(r.recommended_option)],
+          ['السبب', str(r.rationale)], ['المسؤول', str(r.owner_role)], ['المدة', str(r.duration)], ['التكلفة', str(r.cost)],
+          ['الأثر المتوقع', str(r.expected_impact)], ['مؤشر النجاح', str(r.success_kpi)], ['الاعتماد المطلوب', r.approval_required ? str(r.approval_required) : 'لا يلزم'],
+          ['الترتيب', Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).map(function (k) { return RANKING_AR[k] + ': ' + levelAr(rk[k]); }).join(' · ')],
+          ['الدليل', evidenceChips(r.evidence)]])));
+    });
+    var st = list(NAR.strengths);
+    if (st.length) {
+      add(b, h('h4', null, 'نقاط القوة'));
+      add(b, h('ul', null, st.map(function (s) { return h('li', null, kindTag(s && s.kind), ' ', str(s && s.text !== undefined ? s.text : s), s && s.evidence ? evidenceChips(s.evidence) : null); })));
+    }
+    setCount('recommendations', GAPS.length + RECS.length);
+  }
+
+  function renderIssues() {
+    var b = clear(SEC.issues.body);
+    var rows = ISSUES.slice().sort(function (a, c) { return (SEV_ORDER[a.severity] === undefined ? 3 : SEV_ORDER[a.severity]) - (SEV_ORDER[c.severity] === undefined ? 3 : SEV_ORDER[c.severity]); });
+    add(b, h('p', { class: 'small muted' }, 'جودة البيانات منفصلة عن أداء المحفظة: هذه مشكلات في الملف وأثرها على المؤشرات وطريقة معالجتها.'));
+    if (!rows.length) add(b, h('p', { class: 'muted' }, 'لا توجد مشكلات بيانات مسجلة.'));
+    else add(b, simpleTable([
+      { label: 'المعرف', cell: function (x) { return idc(x.id); } },
+      { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
+      { label: 'الموضع', cell: function (x) { return bdi(x.where); } },
+      { label: 'المشكلة', cell: function (x) { return str(x.detail); } },
+      { label: 'الأثر', cell: function (x) { return str(x.impact); } },
+      { label: 'المعالجة', cell: function (x) { return str(x.treatment); } },
+      { label: 'السجلات', cell: function (x) { var ids = list(x.record_ids); return ids.length ? ids.slice(0, 6).map(function (id, i) { return [i ? '، ' : null, REC[id] ? recButton(id) : bdi(id)]; }) : '—'; } }
+    ], rows));
+    setCount('issues', rows.length);
+  }
+
+  function renderExclusions() {
+    var b = clear(SEC.exclusions.body);
+    var out = RECORDS.filter(function (r) { return r.scope !== 'in_scope'; });
+    add(b, h('h4', null, 'سجلات خارج نطاق المؤشرات (' + out.length + ')'));
+    if (!out.length) add(b, h('p', { class: 'muted' }, 'كل السجلات ضمن نطاق الدراسة.'));
+    else add(b, simpleTable([
+      { label: 'السجل', cell: function (r) { return recButton(r.id); } },
+      { label: 'النوع', cell: function (r) { return (V.record_type && V.record_type[r.record_type]) || str(r.record_type); } },
+      { label: 'النطاق', cell: function (r) { return (V.scope && V.scope[r.scope]) || str(r.scope); } },
+      { label: 'السبب', cell: function (r) { return str(r.scope_reason) || '—'; } },
+      { label: 'المصدر', cell: function (r) { return bdi((r.source && (r.source.ref_name || r.source.sheet)) || ''); } }
+    ], out));
+    var ex = list(D.excluded_rows);
+    if (ex.length) {
+      add(b, h('h4', null, 'صفوف استُبعدت أثناء التطبيع (' + ex.length + ')'));
+      add(b, simpleTable([{ label: 'الورقة', cell: function (x) { return bdi(x.sheet); } }, { label: 'الصف', num: true, cell: function (x) { return str(x.row || (x.rows ? list(x.rows).join('، ') : '')); } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ex));
+    }
+    var ne = list(NAR.exclusions);
+    if (ne.length) {
+      add(b, h('h4', null, 'استبعادات موثقة في الدراسة'));
+      add(b, simpleTable([{ label: 'ما استُبعد', cell: function (x) { return str(x.what); } }, { label: 'الموضع', cell: function (x) { return bdi(x.where); } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ne));
+    }
+    setCount('exclusions', out.length + ex.length + ne.length);
+  }
+
+  function renderWorkbook() {
+    var b = clear(SEC.workbook.body);
+    var sheets = list(WB.sheets);
+    var dec = {};
+    list(WB.decisions).forEach(function (d) { if (d && d.sheet !== undefined) dec[str(d.sheet).trim()] = d; });
+    var s = WB.summary || {};
+    if (WB.available) {
+      add(b, h('p', { class: 'small' }, 'الأوراق: ' + (s.sheets !== undefined ? s.sheets : sheets.length) + (s.hidden_sheets !== undefined ? ' (مخفية ' + s.hidden_sheets + ')' : '') +
+        (s.formulas !== undefined ? ' · الصيغ: ' + s.formulas : '') + (s.anomalies !== undefined ? ' · الملاحظات: ' + s.anomalies : '')));
+    } else add(b, h('p', { class: 'small muted' }, 'خريطة المصنف (01_workbook_map.json) غير مرفقة.'));
+    var names = sheets.map(function (x) { return str(x.name).trim(); });
+    Object.keys(dec).forEach(function (n) { if (names.indexOf(n) < 0) { sheets.push({ name: n }); names.push(n); } });
+    if (sheets.length) {
+      add(b, h('h4', null, 'الأوراق وقرارات التحليل'));
+      add(b, simpleTable([
+        { label: 'الورقة', cell: function (x) { return bdi(x.name); } },
+        { label: 'الحالة', cell: function (x) { return STATE_AR[x.state] || str(x.state) || '—'; } },
+        { label: 'الدور', cell: function (x) { var d = dec[str(x.name).trim()]; var r = (d && d.role) || x.role_hint; return ROLE_AR[r] || str(r) || '—'; } },
+        { label: 'القرار', cell: function (x) { var d = dec[str(x.name).trim()]; return d ? (DECISION_AR[d.decision] || str(d.decision)) : '—'; } },
+        { label: 'الفترة', cell: function (x) { var d = dec[str(x.name).trim()]; return d && d.period ? str(d.period) : '—'; } },
+        { label: 'الموثوقية', cell: function (x) { var d = dec[str(x.name).trim()]; return d && d.reliability ? levelAr(d.reliability) : '—'; } },
+        { label: 'العلاقة بالسجل والسبب', cell: function (x) { var d = dec[str(x.name).trim()]; return d ? [str(d.relation_to_register), d.reason ? ' — ' + str(d.reason) : ''].join('') : '—'; } },
+        { label: 'النطاق والجداول', cell: function (x) { return [str(x.dimensions), list(x.tables).map(function (t) { return str(t.name) + ' ' + str(t.ref); }).join('، ')].filter(Boolean).join(' · ') || '—'; } }
+      ], sheets));
+    }
+    var an = list(WB.anomalies);
+    if (an.length) {
+      add(b, h('h4', null, 'ملاحظات على المصنف (' + an.length + ')'));
+      add(b, simpleTable([{ label: 'المعرف', cell: function (x) { return idc(x.id); } }, { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
+        { label: 'الموضع', cell: function (x) { return bdi(x.where); } }, { label: 'التفاصيل', cell: function (x) { return str(x.detail); } }], an));
+    }
+    var pii = list(WB.pii_columns);
+    if (pii.length) add(b, h('p', { class: 'small', style: 'margin-top:12px' }, 'أعمدة بيانات شخصية لم تُنقل قيمها إلى اللوحة: ' + pii.map(function (p) { return str(p.sheet).trim() + '!' + str(p.col) + ' (' + str(p.header) + ')'; }).join('، ')));
+    var ln = list(WB.links);
+    if (ln.length) {
+      add(b, h('h4', null, 'روابط محتملة بين الأوراق'));
+      add(b, simpleTable([{ label: 'السجل', cell: function (x) { return REC[x.record] ? recButton(x.record) : bdi(x.record); } }, { label: 'المرجع الآخر', cell: function (x) { return bdi(x.other_ref); } },
+        { label: 'التطابق', cell: function (x) { return MATCH_AR[x.match] || str(x.match); } }, { label: 'الأساس', cell: function (x) { return str(x.basis); } },
+        { label: 'استُخدم؟', cell: function (x) { return x.used ? 'نعم' : 'لا'; } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ln));
+    }
+    setCount('workbook', sheets.length || null);
+  }
+
+  function renderAssumptions() {
+    var b = clear(SEC.assumptions.body);
+    var a = list(NAR.assumptions);
+    if (!a.length) add(b, h('p', { class: 'muted' }, 'لا توجد افتراضات موثقة.'));
+    else add(b, simpleTable([{ label: 'المعرف', cell: function (x) { return idc(x.id); } }, { label: 'الافتراض', cell: function (x) { return [kindTag(x.kind), ' ', str(x.text !== undefined ? x.text : x)]; } },
+      { label: 'الأساس', cell: function (x) { return str(x.basis) || '—'; } }], a));
+    setCount('assumptions', a.length);
+  }
+
+  function renderSources() {
+    var b = clear(SEC.sources.body);
+    add(b, kvList([['الملف', META.file_name ? bdi(META.file_name) : 'غير معروف'], ['بصمة SHA-256 (مختصرة)', META.sha256_short ? h('code', null, str(META.sha256_short)) : '—'],
+      ['تاريخ إعداد الدراسة', META.study_date ? str(META.study_date) + (META.study_date_basis ? ' — ' + str(META.study_date_basis) : '') : 'غير محدد'],
+      ['تواريخ التقييم', list(META.valuation_dates).map(function (v) { return str(v.year) + (v.basis ? ' — ' + str(v.basis) : ''); }).join('؛ ') || '—']]));
+    var s = list(NAR.sources);
+    if (s.length) {
+      add(b, h('h4', null, 'المصادر المستخدمة'));
+      add(b, simpleTable([{ label: 'النوع', cell: function (x) { return SRC_AR[x.type] || str(x.type); } }, { label: 'المرجع', cell: function (x) { return bdi(x.ref); } },
+        { label: 'التاريخ', cell: function (x) { return str(x.date) || '—'; } }, { label: 'حدود الاستخدام', cell: function (x) { return str(x.limits) || '—'; } }], s));
+    }
+    setCount('sources', s.length + 1);
+  }
+
+  function renderQuestions() {
+    var b = clear(SEC.questions.body);
+    var q = list(NAR.questions).slice(0, 3);
+    add(b, h('h4', null, 'أسئلة مؤثرة (حتى ثلاثة)'));
+    if (!q.length) add(b, h('p', { class: 'muted' }, 'لا توجد أسئلة مفتوحة.'));
+    else add(b, h('ol', null, q.map(function (x) { return h('li', null, str(x)); })));
+    var r = list(NAR.data_requests).slice().sort(function (a, c) { return (a.priority || 99) - (c.priority || 99); });
+    add(b, h('h4', null, 'بيانات إضافية مطلوبة وما ستتيحه'));
+    if (!r.length) add(b, h('p', { class: 'muted' }, 'لا توجد طلبات بيانات.'));
+    else add(b, simpleTable([{ label: 'الأولوية', num: true, cell: function (x) { return str(x.priority) || '—'; } }, { label: 'البيان المطلوب', cell: function (x) { return str(x.item); } },
+      { label: 'يتيح', cell: function (x) { return list(x.enables).map(str).join('، '); } }], r));
+    setCount('questions', q.length + r.length);
+  }
+
+  function renderScenarios() {
+    var b = clear(SEC.scenarios.body);
+    var s = NAR.scenarios && typeof NAR.scenarios === 'object' ? NAR.scenarios : {};
+    var items = list(s.items || s.scenarios || (Array.isArray(NAR.scenarios) ? NAR.scenarios : []));
+    if (s.status !== 'prepared' || !items.length) {
+      add(b, h('p', null, h('b', null, 'لم تُعدّ سيناريوهات. ')), h('p', null, 'السبب: ' + (str(s.reason) || 'لا تتوفر مدخلات موثقة (إيجارات سوقية أو تكاليف) لإعدادها دون نسب اعتباطية.')));
+      var req = list(s.required_inputs);
+      if (req.length) { add(b, h('h4', null, 'المدخلات اللازمة لإعدادها')); add(b, h('ul', null, req.map(function (x) { return h('li', null, str(x)); }))); }
+      setCount('scenarios', 0);
+      return;
+    }
+    add(b, h('p', { class: 'caveat' }, 'نتائج تقديرية مبنية على افتراضات موثقة؛ ليست أداءً محققًا ولا وعدًا بعائد.'));
+    var CASES = [['conservative', 'محافظ'], ['base', 'أساسي'], ['optimistic', 'محسن']];
+    var FIELDS = [['extra_revenue', 'الإيراد الإضافي'], ['extra_expense', 'المصروف الإضافي'], ['net_effect', 'صافي الأثر'], ['capex', 'التكلفة الرأسمالية'],
+      ['start', 'بدء الأثر'], ['year1_effect', 'أثر السنة الأولى'], ['run_rate_effect', 'الأثر السنوي بعد الاكتمال']];
+    items.forEach(function (it) {
+      var art = h('article', { class: 'calc' }, h('h5', null, str(it.id) + ' — ' + str(it.opportunity), it.recurring === false ? pill('لمرة واحدة', 'neutral') : pill('متكرر', 'navy')));
+      add(art, kvList([['الأصول', list(it.asset_ids).map(recName).join('، ') || '—'], ['يتداخل مع', list(it.overlaps_with).map(str).join('، ') || 'لا يوجد']]));
+      var as = list(it.assumptions);
+      if (as.length) add(art, h('ul', { class: 'small' }, as.map(function (a) { return h('li', null, kindTag('assumption'), ' ', str(a.text !== undefined ? a.text : a), a.source ? ' — المصدر: ' + str(a.source) : ''); })));
+      add(art, simpleTable([{ label: 'البند', cell: function (f) { return f[1]; } }].concat(CASES.map(function (c) {
+        return { label: c[1], num: true, cell: function (f) { var v = it[c[0]] && it[c[0]][f[0]]; return typeof v === 'number' ? fmtMoney(v) : (str(v) || '—'); } };
+      })), FIELDS, 'mini-table'));
+      add(b, art);
+    });
+    setCount('scenarios', items.length);
+  }
+
+  function renderVersions() {
+    var b = clear(SEC.versions.body);
+    var vc = NAR.version_comparison;
+    var fu = list(NAR.recommendation_followup);
+    if (!vc || (typeof vc === 'object' && !Object.keys(vc).length)) add(b, h('p', null, 'لا توجد نسخة سابقة متاحة للمقارنة في هذا التشغيل؛ لا يُدّعى وجود نسخة سابقة.'));
+    else { add(b, h('h4', null, 'مقارنة بالنسخة السابقة')); add(b, renderAny(vc, 0)); }
+    add(b, h('h4', null, 'متابعة التوصيات السابقة'));
+    if (!fu.length) add(b, h('p', { class: 'muted' }, 'لا توجد توصيات سابقة للمتابعة.'));
+    else add(b, h('div', null, fu.map(function (x) { return h('div', { class: 'calc' }, renderAny(x, 1)); })));
+    setCount('versions', vc ? 1 + fu.length : fu.length || null);
+  }
+
+  function renderAllRecords() {
+    var b = clear(SEC.records.body);
+    var rows = RECORDS.slice().sort(function (a, c) { var o = { in_scope: 0, isolated: 1, excluded: 2 }; return ((o[a.scope] || 3) - (o[c.scope] || 3)) || (a.id < c.id ? -1 : a.id > c.id ? 1 : 0); });
+    add(b, simpleTable([
+      { label: 'المعرف', cell: function (r) { return idc(r.id); } },
+      { label: 'الاسم', cell: function (r) { return recButton(r.id, str(r.name || r.id)); } },
+      { label: 'النوع', cell: function (r) { return (V.record_type && V.record_type[r.record_type]) || str(r.record_type); } },
+      { label: 'النطاق', cell: function (r) { return (V.scope && V.scope[r.scope]) || str(r.scope); } },
+      { label: 'الاستخدام', cell: function (r) { return dimText(r, 'use'); } },
+      { label: 'طبيعة الدخل', cell: function (r) { return dimText(r, 'income_nature'); } },
+      { label: 'المصدر', cell: function (r) { return bdi((r.source && r.source.ref_name) || ''); } }
+    ], rows));
+    setCount('records', rows.length);
+  }
+
+  function renderFooter() {
+    var f = clear($('#footer'));
+    var when = META.built_at ? str(META.built_at).replace('T', ' ').slice(0, 16) : '';
+    add(f, h('p', null, 'أُعدّت هذه اللوحة آليًا من مجلد التشغيل', when ? [' في ', h('bdi', { dir: 'ltr' }, when)] : null,
+      '. البيانات مضمّنة في الملف ولا تتصل اللوحة بأي خادم، ولا تعرض بيانات اتصال أو معرفات شخصية.'));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Breakdown dimension selector
+  // ---------------------------------------------------------------------------
+  function buildDimSelector() {
+    var sel = clear($('#bd-dim'));
+    var dims = breakdownDims();
+    var pref = ['asset_type', 'use', 'location', 'income_nature', 'ownership'];
+    state.bdDim = pref.filter(function (d) { return dims.indexOf(d) >= 0; })[0] || dims[0] || 'asset_type';
+    if (!dims.length) add(sel, h('option', { value: '' }, 'لا توجد توزيعات'));
+    dims.forEach(function (d) { add(sel, h('option', { value: d }, dimLabel(d) + (d === 'ownership' ? ' (قد تتداخل الفئات)' : ''))); });
+    sel.value = state.bdDim;
+    sel.addEventListener('change', function () { state.bdDim = sel.value; renderCharts(state.last); });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tooltip
+  // ---------------------------------------------------------------------------
+  function bindTooltip() {
+    var tip = $('#tip');
+    var grid = $('#chart-grid');
+    grid.addEventListener('pointermove', function (ev) {
+      var t = ev.target && ev.target.closest ? ev.target.closest('[data-tip]') : null;
+      var text = t ? t.getAttribute('data-tip') : '';
+      if (!text) { tip.hidden = true; return; }
+      tip.textContent = text;
+      tip.hidden = false;
+      var w = tip.offsetWidth, hh = tip.offsetHeight;
+      var x = ev.clientX - w - 14, y = ev.clientY + 14;
+      if (x < 8) x = ev.clientX + 14;
+      if (x + w > window.innerWidth - 8) x = window.innerWidth - w - 8;
+      if (y + hh > window.innerHeight - 8) y = ev.clientY - hh - 14;
+      tip.style.left = x + 'px';
+      tip.style.top = y + 'px';
+    });
+    grid.addEventListener('pointerleave', function () { tip.hidden = true; });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render (single source: APA.computeAll)
+  // ---------------------------------------------------------------------------
+  function render() {
+    var all = APA.computeAll(getFilters());
+    state.last = all;
+    syncSelects();
+    var sc = scopeText(all);
+    var sp = clear($('#filter-scope'));
+    add(sp, h('strong', null, sc.lead), sc.body, sc.tail);
+    renderCards(all);
+    renderCharts(all);
+    renderTable(all);
+    renderCalculations(all);
+    if (state.detailId && REC[state.detailId]) renderDetail();
+    return all;
+  }
+
+  function init() {
+    renderIdentity();
+    buildFilterOptions();
+    buildFilterControls();
+    buildDimSelector();
+    buildTableHead();
+    buildDetailsShell();
+    renderSummary();
+    renderPriorities();
+    renderPlan();
+    renderMethodology();
+    renderRecommendationsFull();
+    renderIssues();
+    renderExclusions();
+    renderWorkbook();
+    renderAssumptions();
+    renderSources();
+    renderQuestions();
+    renderScenarios();
+    renderVersions();
+    renderAllRecords();
+    renderFooter();
+    bindTooltip();
+
+    $('[data-action="print"]').addEventListener('click', function () { window.print(); });
+    $('[data-action="reset-filters"]').addEventListener('click', resetFilters);
+    $('[data-action="close-detail"]').addEventListener('click', closeDetail);
+    var tg = $('[data-action="toggle-filters"]');
+    tg.addEventListener('click', function () {
+      var fb = $('#filterbar');
+      var open = !fb.classList.contains('open');
+      fb.classList.toggle('open', open);
+      tg.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    var search = $('input[data-role="table-search"]');
+    var onSearch = function () { if (state.search !== search.value) { state.search = search.value; renderTable(state.last); } };
+    search.addEventListener('input', onSearch);
+    search.addEventListener('change', onSearch);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && state.detailId) closeDetail();
+    });
+    var rt = null, lastW = window.innerWidth;
+    window.addEventListener('resize', function () {
+      if (window.innerWidth === lastW) return;
+      lastW = window.innerWidth;
+      clearTimeout(rt);
+      rt = setTimeout(function () { if (state.last) renderCharts(state.last); }, 150);
+    });
+    // print: redraw the SVG charts at the paper width (one chart per row), then back to the screen width
+    var setPrinting = function (on) {
+      if (state.printing === on) return;
+      state.printing = on;
+      if (state.last) renderCharts(state.last);
+    };
+    window.addEventListener('beforeprint', function () { setPrinting(true); });
+    window.addEventListener('afterprint', function () { setPrinting(false); });
+    var mq = window.matchMedia ? window.matchMedia('print') : null;
+    if (mq) {
+      var onMq = function (e) { setPrinting(!!e.matches); };
+      if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+    }
+    render();
+    window.APA_UI = { getFilters: getFilters, setFilters: setFilters, render: render };
+  }
+
+  try { init(); } catch (e) {
+    fatal('تعذر عرض اللوحة: ' + (e && e.message ? e.message : String(e)));
+    throw e;
+  }
+})();
+</script>
+</body>
+</html>
