@@ -40,7 +40,7 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
     "title_cells": [{"ref": "A1", "text": "بيان بأصول الجمعية ... لعام 2025م"}],
     "columns": [{"col": "C", "header": "الايراد بدون ضريبة 2025", "years_in_header": [2025],
                  "profile": {"numeric": 1, "zero": 0, "text": 0, "blank": 0, "filler": 0, "error": 0, "formula": 0, "date": 0},
-                 "samples": ["144450"], "mixed_types": false, "pii": false}],
+                 "samples": ["187500"], "mixed_types": false, "pii": false}],
     "row_kinds": {"3": "data", "4": "total_formula", "28-43": "filler"},
     "formulas": {"count": 36, "cached_missing": 0, "errors": 0},
     "comments": [{"ref": "...", "text": "..."}],
@@ -90,7 +90,7 @@ recalculated its formulas — say so in `methodology_notes`.
 ## 2. Typed value (`TV`) — used in every record field
 
 ```jsonc
-{"v": 144450, "s": "value", "raw": "144450", "ref": "عقارات الجمعية !C3", "note": null}
+{"v": 187500, "s": "value", "raw": "187500", "ref": "عقارات الجمعية !C3", "note": null}
 ```
 `s` ∈ `value | derived | zero_recorded | zero_confirmed | zero_as_missing | blank | filler | text | error | not_applicable | not_available`.
 **Known** statuses = `value, derived, zero_recorded, zero_confirmed` (v is a number; zero statuses have v = 0).
@@ -101,7 +101,7 @@ Optional TV keys: `formula`, `no_cache`, `zero_from_blank_inputs`, `percent_in_a
 `foreign_currency`, `redacted`, `joined_from`, `rollup` (`{from, evidence}`), `override` (`{from_s, from_v, evidence}`),
 `calendar`, `hijri`.
 Zero policy per column (mapping `zero_policy`): `recorded` (default for revenue, expense, units, counts) → `zero_recorded`; `missing` (default for `val.*`, areas) → `zero_as_missing`.
-Dates: `{"v": "1982-12-14", "s": "value", "raw": "1403/2/29هـ", "calendar": "hijri", "hijri": "1403-02-29"}`.
+Dates: `{"v": "1989-12-10", "s": "value", "raw": "1410/5/12هـ", "calendar": "hijri", "hijri": "1410-05-12"}`.
 Text fields: `{"v": "منفوحة", "s": "value", "raw": "...", "ref": "..."}`.
 
 ## 3. `02_mapping.json` (authored by Claude)
