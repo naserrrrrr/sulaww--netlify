@@ -37,6 +37,8 @@ import tempfile
 import zipfile
 from collections import OrderedDict
 
+sys.dont_write_bytecode = True
+
 ENTITY = "جمعية تجريبية لرعاية الأيتام (بيانات وهمية)"
 FILE_NAME = "synthetic_portfolio.xlsx"
 REG = "سجل الأصول"
@@ -651,14 +653,18 @@ def m_diff(R, a, b):
 
 
 def m_growth(R, prev, curr, comparability):
+    """Growth over records known in both periods; a revenue start (prev 0, curr > 0) is reported apart, outside the %."""
     if prev is None:
         return OrderedDict([("value", None), ("status", "not_computable"), ("n_scope", len(R)), ("n_included", 0)])
     if comparability == "not_comparable":
         return OrderedDict([("value", None), ("status", "not_comparable"), ("n_scope", len(R)), ("n_included", 0)])
-    I, ex, oc, op = [], [], [], []
+    I, ex, oc, op, starts = [], [], [], [], []
     for r in R:
         kp, kc = _known(r, prev), _known(r, curr)
-        if kp and kc:
+        if kp and kc and _v(r, prev) == 0 and _v(r, curr) > 0:
+            starts.append(r)
+            ex.append({"id": r["id"], "reason": "revenue_start"})
+        elif kp and kc:
             I.append(r)
         elif kc:
             oc.append(r["id"])
@@ -672,10 +678,12 @@ def m_growth(R, prev, curr, comparability):
     cs = sum(_v(r, curr) for r in I)
     pct = (cs - ps) / ps * 100 if (I and ps > 0) else None
     st = "empty" if not R else ("not_computable" if not I else ("partial" if ex else "complete"))
+    if I and not ps > 0:
+        st = "not_computable"   # previous total zero or negative: no growth % (never "complete" with no value)
     return OrderedDict([("value", pct), ("status", st), ("n_scope", len(R)), ("n_included", len(I)),
                         ("included_ids", sorted(r["id"] for r in I)), ("excluded", sorted(ex, key=lambda x: x["id"])),
                         ("prev_sum", ps if I else None), ("curr_sum", cs if I else None),
-                        ("abs_change", cs - ps if I else None), ("revenue_start", bool(I) and ps == 0 and cs > 0),
+                        ("abs_change", cs - ps if I else None), ("revenue_start", bool(starts)),
                         ("only_curr", sorted(oc)), ("only_prev", sorted(op)),
                         ("comparability_status", comparability)])
 
@@ -700,11 +708,22 @@ def m_concentration(R, field, top=3):
 
 
 def m_coverage(R, fields):
+    """Per field: known / (records where the field applies); «لا ينطبق» is not missing data."""
     n = len(R)
-    per = [OrderedDict([("field", f), ("n_known", sum(1 for r in R if _known(r, f))), ("n", n)]) for f in fields]
-    val = min(p["n_known"] / n for p in per) * 100 if n else None
-    return OrderedDict([("value", val), ("status", "complete" if n else "empty"), ("n_scope", n),
-                        ("n_included", n), ("per_field", per)])
+    per = [OrderedDict([("field", f), ("n_known", sum(1 for r in R if _known(r, f))),
+                        ("n", n - sum(1 for r in R if _status(r, f) == "not_applicable"))]) for f in fields]
+    ratios = [p["n_known"] / p["n"] for p in per if p["n"] > 0]
+    val = min(ratios) * 100 if (n and ratios) else None
+    st = "empty" if not n else ("complete" if ratios else "not_computable")
+    return OrderedDict([("value", val), ("status", st), ("n_scope", n), ("n_included", n), ("per_field", per)])
+
+
+def as_zero_if_scope_empty(res, R_unfiltered):
+    """A sum/count whose whole scope (before dashboard filters) is empty is a real 0, status complete."""
+    if res["status"] == "empty" and not R_unfiltered:
+        res["value"] = 0
+        res["status"] = "complete"
+    return res
 
 
 PERIODS = OrderedDict([
@@ -712,6 +731,10 @@ PERIODS = OrderedDict([
     ("2024", dict(REV="rev.2024.actual", EXP=None, REV_PREV=None, comparability="unverified")),
 ])
 VAL = "val.2024.total"
+# revenue/valuation ratios exist only for the valuation year (2024) and the year after
+VALID_YIELD_PERIODS = ("2025", "2024")
+# revenue is read from whole assets, land parcels and operating activities only (never from unit/contract rows)
+REVENUE_TYPES = ("asset", "land_parcel", "operating_activity")
 
 
 def compute_metrics(truth: list, filters: dict) -> OrderedDict:
@@ -719,31 +742,51 @@ def compute_metrics(truth: list, filters: dict) -> OrderedDict:
     period = filters.pop("period", None) or "2025"
     P = PERIODS[period]
     REV, EXP_, PREV = P["REV"], P["EXP"], P["REV_PREV"]
-    base = [r for r in truth if r["scope"] == "in_scope"]
+    scope = [r for r in truth if r["scope"] == "in_scope"]
+    base = scope
     for k, v in filters.items():
         base = [r for r in base if ((v in _d(r, k)) if isinstance(_d(r, k), list) else _d(r, k) == v)]
+
+    def rev_rec(r):
+        return r["record_type"] in REVENUE_TYPES
+
+    def zero_rev_set(recs):
+        return [r for r in recs if _d(r, "use") == "investment" and is_asset(r) and not_managed(r)
+                and _status(r, REV) in ("zero_recorded", "zero_confirmed")]
+
+    def assets(recs):
+        return [r for r in recs if is_asset(r) and not_managed(r)]
+
+    def operating(recs):
+        return [r for r in recs if r["record_type"] == "operating_activity"]
+
+    def managed(recs):
+        return [r for r in recs if not not_managed(r)]
+
     inv = [r for r in base if _d(r, "use") == "investment" and is_asset(r)
            and _d(r, "income_nature") != "operating" and not_managed(r)]
-    rent = [r for r in base if _d(r, "income_nature") == "rent" and not_managed(r)]
+    rent = [r for r in base if _d(r, "income_nature") == "rent" and not_managed(r) and rev_rec(r)]
     out = OrderedDict()
-    out["asset_count"] = m_count([r for r in base if is_asset(r) and not_managed(r)])
-    out["operating_records_count"] = m_count([r for r in base if r["record_type"] == "operating_activity"])
-    out["managed_records_count"] = m_count([r for r in base if not not_managed(r)])
-    out["recorded_value"] = m_sum([r for r in base if is_asset(r) and not_managed(r)], VAL)
+    out["asset_count"] = as_zero_if_scope_empty(m_count(assets(base)), assets(scope))
+    out["operating_records_count"] = as_zero_if_scope_empty(m_count(operating(base)), operating(scope))
+    out["managed_records_count"] = as_zero_if_scope_empty(m_count(managed(base)), managed(scope))
+    out["recorded_value"] = m_sum(assets(base), VAL)
     out["property_revenue"] = m_sum(rent, REV)
-    out["activity_revenue"] = m_sum([r for r in base if _d(r, "income_nature") == "operating"], REV)
+    out["activity_revenue"] = m_sum([r for r in base if _d(r, "income_nature") == "operating" and rev_rec(r)], REV)
     out["gross_yield_investment"] = m_ratio(inv, REV, VAL)
     out["gross_yield_owned"] = m_ratio([r for r in base if is_asset(r) and "owned" in (_d(r, "ownership") or [])
                                         and _d(r, "income_nature") != "operating" and not_managed(r)], REV, VAL)
     out["gross_yield_income_producing"] = m_ratio([r for r in inv if _known(r, REV) and _v(r, REV) > 0], REV, VAL)
+    if period not in VALID_YIELD_PERIODS:
+        for mid in ("gross_yield_investment", "gross_yield_owned", "gross_yield_income_producing"):
+            out[mid] = OrderedDict([("value", None), ("status", "not_comparable"), ("n_scope", out[mid]["n_scope"]),
+                                    ("n_included", 0)])
     out["noi"] = m_diff(rent, REV, EXP_)
-    out["zero_rev_investment_value"] = m_sum(
-        [r for r in base if _d(r, "use") == "investment" and is_asset(r) and not_managed(r)
-         and _status(r, REV) in ("zero_recorded", "zero_confirmed")], VAL)
-    out["data_coverage"] = m_coverage([r for r in base if is_asset(r) and not_managed(r)], [REV, VAL])
+    out["zero_rev_investment_value"] = as_zero_if_scope_empty(m_sum(zero_rev_set(base), VAL), zero_rev_set(scope))
+    out["data_coverage"] = m_coverage(assets(base), [REV, VAL])
     out["revenue_growth"] = m_growth(rent, PREV, REV, P["comparability"])
-    out["value_concentration_top3"] = m_concentration([r for r in base if is_asset(r) and not_managed(r)], VAL)
-    out["revenue_concentration_top3"] = m_concentration([r for r in base if not_managed(r)], REV)
+    out["value_concentration_top3"] = m_concentration(assets(base), VAL)
+    out["revenue_concentration_top3"] = m_concentration([r for r in base if not_managed(r) and rev_rec(r)], REV)
     return out
 
 

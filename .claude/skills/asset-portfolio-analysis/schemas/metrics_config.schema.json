@@ -63,7 +63,21 @@
       "items": {"type": "string", "minLength": 1, "not": {"const": "period"}},
       "uniqueItems": true
     },
-    "parity_max_values_per_dim": {"type": "integer", "minimum": 0}
+    "parity_max_values_per_dim": {"type": "integer", "minimum": 0},
+    "init_warnings": {
+      "description": "Written by compute_metrics.py --init-config for the analyst to review: revenue_incl_vat (a period falls back to a VAT-inclusive revenue field), yield_periods_limited (valid_periods narrower than periods), no_in_scope_records.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "text"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "period": {"type": ["string", "null"]},
+          "field": {"type": ["string", "null"]},
+          "text": {"type": "string", "minLength": 1}
+        }
+      }
+    }
   },
   "$defs": {
     "fieldName": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_.]*$"},
@@ -126,7 +140,8 @@
         "valuation_date": {"type": ["string", "null"]},
         "period_text": {"type": ["string", "null"]},
         "source_text": {"type": ["string", "null"]},
-        "unavailable_reason": {"type": ["string", "null"]}
+        "unavailable_reason": {"type": ["string", "null"]},
+        "empty_text": {"type": ["string", "null"]}
       },
       "additionalProperties": false
     },
@@ -160,6 +175,10 @@
         "period_text": {"type": ["string", "null"]},
         "source_text": {"type": ["string", "null"]},
         "unavailable_reason": {"type": ["string", "null"]},
+        "empty_text": {"description": "Arabic text shown when no record of the whole scope qualifies (empty_cause scope); a dim filter that empties the scope uses the engine's filter text instead", "type": ["string", "null"]},
+        "empty_as_zero": {"description": "sum/count only: no qualifying record in the whole scope (empty_cause scope) gives value 0, status complete, note = empty_text. Default true for count, false for sum", "type": "boolean"},
+        "valid_periods": {"description": "Period ids for which the metric is defined; any other selected period gives status not_comparable with reason invalid_period_reason (revenue-to-valuation ratios: the valuation year and the year after)", "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "invalid_period_reason": {"description": "Arabic reason used when the selected period is outside valid_periods", "type": ["string", "null"]},
         "kind_tag": {"enum": ["fact", "derived"]},
         "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
       },
@@ -167,7 +186,8 @@
         {"if": {"properties": {"kind": {"enum": ["sum", "concentration"]}}}, "then": {"required": ["field"]}},
         {"if": {"properties": {"kind": {"const": "ratio"}}}, "then": {"required": ["num", "den"]}},
         {"if": {"properties": {"kind": {"const": "diff"}}}, "then": {"required": ["a", "b"]}},
-        {"if": {"properties": {"kind": {"const": "coverage"}}}, "then": {"required": ["fields"]}}
+        {"if": {"properties": {"kind": {"const": "coverage"}}}, "then": {"required": ["fields"]}},
+        {"if": {"required": ["empty_as_zero"], "properties": {"empty_as_zero": {"const": true}}}, "then": {"properties": {"kind": {"enum": ["sum", "count"]}}}}
       ]
     },
     "breakdown": {
@@ -188,6 +208,7 @@
         "period_text": {"type": ["string", "null"]},
         "source_text": {"type": ["string", "null"]},
         "unavailable_reason": {"type": ["string", "null"]},
+        "empty_text": {"type": ["string", "null"]},
         "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
       }
     }

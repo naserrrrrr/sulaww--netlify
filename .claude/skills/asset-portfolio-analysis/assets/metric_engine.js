@@ -12,8 +12,9 @@
  *  - records are ordered by id ascending using Python's sorted() order (Unicode code
  *    points; identical to plain `a < b` for every id without astral-plane characters —
  *    never localeCompare), and every sum is accumulated in that order;
- *  - check order: unresolved placeholder -> not_computable; growth not_comparable;
- *    |R| = 0 -> empty; then the kind rules;
+ *  - check order: period outside spec.valid_periods -> not_comparable; unresolved
+ *    placeholder -> not_computable; growth not_comparable; |R| = 0 -> empty (with
+ *    empty_cause, and empty_as_zero for sum/count); then the kind rules;
  *  - eq/in/has use strict equality (no bool/number coercion; lists/objects never equal);
  *  - a field missing from a record has status null (known() false, reason "absent");
  *  - Python truthiness is reproduced where the Python code relies on `or` / `if x`.
@@ -37,10 +38,18 @@
 
   var KNOWN_STATUSES = ['value', 'derived', 'zero_recorded', 'zero_confirmed'];
   var TEXT_KEYS = ['label', 'short_label', 'definition', 'scope_text', 'basis', 'valuation_date',
-    'period_text', 'source_text', 'unavailable_reason'];
+    'period_text', 'source_text', 'unavailable_reason', 'empty_text'];
   var PLACEHOLDERS = ['{REV}', '{REV_PREV}', '{EXP}', '{VAL}'];
   var NO_EXPENSE_REASON = 'لا توجد بيانات مصروفات';
   var DEFAULT_UNAVAILABLE = 'الحقل غير متاح لهذه الفترة';
+  var INVALID_PERIOD_REASON = 'لا يُحسب هذا المؤشر للفترة المختارة (خارج الفترات الصالحة له)';
+  var EMPTY_FILTERS_REASON = 'لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر';
+  var EMPTY_SCOPE_REASON = 'لا توجد سجلات مؤهلة لهذا المؤشر في الملف';
+  var REVENUE_START_ONLY_REASON = 'كل السجلات المعروف إيرادها في الفترتين بدأ إيرادها في الفترة الحالية (إيراد سابق صفر)؛ ' +
+    'يُعرض «بدء إيراد» والتغير بالريال دون نسبة نمو';
+  var PREV_NONPOSITIVE_REASON = 'مجموع إيراد الفترة السابقة للسجلات المعروفة في الفترتين صفر أو سالب؛ ' +
+    'لا تُحسب نسبة نمو';
+  var NO_COVERAGE_FIELD_REASON = 'الحقول المطلوبة «لا تنطبق» على أي سجل ضمن النطاق';
   var NONE_KEY = '__none__';
   var OVERLAP_NOTE = 'قد تتداخل الفئات';
   var hasOwn = Object.prototype.hasOwnProperty;
@@ -297,7 +306,7 @@
       id: own(spec, 'id'), kind: own(spec, 'kind'), period: nn(period),
       value: null, status: null, unit: own(spec, 'unit'),
       n_scope: 0, n_included: 0, included_ids: [], excluded: [],
-      resolved_fields: {}, reason: null,
+      resolved_fields: {}, reason: null, empty_cause: null, note: null,
       card: truthy(hasOwn.call(spec, 'card') ? spec.card : false),
       card_order: own(spec, 'card_order'),
       card_group: own(spec, 'card_group'), kind_tag: own(spec, 'kind_tag')
@@ -424,11 +433,18 @@
       return;
     }
     if (!R.length) { res.status = 'empty'; return; }
-    var I = [], excluded = [], onlyCurr = [], onlyPrev = [];
+    var I = [], excluded = [], onlyCurr = [], onlyPrev = [], starts = [];
     R.forEach(function (r) {
       var kp = isKnown(r, prevF), kc = isKnown(r, currF);
-      if (kp && kc) I.push(r);
-      else if (kc) { onlyCurr.push(r.id); excluded.push({ id: r.id, reason: 'prev_unknown' }); }
+      if (kp && kc) {
+        if (fv(r, prevF) === 0 && fv(r, currF) > 0) {
+          // revenue start: shown as «بدء إيراد» with its riyal change, never inside the growth %
+          starts.push(r);
+          excluded.push({ id: r.id, reason: 'revenue_start' });
+        } else {
+          I.push(r);
+        }
+      } else if (kc) { onlyCurr.push(r.id); excluded.push({ id: r.id, reason: 'prev_unknown' }); }
       else if (kp) { onlyPrev.push(r.id); excluded.push({ id: r.id, reason: 'curr_unknown' }); }
       else excluded.push({ id: r.id, reason: 'both_unknown' });
     });
@@ -437,18 +453,29 @@
       prevSum = prevSum + fv(r, prevF);
       currSum = currSum + fv(r, currF);
     });
+    var startChange = 0;
+    starts.forEach(function (r) { startChange = startChange + fv(r, currF); });
     finishStatus(res, R, I, excluded, 'لا توجد سجلات لها إيراد معروف في الفترتين');
-    var absChange = currSum - prevSum;
-    var pct = prevSum > 0 ? (absChange / prevSum * 100) : null;
     var has = I.length > 0;
+    var absChange = currSum - prevSum;
+    var pct = (has && prevSum > 0) ? (absChange / prevSum * 100) : null;
     res.prev_sum = has ? prevSum : null;
     res.curr_sum = has ? currSum : null;
     res.abs_change = has ? absChange : null;
-    res.pct = has ? pct : null;
-    res.revenue_start = has && prevSum === 0 && currSum > 0;
+    res.pct = pct;
+    res.revenue_start = starts.length > 0;
+    res.revenue_start_ids = ids(starts);
+    res.start_change = starts.length ? startChange : null;
     res.only_curr = onlyCurr;
     res.only_prev = onlyPrev;
-    res.value = has ? pct : null;
+    res.value = pct;
+    if (!has && starts.length) {
+      res.status = 'not_computable';
+      res.reason = REVENUE_START_ONLY_REASON;
+    } else if (has && !(prevSum > 0)) {
+      res.status = 'not_computable';
+      res.reason = PREV_NONPOSITIVE_REASON;
+    }
   }
 
   function kConcentration(eng, spec, R, ctx, res) {
@@ -515,9 +542,13 @@
     res.resolved_fields = { fields: fields };
     var n = R.length;
     var perField = fields.map(function (fld) {
-      var nk = 0;
-      R.forEach(function (r) { if (isKnown(r, fld)) nk += 1; });
-      return { field: fld, n_known: nk, n: n };
+      var nk = 0, nna = 0;
+      R.forEach(function (r) {
+        if (isKnown(r, fld)) nk += 1;
+        else if (fieldStatus(r, fld) === 'not_applicable') nna += 1;
+      });
+      // «لا ينطبق» is not missing data: it leaves this field's denominator
+      return { field: fld, n_known: nk, n: n - nna, n_not_applicable: nna };
     });
     res.per_field = perField;
     res.n_included = n;
@@ -527,8 +558,14 @@
       res.value = null;
       return;
     }
-    var ratios = perField.map(function (pf) { return pf.n_known / n; });
-    res.value = ratios.length ? (Math.min.apply(null, ratios) * 100) : null;
+    var ratios = perField.filter(function (pf) { return pf.n > 0; }).map(function (pf) { return pf.n_known / pf.n; });
+    if (!ratios.length) {
+      res.value = null;
+      res.status = 'not_computable';
+      res.reason = NO_COVERAGE_FIELD_REASON;
+      return;
+    }
+    res.value = Math.min.apply(null, ratios) * 100;
     res.status = 'complete';
   }
 
@@ -618,15 +655,27 @@
     var res = baseResult(spec, f.period);
     var fw = this.filterWhere(f);
     var base = own(this.config, 'base_where');
-    var where;
+    var where = null, unresolved = null;
     try {
       where = resolveWhere(own(spec, 'where'), ctx);
     } catch (e) {
       if (!(e instanceof Unresolved)) throw e;
+      where = null;
+      unresolved = e.placeholder;
+    }
+    var vp = own(spec, 'valid_periods');
+    if (Array.isArray(vp) && vp.indexOf(f.period) < 0) {
+      var scopeW = unresolved !== null ? andWhere(base, fw) : andWhere(base, where, fw);
+      res.status = 'not_comparable';
+      res.n_scope = this._select(scopeW).length;
+      res.reason = or(own(spec, 'invalid_period_reason'), INVALID_PERIOD_REASON);
+      return res;
+    }
+    if (unresolved !== null) {
       res.status = 'not_computable';
       res.n_scope = this._select(andWhere(base, fw)).length;
       res.reason = or(res.unavailable_reason, DEFAULT_UNAVAILABLE);
-      res.unresolved = e.placeholder;
+      res.unresolved = unresolved;
       return res;
     }
     var R = this._select(andWhere(base, where, fw));
@@ -647,7 +696,31 @@
       res.reason = or(res.unavailable_reason, DEFAULT_UNAVAILABLE);
       res.unresolved = e.placeholder;
     }
+    if (res.status === 'empty') {
+      var cause = this._emptyCause(base, where, fw);
+      res.empty_cause = cause;
+      if (cause === 'filters') {
+        res.reason = EMPTY_FILTERS_REASON;
+      } else {
+        var text = or(res.empty_text, EMPTY_SCOPE_REASON);
+        var eaz = hasOwn.call(spec, 'empty_as_zero') ? truthy(spec.empty_as_zero) : kind === 'count';
+        if ((kind === 'sum' || kind === 'count') && eaz) {
+          res.value = 0;
+          res.status = 'complete';
+          res.reason = null;
+          res.note = text;
+        } else {
+          res.reason = text;
+        }
+      }
+    }
     return res;
+  };
+
+  /** 'filters' when the dashboard dim filters alone empty the metric's scope, else 'scope'. */
+  Engine.prototype._emptyCause = function (base, where, fw) {
+    if (fw !== null && this._select(andWhere(base, where)).length > 0) return 'filters';
+    return 'scope';
   };
 
   Engine.prototype.computeBreakdown = function (spec, filters) {
@@ -680,7 +753,13 @@
     var R = this._select(andWhere(base, where, fw));
     res.n_scope = R.length;
     var by = own(spec, 'by');
-    if (!R.length) { res.status = 'empty'; return res; }
+    if (!R.length) {
+      var cause = this._emptyCause(base, where, fw);
+      res.status = 'empty';
+      res.empty_cause = cause;
+      res.reason = cause === 'filters' ? EMPTY_FILTERS_REASON : or(res.empty_text, EMPTY_SCOPE_REASON);
+      return res;
+    }
     var K = R.filter(function (r) { return isKnown(r, field); });
     var U = R.filter(function (r) { return !isKnown(r, field); });
     var groups = new Map();
@@ -769,7 +848,8 @@
     var out = {
       id: 'trend', label: own(tcfg, 'label'), status: null, points: [], comparable: comparable,
       not_comparable: own(comparable, 'status') === 'not_comparable', n_scope: 0, reason: null,
-      unit: hasOwn.call(tcfg, 'unit') ? nn(tcfg.unit) : 'SAR'
+      unit: hasOwn.call(tcfg, 'unit') ? nn(tcfg.unit) : 'SAR',
+      same_records: null, n_known_varies: false, empty_cause: null
     };
     if (!truthy(tcfg) || !truthy(own(tcfg, 'enabled')) || !truthy(own(tcfg, 'fields'))) {
       out.status = 'not_computable';
@@ -785,13 +865,20 @@
       if (!(e instanceof Unresolved)) throw e;
       where = null;
     }
-    var R = this._select(andWhere(base, where, this.filterWhere(f)));
+    var fw = this.filterWhere(f);
+    var R = this._select(andWhere(base, where, fw));
     out.n_scope = R.length;
     if (!R.length) {
+      var cause = this._emptyCause(base, where, fw);
       out.status = 'empty';
+      out.empty_cause = cause;
+      out.reason = cause === 'filters' ? EMPTY_FILTERS_REASON : EMPTY_SCOPE_REASON;
       out.points = tcfg.fields.map(function (t) {
         return { period: own(t, 'period'), field: own(t, 'field'), value: null, n_known: 0, n: 0 };
       });
+      out.same_records = { n: 0, ids: [], points: tcfg.fields.map(function (t) {
+        return { period: own(t, 'period'), field: own(t, 'field'), value: null, n_known: 0 };
+      }) };
       return out;
     }
     var anyKnown = false, anyPartial = false;
@@ -805,6 +892,19 @@
       if (nKnown < R.length) anyPartial = true;
       out.points.push({ period: own(t, 'period'), field: field, value: nKnown ? s : null, n_known: nKnown, n: R.length });
     });
+    // the same records in every period: a change between points is not a change in the record set
+    var same = R.filter(function (r) {
+      for (var i = 0; i < tcfg.fields.length; i++) if (!isKnown(r, own(tcfg.fields[i], 'field'))) return false;
+      return true;
+    });
+    var srPoints = tcfg.fields.map(function (t) {
+      var field = own(t, 'field');
+      var s = 0;
+      same.forEach(function (r) { s = s + fv(r, field); });
+      return { period: own(t, 'period'), field: field, value: same.length ? s : null, n_known: same.length };
+    });
+    out.same_records = { n: same.length, ids: ids(same), points: srPoints };
+    out.n_known_varies = out.points.some(function (p) { return p.n_known !== same.length; });
     if (!anyKnown) {
       out.status = 'not_computable';
       out.reason = 'لا توجد قيم إيراد معروفة ضمن النطاق';
@@ -871,6 +971,12 @@
     PLACEHOLDERS: PLACEHOLDERS.slice(),
     NO_EXPENSE_REASON: NO_EXPENSE_REASON,
     DEFAULT_UNAVAILABLE: DEFAULT_UNAVAILABLE,
+    INVALID_PERIOD_REASON: INVALID_PERIOD_REASON,
+    EMPTY_FILTERS_REASON: EMPTY_FILTERS_REASON,
+    EMPTY_SCOPE_REASON: EMPTY_SCOPE_REASON,
+    REVENUE_START_ONLY_REASON: REVENUE_START_ONLY_REASON,
+    PREV_NONPOSITIVE_REASON: PREV_NONPOSITIVE_REASON,
+    NO_COVERAGE_FIELD_REASON: NO_COVERAGE_FIELD_REASON,
     NONE_KEY: NONE_KEY,
     OVERLAP_NOTE: OVERLAP_NOTE
   };

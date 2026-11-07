@@ -160,10 +160,25 @@ function test_count() {
   assert.equal(res.value, 7);
   assert.equal(res.status, 'complete');
   assert.equal(res.n_included, 7);
+  assert.equal(res.empty_cause, null);
+  assert.equal(res.note, null);
+  // nothing qualifies in the whole scope: a count is a real zero (empty_as_zero defaults to true for count)
   res = eng.compute({ id: 'c', kind: 'count', where: { eq: ['record_type', 'unit'] }, unit: 'count' });
   assert.equal(res.value, 0);
-  assert.equal(res.status, 'empty');
+  assert.equal(res.status, 'complete');
   assert.equal(res.n_included, 0);
+  assert.equal(res.empty_cause, 'scope');
+  assert.equal(res.note, lib.EMPTY_SCOPE_REASON);
+  assert.equal(res.reason, null);
+  res = eng.compute({ id: 'c', kind: 'count', where: { eq: ['record_type', 'unit'] }, unit: 'count', empty_as_zero: false, empty_text: 'لا وحدات' });
+  assert.equal(res.status, 'empty');
+  assert.equal(res.reason, 'لا وحدات');
+  // a dim filter that empties a non-empty scope stays "empty" with cause filters
+  res = eng.compute({ id: 'c', kind: 'count', where: ASSET, unit: 'asset' }, { location: 'nowhere' });
+  assert.equal(res.status, 'empty');
+  assert.equal(res.value, 0);
+  assert.equal(res.empty_cause, 'filters');
+  assert.equal(res.reason, lib.EMPTY_FILTERS_REASON);
 }
 
 function test_sum_statuses() {
@@ -288,13 +303,37 @@ function test_growth() {
   assert.equal(res.status, 'partial');
   assert.equal(res.comparability.status, 'unverified');
   assert.equal(res.prev_period, '2024');
-  // revenue start: prev 0, curr 50 -> value null, revenue_start true
+  assert.equal(res.revenue_start, false);
+  assert.deepEqual(res.revenue_start_ids, []);
+  assert.equal(res.start_change, null);
+  // revenue start only: prev 0, curr 50 -> no %, «بدء إيراد» with its riyal change
   const r2 = createEngine({ records: [rec('B1', {}, { 'rev.2025': tv(50), 'rev.2024': tv(0) })], config: config() })
     .compute(spec, { period: '2025' });
   assert.equal(r2.value, null);
   assert.equal(r2.revenue_start, true);
-  assert.equal(r2.abs_change, 50);
-  assert.equal(r2.status, 'complete');
+  assert.deepEqual(r2.revenue_start_ids, ['B1']);
+  assert.equal(r2.start_change, 50);
+  assert.equal(r2.abs_change, null);
+  assert.equal(r2.status, 'not_computable');
+  assert.equal(r2.reason, lib.REVENUE_START_ONLY_REASON);
+  assert.deepEqual(r2.excluded, [{ id: 'B1', reason: 'revenue_start' }]);
+  // B9: A 100->100 and B 0->1000 is 0 % for the existing asset plus a separate revenue start (never 1000 %)
+  const r7 = createEngine({ records: [rec('A', {}, { 'rev.2025': tv(100), 'rev.2024': tv(100) }),
+    rec('B', {}, { 'rev.2025': tv(1000), 'rev.2024': tv(0, 'zero_confirmed') })], config: config() }).compute(spec);
+  assert.equal(r7.value, 0);
+  assert.deepEqual(r7.included_ids, ['A']);
+  assert.equal(r7.status, 'partial');
+  assert.deepEqual(r7.revenue_start_ids, ['B']);
+  assert.equal(r7.start_change, 1000);
+  // B19: prev_sum <= 0 without a revenue start -> not_computable with a reason
+  for (const recs of [[rec('N', {}, { 'rev.2025': tv(100), 'rev.2024': tv(-50) })], [rec('Z', {}, { 'rev.2025': tv(0), 'rev.2024': tv(0) })]]) {
+    const r8 = createEngine({ records: recs, config: config() }).compute(spec);
+    assert.equal(r8.status, 'not_computable');
+    assert.equal(r8.value, null);
+    assert.equal(r8.reason, lib.PREV_NONPOSITIVE_REASON);
+    assert.equal(r8.revenue_start, false);
+    assert.equal(r8.n_included, 1);
+  }
   // not_comparable
   const cfg = config();
   cfg.periods[0].comparable_with_prev = { status: 'not_comparable', reason: 'partial' };
@@ -354,13 +393,97 @@ function test_coverage() {
   const spec = { id: 'cov', kind: 'coverage', fields: ['{REV}', '{VAL}'], unit: '%', where: ASSET };
   let res = eng.compute(spec);
   // R = A1..A6, A9 (7). REV known: A1,A2,A4,A6,A9 = 5 ; VAL known: A1,A2,A3,A5,A6,A9 = 6 -> 5/7*100
-  assert.deepEqual(res.per_field, [{ field: 'rev.2025', n_known: 5, n: 7 }, { field: 'val.2024', n_known: 6, n: 7 }]);
+  assert.deepEqual(res.per_field, [{ field: 'rev.2025', n_known: 5, n: 7, n_not_applicable: 0 },
+    { field: 'val.2024', n_known: 6, n: 7, n_not_applicable: 0 }]);
   assert.equal(res.value, Math.min(5 / 7, 6 / 7) * 100);
   assert.equal(res.status, 'complete');
   assert.equal(res.n_included, 7);
   res = eng.compute(Object.assign({}, spec, { where: { eq: ['id', 'nope'] } }));
   assert.equal(res.status, 'empty');
   assert.equal(res.value, null);
+  // B13: «لا ينطبق» leaves that field's denominator
+  const recs = records();
+  recs[4].fields['rev.2025'] = tv(null, 'not_applicable');      // A5 service asset
+  res = createEngine({ records: recs, config: config() }).compute(spec);
+  assert.deepEqual(res.per_field[0], { field: 'rev.2025', n_known: 5, n: 6, n_not_applicable: 1 });
+  assert.equal(res.value, Math.min(5 / 6, 6 / 7) * 100);
+  res = createEngine({ records: recs, config: config() }).compute(Object.assign({}, spec, { fields: ['rev.2025'], where: { eq: ['id', 'A5'] } }));
+  assert.equal(res.status, 'not_computable');
+  assert.equal(res.value, null);
+  assert.equal(res.reason, lib.NO_COVERAGE_FIELD_REASON);
+}
+
+function test_trend_same_records() {
+  // A18: 2024 known A1 80, A2 0, A3 50 ; 2025 known A1 100, A2 0, A4 300, A9 0 -> the record set changes
+  const t = engine().computeTrend();
+  assert.equal(t.n_known_varies, true);
+  assert.equal(t.same_records.n, 2);
+  assert.deepEqual(t.same_records.ids, ['A1', 'A2']);
+  assert.deepEqual(t.same_records.points.map((p) => p.value), [80, 100]);
+  const t2 = createEngine({ records: [rec('S1', {}, { 'rev.2024': tv(10), 'rev.2025': tv(20) }),
+    rec('S2', {}, { 'rev.2024': tv(5), 'rev.2025': tv(0) })], config: config() }).computeTrend();
+  assert.equal(t2.n_known_varies, false);
+  assert.deepEqual(t2.same_records.points.map((p) => p.value), [15, 20]);
+  const t3 = createEngine({ records: [rec('X1', {}, { 'rev.2024': tv(10) }), rec('X2', {}, { 'rev.2025': tv(10) })], config: config() }).computeTrend();
+  assert.deepEqual(t3.points.map((p) => p.n_known), [1, 1]);
+  assert.equal(t3.n_known_varies, true);                        // same count, different records
+  assert.equal(t3.same_records.points[0].value, null);
+  const t4 = engine().computeTrend({ location: 'nowhere' });
+  assert.equal(t4.status, 'empty');
+  assert.equal(t4.empty_cause, 'filters');
+  assert.equal(t4.same_records.n, 0);
+}
+
+function test_valid_periods() {
+  const eng = engine();
+  const spec = { id: 'gy', kind: 'ratio', num: '{REV}', den: '{VAL}', scale: 100, unit: '%', where: ASSET,
+    valid_periods: ['2025'], invalid_period_reason: 'تقييم 2024 لا يقابل إيراد 2024 هنا' };
+  assert.equal(eng.compute(spec, { period: '2025' }).status, 'partial');
+  let bad = eng.compute(spec, { period: '2024' });
+  assert.equal(bad.status, 'not_comparable');
+  assert.equal(bad.value, null);
+  assert.equal(bad.reason, 'تقييم 2024 لا يقابل إيراد 2024 هنا');
+  assert.equal(bad.n_scope, 7);
+  assert.equal(bad.n_included, 0);
+  const engNv = createEngine({ records: records(), config: config({ valuation: { field: null } }) });
+  bad = engNv.compute(Object.assign({}, spec, { invalid_period_reason: null }), { period: '2024' });
+  assert.equal(bad.status, 'not_comparable');
+  assert.equal(bad.reason, lib.INVALID_PERIOD_REASON);
+  bad = engNv.compute(Object.assign({}, spec, { where: { known: '{VAL}' } }), { period: '2024' });
+  assert.equal(bad.n_scope, 8);
+  assert.equal(engNv.compute(Object.assign({}, spec, { where: { known: '{VAL}' } }), { period: '2025' }).status, 'not_computable');
+  assert.notEqual(eng.compute(Object.assign({}, spec, { valid_periods: null }), { period: '2024' }).status, 'not_comparable');
+}
+
+function test_empty_cause_and_empty_as_zero() {
+  const eng = engine();
+  const zr = { id: 'zr', kind: 'sum', field: '{VAL}', unit: 'SAR', empty_as_zero: true, empty_text: 'لا توجد أصول استثمارية بإيراد صفري مسجل',
+    where: { all: [ASSET, { eq: ['use', 'admin'] }, { status: ['{REV}', ['zero_recorded']] }] } };
+  let res = eng.compute(zr);
+  assert.equal(res.status, 'complete');
+  assert.equal(res.value, 0);
+  assert.equal(res.empty_cause, 'scope');
+  assert.equal(res.note, zr.empty_text);
+  assert.equal(res.reason, null);
+  res = eng.compute(Object.assign({}, zr, { empty_as_zero: false }));
+  assert.equal(res.status, 'empty');
+  assert.equal(res.value, null);
+  assert.equal(res.reason, zr.empty_text);
+  const op = { id: 'op', kind: 'sum', field: '{REV}', unit: 'SAR', empty_as_zero: true, where: { eq: ['income_nature', 'operating'] } };
+  res = eng.compute(op, { location: 'شمال' });
+  assert.equal(res.status, 'empty');
+  assert.equal(res.empty_cause, 'filters');
+  assert.equal(res.reason, lib.EMPTY_FILTERS_REASON);
+  res = eng.compute({ id: 'r', kind: 'ratio', num: '{REV}', den: '{VAL}', unit: '%', empty_as_zero: true, where: { eq: ['record_type', 'unit'] } });
+  assert.equal(res.status, 'empty');
+  assert.equal(res.reason, lib.EMPTY_SCOPE_REASON);
+  const bd = { id: 'b', label: 'b', field: '{VAL}', by: 'use', where: { eq: ['record_type', 'unit'] }, empty_text: 'لا وحدات' };
+  res = eng.computeBreakdown(bd);
+  assert.equal(res.status, 'empty');
+  assert.equal(res.empty_cause, 'scope');
+  assert.equal(res.reason, 'لا وحدات');
+  res = eng.computeBreakdown(Object.assign({}, bd, { where: ASSET }), { location: 'nowhere' });
+  assert.equal(res.empty_cause, 'filters');
 }
 
 function test_unresolved_placeholder() {
@@ -588,7 +711,16 @@ function cross_records() {
     rec('A11', { own: ['owned', 'partial'], use: 'unknown', rtype: 'land_parcel' },
       { 'rev.2025': { v: 12.5, s: 'derived' }, 'rev.2024': tv(10), 'val.2024': tv(250.75), 'exp.2025': tv(2.25) }),
     rec('A12', { use: 'admin', inc: 'none' }, { 'rev.2025': { v: null, s: 'text', raw: 'غير مقيد' }, 'val.2024': tv(0, 'zero_recorded') }),
-    rec('ب1', { atype: 'محل', loc: 'وسط' }, { 'rev.2025': tv(1 / 3), 'rev.2024': tv(0.1), 'val.2024': tv(0.7) })
+    rec('ب1', { atype: 'محل', loc: 'وسط' }, { 'rev.2025': tv(1 / 3), 'rev.2024': tv(0.1), 'val.2024': tv(0.7) }),
+    // revenue start (prev recorded zero, curr > 0): outside the growth %, in revenue_start_ids / start_change
+    rec('A13', { loc: 'وسط' }, { 'rev.2025': tv(40), 'rev.2024': tv(0), 'val.2024': tv(400) }),
+    rec('A16', { loc: 'شمال' }, { 'rev.2025': tv(7.5), 'rev.2024': tv(0, 'zero_confirmed') }),
+    // «لا ينطبق» revenue on an admin asset: leaves the coverage denominator
+    rec('A14', { use: 'admin', inc: 'none' }, { 'rev.2025': { v: null, s: 'not_applicable', raw: 'لا ينطبق' }, 'val.2024': tv(300) }),
+    // negative previous revenue: growth over it alone is not computable
+    rec('A15', { use: 'unknown', loc: 'وسط' }, { 'rev.2025': tv(5), 'rev.2024': tv(-10) }),
+    // a unit row (never matched by the revenue metrics of compute_metrics; here only by the unit metrics)
+    rec('A17', { rtype: 'unit' }, { 'rev.2025': tv(3), 'val.2024': tv(30) })
   ]);
 }
 
@@ -609,13 +741,34 @@ function cross_config() {
       { id: 'conc_val', kind: 'concentration', field: '{VAL}', top: 3, where: ASSET },
       { id: 'conc_rev', kind: 'concentration', field: '{REV}', top: 2 },
       { id: 'has_owned', kind: 'count', where: { all: [{ has: ['ownership', 'owned'] }, { not: { in: ['use', ['admin', 'service']] } }] } },
-      { id: 'known_exp', kind: 'sum', field: 'rev.2025', where: { any: [{ known: '{EXP}' }, { eq: ['asset_type', null] }] } }
+      { id: 'known_exp', kind: 'sum', field: 'rev.2025', where: { any: [{ known: '{EXP}' }, { eq: ['asset_type', null] }] } },
+      // C2 valid_periods (2024 -> not_comparable), with and without a reason, and over an unresolved placeholder
+      { id: 'yield_vp', kind: 'ratio', num: '{REV}', den: '{VAL}', scale: 100, where: ASSET, valid_periods: ['2025'],
+        invalid_period_reason: 'تقييم 2024 لا يقابل إيراد هذه الفترة' },
+      { id: 'noi_vp', kind: 'diff', a: '{REV}', b: '{EXP}', valid_periods: ['2025'] },
+      // C3 empty cause / empty_as_zero / empty_text
+      { id: 'units_val', kind: 'sum', field: '{VAL}', where: { eq: ['record_type', 'contract'] }, empty_as_zero: true, empty_text: 'لا عقود' },
+      { id: 'units_val_nz', kind: 'sum', field: '{VAL}', where: { eq: ['record_type', 'contract'] }, empty_text: 'لا عقود' },
+      { id: 'cnt_contract', kind: 'count', where: { eq: ['record_type', 'contract'] } },
+      { id: 'cnt_contract_nz', kind: 'count', where: { eq: ['record_type', 'contract'] }, empty_as_zero: false },
+      { id: 'unit_rev', kind: 'sum', field: '{REV}', where: { eq: ['record_type', 'unit'] }, empty_as_zero: true },
+      { id: 'ratio_empty', kind: 'ratio', num: '{REV}', den: '{VAL}', where: { eq: ['record_type', 'contract'] }, empty_as_zero: true },
+      { id: 'zero_rev', kind: 'sum', field: '{VAL}', empty_as_zero: true, empty_text: 'لا أصول بإيراد صفري',
+        where: { all: [ASSET, { eq: ['use', 'investment'] }, { status: ['{REV}', ['zero_recorded', 'zero_confirmed']] }] } },
+      // B9/B19 growth edge cases
+      { id: 'growth_all', kind: 'growth', where: ASSET },
+      { id: 'growth_neg', kind: 'growth', where: { eq: ['id', 'A15'] } },
+      { id: 'growth_start', kind: 'growth', where: { in: ['id', ['A13', 'A16']] } },
+      // B13 coverage with a not-applicable field value
+      { id: 'cov_na', kind: 'coverage', fields: ['{REV}', '{VAL}'], where: { all: [ASSET, { in: ['use', ['admin', 'investment']] }] } },
+      { id: 'cov_all_na', kind: 'coverage', fields: ['{REV}'], where: { eq: ['id', 'A14'] } }
     ],
     breakdowns: [
       { id: 'b_type', field: '{VAL}', by: 'asset_type', where: ASSET },
       { id: 'b_own', field: '{REV}', by: 'ownership' },
       { id: 'b_mfo', field: '{VAL}', by: 'managed_for_others' },
-      { id: 'b_exp', field: '{EXP}', by: 'use' }
+      { id: 'b_exp', field: '{EXP}', by: 'use' },
+      { id: 'b_contract', field: '{VAL}', by: 'use', where: { eq: ['record_type', 'contract'] }, empty_text: 'لا عقود' }
     ]
   });
 }
@@ -645,7 +798,8 @@ function test_cross_check_with_python_engine() {
   const cmp = (a, b, p) => {
     if (typeof a === 'number' && typeof b === 'number') {
       compared++;
-      if (!(a === b || Math.abs(a - b) <= 1e-12 * Math.max(Math.abs(a), Math.abs(b)))) diffs.push(p + ': py=' + a + ' js=' + b);
+      // bit-identical: same accumulation order and the same operations (e.g. HHI uses s*s in both engines)
+      if (a !== b) diffs.push(p + ': py=' + a + ' js=' + b);
       return;
     }
     if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
@@ -670,7 +824,8 @@ function test_cross_check_with_python_engine() {
 const TESTS = {
   test_where_ops, test_placeholders_in_where, test_count, test_sum_statuses, test_unknown_statuses_never_summed,
   test_ratio_zero_included_and_exclusion_reasons, test_diff_and_missing_expense, test_growth,
-  test_concentration_tiebreak_and_hhi, test_coverage, test_unresolved_placeholder, test_breakdown_list_dim_and_none,
+  test_concentration_tiebreak_and_hhi, test_coverage, test_trend_same_records, test_valid_periods,
+  test_empty_cause_and_empty_as_zero, test_unresolved_placeholder, test_breakdown_list_dim_and_none,
   test_trend, test_filters_and_compute_all, test_text_by_period, test_standard_metric_set,
   test_determinism_independent_of_input_order, test_does_not_mutate_input, test_loading_modes,
   test_cross_check_with_python_engine

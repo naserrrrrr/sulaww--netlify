@@ -14,32 +14,43 @@ import os
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from apa_common import KNOWN_STATUSES  # noqa: E402
 
 IMPLEMENTATION_NOTES = [
     "R (records in scope of a metric) is ordered by id ascending (plain string order); every sum is accumulated in that order.",
-    "Check order for every metric: (1) a placeholder resolving to null -> not_computable; (2) growth with comparable_with_prev.status == not_comparable -> not_comparable; (3) |R| == 0 -> empty (count: value 0, others: value null); (4) kind rules.",
-    "Early-return statuses (not_computable by placeholder, not_comparable) have n_included 0, included_ids [], excluded [].",
+    "Check order for every metric: (0) spec.valid_periods given and the period not in it -> not_comparable (reason invalid_period_reason); (1) a placeholder resolving to null -> not_computable; (2) growth with comparable_with_prev.status == not_comparable -> not_comparable; (3) |R| == 0 -> empty (count: value 0, others: value null); (4) kind rules.",
+    "Early-return statuses (not_comparable by period or comparability, not_computable by placeholder) have n_included 0, included_ids [], excluded [].",
+    "empty: empty_cause = 'filters' when a dashboard dim filter is active and base_where AND where (same period) selects records, else 'scope'; reason = EMPTY_FILTERS_REASON, or empty_text / EMPTY_SCOPE_REASON. sum/count with cause 'scope' and empty_as_zero (default true for count, false otherwise) -> value 0, status complete, reason null, note = empty_text or EMPTY_SCOPE_REASON. Breakdowns and the trend set empty_cause the same way (never zero).",
     "n_included: count |R|; sum |K|; ratio/diff/growth |I|; concentration |K| (known and v > 0); coverage |R|.",
     "eq/in use strict equality (no bool/number coercion; lists and objects never equal). has: list attr -> membership (strict), scalar attr -> strict equality.",
     "A field missing from a record has status null: known() false, status() never matches; sum excluded reason 'absent'.",
     "diff: not_computable with reason «لا توجد بيانات مصروفات» when no record of R has the key b in fields; value = sum over I (id order) of (a.v - b.v).",
-    "growth: excluded = R minus I with reasons prev_unknown|curr_unknown|both_unknown; status partial if excluded non-empty; value null when prev_sum <= 0.",
-    "concentration: K sorted by v desc then id asc; total summed in id order; top sum in rank order; status partial only if some record of R has an unknown field (known zeros/negatives are excluded with reason 'nonpositive' but do not make it partial).",
-    "coverage: value = min(n_known_f / |R|) * 100; empty when |R| == 0 (value null).",
+    "growth: a record known in both periods with prev.v == 0 and curr.v > 0 is a revenue start: excluded with reason 'revenue_start', listed in revenue_start_ids, its curr.v summed (id order) into start_change; I = the other records known in both periods. Other exclusions: prev_unknown|curr_unknown|both_unknown. status partial if excluded non-empty; value = pct over I. I empty with revenue starts -> not_computable (REVENUE_START_ONLY_REASON); I non-empty with prev_sum <= 0 -> not_computable (PREV_NONPOSITIVE_REASON), sums kept.",
+    "concentration: K sorted by v desc then id asc; total summed in id order; top sum in rank order; hhi = sum over ranked of s*s with s = v/total, times 10000; status partial only if some record of R has an unknown field (known zeros/negatives are excluded with reason 'nonpositive' but do not make it partial).",
+    "coverage: per field n_not_applicable = records of R with status not_applicable (they leave that field's denominator), n = |R| - n_not_applicable; value = min over fields with n > 0 of (n_known / n) * 100; no such field -> not_computable; empty when |R| == 0 (value null).",
     "breakdown: rows sorted by value desc (null last) then key (string) asc; list dims give one row per element (empty list -> '__none__'); a group with no known value has value null.",
+    "trend: points over R per field; same_records = records of R known in every trend field (n, ids, points summed in id order; value null when n == 0); n_known_varies = some point's n_known differs from same_records.n (the set of known records changes between periods).",
     "Dashboard filters: every key except 'period' whose value is not null/'' adds {eq:[dim,value]}, or {has:[dim,value]} when any record holds a list for that dim.",
-    "Optional spec key text_by_period[period] overrides label/short_label/definition/scope_text/basis/period_text/valuation_date/source_text/unavailable_reason for that period.",
+    "Optional spec key text_by_period[period] overrides label/short_label/definition/scope_text/basis/period_text/valuation_date/source_text/unavailable_reason/empty_text for that period.",
     "growth spec keys prev/curr default to '{REV_PREV}'/'{REV}'.",
 ]
 
 TEXT_KEYS = ("label", "short_label", "definition", "scope_text", "basis", "valuation_date",
-             "period_text", "source_text", "unavailable_reason")
+             "period_text", "source_text", "unavailable_reason", "empty_text")
 PLACEHOLDERS = ("{REV}", "{REV_PREV}", "{EXP}", "{VAL}")
 NO_EXPENSE_REASON = "لا توجد بيانات مصروفات"
 DEFAULT_UNAVAILABLE = "الحقل غير متاح لهذه الفترة"
+INVALID_PERIOD_REASON = "لا يُحسب هذا المؤشر للفترة المختارة (خارج الفترات الصالحة له)"
+EMPTY_FILTERS_REASON = "لا تطابق التصفية الحالية أي سجل في نطاق هذا المؤشر"
+EMPTY_SCOPE_REASON = "لا توجد سجلات مؤهلة لهذا المؤشر في الملف"
+REVENUE_START_ONLY_REASON = ("كل السجلات المعروف إيرادها في الفترتين بدأ إيرادها في الفترة الحالية (إيراد سابق صفر)؛ "
+                            "يُعرض «بدء إيراد» والتغير بالريال دون نسبة نمو")
+PREV_NONPOSITIVE_REASON = ("مجموع إيراد الفترة السابقة للسجلات المعروفة في الفترتين صفر أو سالب؛ "
+                           "لا تُحسب نسبة نمو")
+NO_COVERAGE_FIELD_REASON = "الحقول المطلوبة «لا تنطبق» على أي سجل ضمن النطاق"
 NONE_KEY = "__none__"
 OVERLAP_NOTE = "قد تتداخل الفئات"
 
@@ -263,13 +274,22 @@ class Engine:
         fw = self.filter_where(f)
         base = self.config.get("base_where")
         # R without the metric's own placeholders is needed for n_scope in early returns
+        unresolved = None
         try:
             where = resolve_where(spec.get("where"), ctx)
         except Unresolved as exc:
+            where, unresolved = None, exc.placeholder
+        vp = spec.get("valid_periods")
+        if isinstance(vp, list) and f["period"] not in vp:
+            scope_w = and_where(base, fw) if unresolved is not None else and_where(base, where, fw)
+            res.update(status="not_comparable", n_scope=len(self._select(scope_w)),
+                       reason=spec.get("invalid_period_reason") or INVALID_PERIOD_REASON)
+            return res
+        if unresolved is not None:
             r_scope = self._select(and_where(base, fw))
             res.update(status="not_computable", n_scope=len(r_scope),
                        reason=res.get("unavailable_reason") or DEFAULT_UNAVAILABLE,
-                       unresolved=exc.placeholder)
+                       unresolved=unresolved)
             return res
         R = self._select(and_where(base, where, fw))
         res["n_scope"] = len(R)
@@ -284,7 +304,25 @@ class Engine:
             res.update(status="not_computable", value=None, n_included=0, included_ids=[], excluded=[],
                        reason=res.get("unavailable_reason") or DEFAULT_UNAVAILABLE,
                        unresolved=exc.placeholder)
+        if res["status"] == "empty":
+            cause = self._empty_cause(base, where, fw)
+            res["empty_cause"] = cause
+            if cause == "filters":
+                res["reason"] = EMPTY_FILTERS_REASON
+            else:
+                text = res.get("empty_text") or EMPTY_SCOPE_REASON
+                eaz = spec["empty_as_zero"] if "empty_as_zero" in spec else (kind == "count")
+                if kind in ("sum", "count") and eaz:
+                    res.update(value=0, status="complete", reason=None, note=text)
+                else:
+                    res["reason"] = text
         return res
+
+    def _empty_cause(self, base: Any, where: Any, fw: Any) -> str:
+        """'filters' when the dashboard dim filters alone empty the metric's scope, else 'scope'."""
+        if fw is not None and self._select(and_where(base, where)):
+            return "filters"
+        return "scope"
 
     def compute_breakdown(self, spec: dict, filters: Optional[dict] = None) -> dict:
         f = self.normalize_filters(filters)
@@ -307,7 +345,9 @@ class Engine:
         res["n_scope"] = len(R)
         by = spec.get("by")
         if not R:
-            res["status"] = "empty"
+            cause = self._empty_cause(base, where, fw)
+            res.update(status="empty", empty_cause=cause,
+                       reason=EMPTY_FILTERS_REASON if cause == "filters" else (res.get("empty_text") or EMPTY_SCOPE_REASON))
             return res
         K = [r for r in R if is_known(r, field)]
         U = [r for r in R if not is_known(r, field)]
@@ -376,7 +416,7 @@ class Engine:
         comparable = tcfg.get("comparable") or {"status": "unverified", "reason": None}
         out = {"id": "trend", "label": tcfg.get("label"), "status": None, "points": [], "comparable": comparable,
                "not_comparable": comparable.get("status") == "not_comparable", "n_scope": 0, "reason": None,
-               "unit": tcfg.get("unit", "SAR")}
+               "unit": tcfg.get("unit", "SAR"), "same_records": None, "n_known_varies": False, "empty_cause": None}
         if not tcfg or not tcfg.get("enabled") or not tcfg.get("fields"):
             out.update(status="not_computable", reason="التطور الزمني غير مفعّل أو لا توجد فترات")
             return out
@@ -386,12 +426,18 @@ class Engine:
             where = resolve_where(tcfg.get("where"), ctx)
         except Unresolved:
             where = None
-        R = self._select(and_where(base, where, self.filter_where(f)))
+        fw = self.filter_where(f)
+        R = self._select(and_where(base, where, fw))
         out["n_scope"] = len(R)
         if not R:
+            cause = self._empty_cause(base, where, fw)
             out["status"] = "empty"
+            out["empty_cause"] = cause
+            out["reason"] = EMPTY_FILTERS_REASON if cause == "filters" else EMPTY_SCOPE_REASON
             out["points"] = [{"period": t.get("period"), "field": t.get("field"), "value": None, "n_known": 0, "n": 0}
                              for t in tcfg["fields"]]
+            out["same_records"] = {"n": 0, "ids": [], "points": [
+                {"period": t.get("period"), "field": t.get("field"), "value": None, "n_known": 0} for t in tcfg["fields"]]}
             return out
         any_known = False
         any_partial = False
@@ -409,6 +455,18 @@ class Engine:
                 any_partial = True
             out["points"].append({"period": t.get("period"), "field": field,
                                   "value": s if n_known else None, "n_known": n_known, "n": len(R)})
+        # the same records in every period: a change between points is not a change in the record set
+        same = [r for r in R if all(is_known(r, t.get("field")) for t in tcfg["fields"])]
+        sr_points = []
+        for t in tcfg["fields"]:
+            field = t.get("field")
+            s = 0
+            for r in same:
+                s = s + fv(r, field)
+            sr_points.append({"period": t.get("period"), "field": field, "value": s if same else None,
+                              "n_known": len(same)})
+        out["same_records"] = {"n": len(same), "ids": [r["id"] for r in same], "points": sr_points}
+        out["n_known_varies"] = any(p["n_known"] != len(same) for p in out["points"])
         if not any_known:
             out["status"] = "not_computable"
             out["reason"] = "لا توجد قيم إيراد معروفة ضمن النطاق"
@@ -454,7 +512,7 @@ def _base_result(spec: dict, period: Optional[str]) -> dict:
         "id": spec.get("id"), "kind": spec.get("kind"), "period": period,
         "value": None, "status": None, "unit": spec.get("unit"),
         "n_scope": 0, "n_included": 0, "included_ids": [], "excluded": [],
-        "resolved_fields": {}, "reason": None,
+        "resolved_fields": {}, "reason": None, "empty_cause": None, "note": None,
         "card": bool(spec.get("card", False)), "card_order": spec.get("card_order"),
         "card_group": spec.get("card_group"), "kind_tag": spec.get("kind_tag"),
     }
@@ -578,11 +636,16 @@ def _k_growth(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: dict) -
     if not R:
         res["status"] = "empty"
         return
-    I, excluded, only_curr, only_prev = [], [], [], []
+    I, excluded, only_curr, only_prev, starts = [], [], [], [], []
     for r in R:
         kp, kc = is_known(r, prev_f), is_known(r, curr_f)
         if kp and kc:
-            I.append(r)
+            if fv(r, prev_f) == 0 and fv(r, curr_f) > 0:
+                # revenue start: shown as «بدء إيراد» with its riyal change, never inside the growth %
+                starts.append(r)
+                excluded.append({"id": r["id"], "reason": "revenue_start"})
+            else:
+                I.append(r)
         elif kc:
             only_curr.append(r["id"])
             excluded.append({"id": r["id"], "reason": "prev_unknown"})
@@ -596,14 +659,22 @@ def _k_growth(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: dict) -
     for r in I:
         prev_sum = prev_sum + fv(r, prev_f)
         curr_sum = curr_sum + fv(r, curr_f)
+    start_change = 0
+    for r in starts:
+        start_change = start_change + fv(r, curr_f)
     _finish_status(res, R, I, excluded, "لا توجد سجلات لها إيراد معروف في الفترتين")
+    has = bool(I)
     abs_change = curr_sum - prev_sum
-    pct = (abs_change / prev_sum * 100) if prev_sum > 0 else None
-    res.update(prev_sum=prev_sum if I else None, curr_sum=curr_sum if I else None,
-               abs_change=abs_change if I else None, pct=pct if I else None,
-               revenue_start=bool(I) and prev_sum == 0 and curr_sum > 0,
-               only_curr=only_curr, only_prev=only_prev,
-               value=pct if I else None)
+    pct = (abs_change / prev_sum * 100) if (has and prev_sum > 0) else None
+    res.update(prev_sum=prev_sum if has else None, curr_sum=curr_sum if has else None,
+               abs_change=abs_change if has else None, pct=pct,
+               revenue_start=bool(starts), revenue_start_ids=[r["id"] for r in starts],
+               start_change=start_change if starts else None,
+               only_curr=only_curr, only_prev=only_prev, value=pct)
+    if not has and starts:
+        res.update(status="not_computable", reason=REVENUE_START_ONLY_REASON)
+    elif has and not prev_sum > 0:
+        res.update(status="not_computable", reason=PREV_NONPOSITIVE_REASON)
 
 
 def _k_concentration(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: dict) -> None:
@@ -641,7 +712,8 @@ def _k_concentration(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: 
         res["value"] = top_sum / total * 100
         h = 0
         for r in ranked:
-            h = h + (fv(r, field) / total) ** 2
+            s = fv(r, field) / total
+            h = h + s * s  # s*s (not **2) so the JS twin gives the same last digit
         res["hhi"] = h * 10000
         res["top_shares"] = [{"id": r["id"], "value": fv(r, field), "share": fv(r, field) / total * 100}
                              for r in top_recs]
@@ -666,10 +738,14 @@ def _k_coverage(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: dict)
     per_field = []
     for fld in fields:
         nk = 0
+        nna = 0
         for r in R:
             if is_known(r, fld):
                 nk += 1
-        per_field.append({"field": fld, "n_known": nk, "n": n})
+            elif field_status(r, fld) == "not_applicable":
+                nna += 1
+        # «لا ينطبق» is not missing data: it leaves this field's denominator
+        per_field.append({"field": fld, "n_known": nk, "n": n - nna, "n_not_applicable": nna})
     res["per_field"] = per_field
     res["n_included"] = n
     res["included_ids"] = [r["id"] for r in R]
@@ -677,8 +753,11 @@ def _k_coverage(eng: Engine, spec: dict, R: list, ctx: dict, res: dict, f: dict)
         res["status"] = "empty"
         res["value"] = None
         return
-    ratios = [pf["n_known"] / n for pf in per_field]
-    res["value"] = (min(ratios) * 100) if ratios else None
+    ratios = [pf["n_known"] / pf["n"] for pf in per_field if pf["n"] > 0]
+    if not ratios:
+        res.update(value=None, status="not_computable", reason=NO_COVERAGE_FIELD_REASON)
+        return
+    res["value"] = min(ratios) * 100
     res["status"] = "complete"
 
 

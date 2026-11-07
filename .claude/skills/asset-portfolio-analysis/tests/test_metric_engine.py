@@ -10,6 +10,7 @@ import os
 import random
 import sys
 
+sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
 
@@ -143,8 +144,19 @@ def test_count():
     spec = {"id": "c", "kind": "count", "where": ASSET, "unit": "asset"}
     res = eng.compute(spec)
     assert res["value"] == 7 and res["status"] == "complete" and res["n_included"] == 7  # A1-A6, A9
+    assert res["empty_cause"] is None and res["note"] is None
+    # nothing qualifies in the whole scope: a count is a real zero (empty_as_zero defaults to true for count)
     res = eng.compute({"id": "c", "kind": "count", "where": {"eq": ["record_type", "unit"]}, "unit": "count"})
-    assert res["value"] == 0 and res["status"] == "empty" and res["n_included"] == 0
+    assert res["value"] == 0 and res["status"] == "complete" and res["n_included"] == 0
+    assert res["empty_cause"] == "scope" and res["note"] == me.EMPTY_SCOPE_REASON and res["reason"] is None
+    # explicit empty_as_zero false keeps the empty status
+    res = eng.compute({"id": "c", "kind": "count", "where": {"eq": ["record_type", "unit"]}, "unit": "count",
+                       "empty_as_zero": False, "empty_text": "لا وحدات"})
+    assert res["value"] == 0 and res["status"] == "empty" and res["reason"] == "لا وحدات"
+    # a dim filter that empties a non-empty scope stays "empty" with cause filters
+    res = eng.compute(spec, {"location": "nowhere"})
+    assert res["value"] == 0 and res["status"] == "empty" and res["empty_cause"] == "filters"
+    assert res["reason"] == me.EMPTY_FILTERS_REASON
 
 
 def test_sum_statuses():
@@ -228,11 +240,25 @@ def test_growth():
     assert res["only_curr"] == ["A4", "A9"] and res["only_prev"] == ["A3"]
     assert res["status"] == "partial"
     assert res["comparability"]["status"] == "unverified"
-    # revenue start: prev 0, curr > 0
+    assert res["revenue_start"] is False and res["revenue_start_ids"] == [] and res["start_change"] is None
+    # revenue start only: prev 0 (recorded), curr > 0 -> no %, «بدء إيراد» with its riyal change
     recs = [rec("B1", rev_2025=tv(50), rev_2024=tv(0))]
     r2 = me.Engine(config(), recs).compute(spec, {"period": "2025"})
-    assert r2["value"] is None and r2["revenue_start"] is True and r2["abs_change"] == 50
-    assert r2["status"] == "complete"
+    assert r2["value"] is None and r2["revenue_start"] is True and r2["revenue_start_ids"] == ["B1"]
+    assert r2["start_change"] == 50 and r2["abs_change"] is None and r2["n_included"] == 0
+    assert r2["status"] == "not_computable" and r2["reason"] == me.REVENUE_START_ONLY_REASON
+    assert r2["excluded"] == [{"id": "B1", "reason": "revenue_start"}]
+    # B9: a revenue start next to an existing asset stays outside the % (A 100->100, B 0->1000 is 0 %, not 1000 %)
+    recs = [rec("A", rev_2025=tv(100), rev_2024=tv(100)), rec("B", rev_2025=tv(1000), rev_2024=tv(0, "zero_confirmed"))]
+    r5 = me.Engine(config(), recs).compute(spec, {"period": "2025"})
+    assert r5["value"] == 0 and r5["included_ids"] == ["A"] and r5["status"] == "partial"
+    assert r5["revenue_start"] is True and r5["revenue_start_ids"] == ["B"] and r5["start_change"] == 1000
+    assert r5["prev_sum"] == 100 and r5["curr_sum"] == 100 and r5["abs_change"] == 0
+    # B19: prev_sum <= 0 without a revenue start -> not_computable with a reason (never complete + null)
+    for recs in ([rec("N", rev_2025=tv(100), rev_2024=tv(-50))], [rec("Z", rev_2025=tv(0), rev_2024=tv(0))]):
+        r6 = me.Engine(config(), recs).compute(spec, {"period": "2025"})
+        assert r6["status"] == "not_computable" and r6["value"] is None and r6["reason"] == me.PREV_NONPOSITIVE_REASON
+        assert r6["revenue_start"] is False and r6["n_included"] == 1 and r6["prev_sum"] is not None
     # not_comparable
     cfg = config()
     cfg["periods"][0]["comparable_with_prev"] = {"status": "not_comparable", "reason": "partial"}
@@ -254,6 +280,10 @@ def test_concentration_tiebreak_and_hhi():
     assert close(res["value"], 500 / 600 * 100)
     shares = [300 / 600, 100 / 600, 100 / 600, 100 / 600]
     assert close(res["hhi"], sum(x * x for x in shares) * 10000)
+    h = 0
+    for v in (300, 100, 100, 100):      # ranked order, s*s (bit-identical with the JS twin)
+        h = h + (v / 600) * (v / 600)
+    assert res["hhi"] == h * 10000
     assert res["status"] == "partial"                      # C4 unknown
     assert {"id": "C5", "reason": "nonpositive"} in res["excluded"]
     res = eng.compute(dict(spec, where={"eq": ["id", "C4"]}))
@@ -267,11 +297,21 @@ def test_coverage():
     spec = {"id": "cov", "kind": "coverage", "fields": ["{REV}", "{VAL}"], "unit": "%", "where": ASSET}
     res = eng.compute(spec)
     # R = A1..A6, A9 (7). REV known: A1,A2,A4,A6,A9 = 5 ; VAL known: A1,A2,A3,A5,A6,A9 = 6
-    assert res["per_field"] == [{"field": "rev.2025", "n_known": 5, "n": 7}, {"field": "val.2024", "n_known": 6, "n": 7}]
+    assert res["per_field"] == [{"field": "rev.2025", "n_known": 5, "n": 7, "n_not_applicable": 0},
+                                {"field": "val.2024", "n_known": 6, "n": 7, "n_not_applicable": 0}]
     assert res["value"] == min(5 / 7, 6 / 7) * 100 and res["status"] == "complete"
     assert res["n_included"] == 7
     res = eng.compute(dict(spec, where={"eq": ["id", "nope"]}))
     assert res["status"] == "empty" and res["value"] is None
+    # B13: «لا ينطبق» leaves that field's denominator (admin HQ without revenue is not missing data)
+    recs = records()
+    recs[4]["fields"]["rev.2025"] = tv(None, "not_applicable")          # A5 service asset
+    res = me.Engine(config(), recs).compute(spec)
+    assert res["per_field"][0] == {"field": "rev.2025", "n_known": 5, "n": 6, "n_not_applicable": 1}
+    assert res["value"] == min(5 / 6, 6 / 7) * 100
+    # every record not applicable for the only field -> not_computable with a reason
+    res = me.Engine(config(), recs).compute(dict(spec, fields=["rev.2025"], where={"eq": ["id", "A5"]}))
+    assert res["status"] == "not_computable" and res["value"] is None and res["reason"] == me.NO_COVERAGE_FIELD_REASON
 
 
 def test_unresolved_placeholder():
@@ -326,7 +366,227 @@ def test_trend():
     t2 = me.Engine(cfg, records()).compute_trend()
     assert t2["not_comparable"] is True and t2["points"][0]["value"] == 130   # values kept, flagged
     t3 = eng.compute_trend({"location": "nowhere"})
-    assert t3["status"] == "empty"
+    assert t3["status"] == "empty" and t3["empty_cause"] == "filters"
+    assert t3["same_records"]["n"] == 0 and t3["n_known_varies"] is False
+
+
+def test_trend_same_records():
+    # A18: 2024 known A1 80, A2 0, A3 50 ; 2025 known A1 100, A2 0, A4 300, A9 0 -> the record set changes
+    t = engine().compute_trend()
+    assert t["n_known_varies"] is True
+    sr = t["same_records"]
+    assert sr["n"] == 2 and sr["ids"] == ["A1", "A2"]
+    assert [p["value"] for p in sr["points"]] == [80, 100] and [p["n_known"] for p in sr["points"]] == [2, 2]
+    # same records in every period -> n_known does not vary
+    recs = [rec("S1", rev_2024=tv(10), rev_2025=tv(20)), rec("S2", rev_2024=tv(5), rev_2025=tv(0))]
+    t2 = me.Engine(config(), recs).compute_trend()
+    assert t2["n_known_varies"] is False and t2["same_records"]["ids"] == ["S1", "S2"]
+    assert [p["value"] for p in t2["same_records"]["points"]] == [15, 20]
+    # equal counts but different records still vary (membership, not only the count)
+    recs = [rec("X1", rev_2024=tv(10)), rec("X2", rev_2025=tv(10))]
+    t3 = me.Engine(config(), recs).compute_trend()
+    assert [p["n_known"] for p in t3["points"]] == [1, 1] and t3["n_known_varies"] is True
+    assert t3["same_records"]["n"] == 0 and t3["same_records"]["points"][0]["value"] is None
+
+
+def test_valid_periods():
+    eng = engine()
+    spec = {"id": "gy", "kind": "ratio", "num": "{REV}", "den": "{VAL}", "scale": 100, "unit": "%", "where": ASSET,
+            "valid_periods": ["2025"], "invalid_period_reason": "تقييم 2024 لا يقابل إيراد 2024 هنا"}
+    ok = eng.compute(spec, {"period": "2025"})
+    assert ok["status"] == "partial" and ok["value"] is not None
+    bad = eng.compute(spec, {"period": "2024"})
+    assert bad["status"] == "not_comparable" and bad["value"] is None and bad["reason"] == "تقييم 2024 لا يقابل إيراد 2024 هنا"
+    assert bad["n_included"] == 0 and bad["included_ids"] == [] and bad["n_scope"] == 7
+    # default reason; and the period check wins over an unresolved placeholder
+    eng_nv = me.Engine(config(valuation={"field": None}), records())
+    bad = eng_nv.compute(dict(spec, invalid_period_reason=None), {"period": "2024"})
+    assert bad["status"] == "not_comparable" and bad["reason"] == me.INVALID_PERIOD_REASON and bad["n_scope"] == 7
+    # placeholder unresolved inside where: n_scope falls back to base_where AND filters (8 in-scope records)
+    bad = eng_nv.compute(dict(spec, where={"known": "{VAL}"}), {"period": "2024"})
+    assert bad["status"] == "not_comparable" and bad["n_scope"] == 8
+    assert eng_nv.compute(dict(spec, where={"known": "{VAL}"}), {"period": "2025"})["status"] == "not_computable"
+    # no valid_periods key -> every period is valid
+    assert eng.compute(dict(spec, valid_periods=None), {"period": "2024"})["status"] != "not_comparable"
+
+
+def test_empty_cause_and_empty_as_zero():
+    eng = engine()
+    zr = {"id": "zr", "kind": "sum", "field": "{VAL}", "unit": "SAR", "empty_as_zero": True,
+          "empty_text": "لا توجد أصول استثمارية بإيراد صفري مسجل",
+          "where": {"all": [ASSET, {"eq": ["use", "admin"]}, {"status": ["{REV}", ["zero_recorded"]]}]}}
+    res = eng.compute(zr)
+    assert res["status"] == "complete" and res["value"] == 0 and res["n_included"] == 0
+    assert res["empty_cause"] == "scope" and res["note"] == zr["empty_text"] and res["reason"] is None
+    # sum without empty_as_zero: empty with the metric's own text
+    res = eng.compute(dict(zr, empty_as_zero=False))
+    assert res["status"] == "empty" and res["value"] is None and res["reason"] == zr["empty_text"]
+    # a filter that empties a non-empty scope: never a zero
+    op = {"id": "op", "kind": "sum", "field": "{REV}", "unit": "SAR", "empty_as_zero": True,
+          "where": {"eq": ["income_nature", "operating"]}}
+    res = eng.compute(op, {"location": "شمال"})
+    assert res["status"] == "empty" and res["value"] is None and res["empty_cause"] == "filters"
+    assert res["reason"] == me.EMPTY_FILTERS_REASON
+    # ratio: empty_as_zero ignored, cause and text reported
+    ratio = {"id": "r", "kind": "ratio", "num": "{REV}", "den": "{VAL}", "unit": "%", "empty_as_zero": True,
+             "where": {"eq": ["record_type", "unit"]}}
+    res = eng.compute(ratio)
+    assert res["status"] == "empty" and res["empty_cause"] == "scope" and res["reason"] == me.EMPTY_SCOPE_REASON
+    # breakdown
+    bd = {"id": "b", "label": "b", "field": "{VAL}", "by": "use", "where": {"eq": ["record_type", "unit"]},
+          "empty_text": "لا وحدات"}
+    res = eng.compute_breakdown(bd)
+    assert res["status"] == "empty" and res["empty_cause"] == "scope" and res["reason"] == "لا وحدات"
+    res = eng.compute_breakdown(dict(bd, where=ASSET), {"location": "nowhere"})
+    assert res["status"] == "empty" and res["empty_cause"] == "filters"
+
+
+# ---------------------------------------------------------------------------
+# compute_metrics.py config builder (init-config rules that feed the engine)
+# ---------------------------------------------------------------------------
+def _cm():
+    import compute_metrics as cm  # imports normalize (openpyxl/jsonschema) — only for these tests
+    return cm
+
+
+def _rec_doc(records_list, meta):
+    return {"contract_version": "1.0", "source": {"name": "t.xlsx"}, "field_meta": meta, "records": records_list}
+
+
+def _meta_a():
+    return {
+        "rev.2025": {"label": "إيراد 2025 بدون ضريبة", "group": "revenue", "period": "2025", "vat": "excl",
+                     "basis": "recorded", "completeness": "full_year"},
+        "rev.2024": {"label": "إيراد 2024 شامل الضريبة", "group": "revenue", "period": "2024", "vat": "incl",
+                     "basis": "recorded", "completeness": "full_year"},
+        "rev.2022": {"label": "إيراد 2022", "group": "revenue", "period": "2022", "vat": "excl",
+                     "basis": "recorded", "completeness": "full_year"},
+        "rev.2023": {"label": "إيراد 2023 (ورقة معزولة)", "group": "revenue", "period": "2023", "vat": "excl"},
+        "val.2024": {"label": "تقييم 2024", "group": "valuation", "year": "2024", "component": "total"},
+    }
+
+
+def _src(rid, sheet, rtype="asset", scope="in_scope", **kw):
+    r = rec(rid, rtype=rtype, scope=scope, **kw)
+    r["source"] = {"sheet": sheet, "row": 1}
+    return r
+
+
+def _doc_a():
+    return _rec_doc([
+        _src("T1", "السجل", rev_2025=tv(100), rev_2024=tv(110), rev_2022=tv(90), val_2024=tv(1000)),
+        _src("T1.1", "السجل", rtype="unit", rev_2025=tv(60), rev_2024=tv(60)),   # unit of T1: never added again
+        _src("T2", "السجل", loc="شمال", rev_2025=tv(50), rev_2024=tv(40), rev_2022=tv(40), val_2024=tv(500)),
+        _src("I1", "التخصيص", scope="isolated", rev_2023=tv(999)),
+    ], _meta_a())
+
+
+def test_init_config_scope_rules():
+    cm = _cm()
+    doc = _doc_a()
+    cfg = cm.init_config(doc)
+    # C22: rev.2023 is known only on an isolated record -> no 2023 period
+    assert [p["id"] for p in cfg["periods"]] == ["2025", "2024", "2022"]
+    assert not cm.semantic_errors(cfg, doc["records"]) and not cm.comparability_errors(cfg, doc["field_meta"])
+    M = {m["id"]: m for m in cfg["metrics"]}
+    # A2: unit rows never add revenue to their asset
+    res = me.Engine(cfg, doc["records"]).compute_all({"period": "2025"})["metrics"]
+    assert res["property_revenue"]["value"] == 150 and "T1.1" not in res["property_revenue"]["included_ids"]
+    assert res["revenue_concentration_top3"]["included_ids"] == ["T1", "T2"]
+    # C1: source text names only the sheets of the records the metric reads
+    assert "التخصيص" not in M["property_revenue"]["source_text"] and "«السجل»" in M["property_revenue"]["source_text"]
+    # C2: revenue/valuation ratios only for the valuation year and the year after
+    assert M["gross_yield_investment"]["valid_periods"] == ["2025", "2024"]
+    r22 = me.Engine(cfg, doc["records"]).compute(M["gross_yield_investment"], {"period": "2022"})
+    assert r22["status"] == "not_comparable" and "2024" in r22["reason"]
+    assert any(w["code"] == "yield_periods_limited" for w in cfg["init_warnings"])
+    # B1: 2025 (excl) vs 2024 (incl): both known, different -> not_comparable; 2024 vs 2022 excl/incl too
+    assert cfg["periods"][0]["comparable_with_prev"]["status"] == "not_comparable"
+    assert cfg["trend"]["comparable"]["status"] == "not_comparable"
+    g = me.Engine(cfg, doc["records"]).compute(M["revenue_growth"], {"period": "2025"})
+    assert g["status"] == "not_comparable" and g["value"] is None
+    # B3: 2024 has only a VAT-inclusive field -> labels say so, and 04 carries a warning
+    t24 = M["property_revenue"]["text_by_period"]["2024"]
+    assert "شامل الضريبة" in t24["label"]
+    assert "شامل الضريبة" in M["gross_yield_investment"]["text_by_period"]["2024"]["label"]
+    assert "شامل الضريبة" not in M["gross_yield_investment"]["label"]
+    assert [w["period"] for w in cfg["init_warnings"] if w["code"] == "revenue_incl_vat"] == ["2024"]
+    # C3: standard empty texts / empty_as_zero
+    assert M["zero_rev_investment_value"]["empty_as_zero"] is True
+    assert M["zero_rev_investment_value"]["empty_text"] == "لا توجد أصول استثمارية بإيراد صفري مسجل"
+    assert M["activity_revenue"]["empty_text"] == "لا توجد أنشطة تشغيلية ضمن النطاق"
+    z = me.Engine(cfg, doc["records"]).compute(M["zero_rev_investment_value"], {"period": "2025"})
+    assert z["status"] == "complete" and z["value"] == 0 and z["empty_cause"] == "scope"
+    # C19: location has 2 values on assets (جنوب, شمال); use has one (investment) -> no use breakdown
+    bids = [b["id"] for b in cfg["breakdowns"]]
+    assert "value_by_location" in bids and "value_by_use" not in bids and "revenue_by_use" not in bids
+    # C22: no in-scope record -> fields of isolated records never become periods or the valuation
+    iso = _doc_a()
+    for r in iso["records"]:
+        r["scope"] = "isolated"
+    cfg2 = cm.init_config(iso)
+    assert cfg2["periods"] == [] and cfg2["valuation"]["field"] is None
+    assert [w["code"] for w in cfg2["init_warnings"]] == ["no_in_scope_records"]
+    schema = os.path.join(cm.SKILL_DIR, "schemas", "metrics_config.schema.json")
+    assert cm.schema_errors(cfg, schema) == [] and cm.schema_errors(cfg2, schema) == []
+
+
+def test_comparability_rules():
+    cm = _cm()
+    c = cm.comparability
+    full = {"vat": "excl", "basis": "recorded", "completeness": "full_year"}
+    assert c(full, dict(full), "2025", "2024")["status"] == "confirmed"
+    assert c(full, dict(full, vat="incl"), "2025", "2024")["status"] == "not_comparable"
+    assert c(full, dict(full, vat="none_evidenced"), "2025", "2024")["status"] == "unverified"   # same class
+    assert c(full, dict(full, vat="unknown"), "2025", "2024")["status"] == "unverified"
+    assert c(full, dict(full, basis="expected"), "2025", "2024")["status"] == "not_comparable"
+    assert c(full, dict(full, basis="actual"), "2025", "2024")["status"] == "unverified"
+    assert c(dict(full, cash_basis="collected"), dict(full, cash_basis="accrued"), "2025", "2024")["status"] == "not_comparable"
+    assert c(full, dict(full, completeness="partial"), "2025", "2024")["status"] == "not_comparable"
+    # the previous field belongs to the same year (e.g. 2025 incl used as "previous")
+    d = c(full, dict(full), "2025", "2024", "2025", "2025")
+    assert d["status"] == "not_comparable" and "2025" in d["reason"]
+    # prev_id null (previous period trimmed from 04) stays valid
+    assert c(full, dict(full), "2025", None, "2025", "2024")["status"] == "confirmed"
+
+
+def test_semantic_errors_new_rules():
+    cm = _cm()
+    cfg = config(metrics=[
+        {"id": "gyo", "kind": "ratio", "num": "{REV}", "den": "{VAL}", "unit": "%",
+         "where": {"all": [ASSET, {"eq": ["ownership", "owned"]}]}},
+        {"id": "inown", "kind": "count", "unit": "count", "where": {"in": ["ownership", ["owned", "partial"]]}},
+        {"id": "vp", "kind": "count", "unit": "count", "valid_periods": ["2025", "2031"]},
+        {"id": "ez", "kind": "ratio", "num": "{REV}", "den": "{VAL}", "unit": "%", "empty_as_zero": True},
+    ])
+    errs = cm.semantic_errors(cfg, records())
+    joined = "\n".join(errs)
+    assert "metrics/gyo/where/all/1" in joined and '{"has": ["ownership", "owned"]}' in joined   # B12
+    assert "metrics/inown/where" in joined and '"any"' in joined
+    assert "2031" in joined                                                                   # unknown period id
+    assert "metrics/ez" in joined                                                             # empty_as_zero kind
+    assert cm.semantic_errors(cfg) == [e for e in errs if "where" not in e]                   # records optional
+    # prev_id pointing to a removed period: the message tells how to trim
+    cfg2 = config()
+    cfg2["periods"] = cfg2["periods"][:1]
+    msg = "\n".join(cm.semantic_errors(cfg2))
+    assert "prev_id" in msg and "null" in msg
+    cfg2["periods"][0]["prev_id"] = None
+    assert cm.semantic_errors(cfg2) == []
+
+
+def test_comparability_errors_block_hand_set_status():
+    cm = _cm()
+    meta = {"rev.2025": {"vat": "excl", "basis": "recorded", "completeness": "full_year", "period": "2025"},
+            "rev.2024": {"vat": "incl", "basis": "recorded", "completeness": "partial", "period": "2024"}}
+    cfg = config()
+    cfg["periods"][0]["comparable_with_prev"] = {"status": "confirmed", "reason": "متماثلتان"}
+    errs = cm.comparability_errors(cfg, meta)
+    assert errs and "periods/2025" in errs[0] and "not_comparable" in errs[0]
+    assert any(e.startswith("• trend") for e in errs)
+    cfg["periods"][0]["comparable_with_prev"] = {"status": "not_comparable", "reason": "x"}
+    cfg["trend"]["comparable"] = {"status": "not_comparable", "reason": "x"}
+    assert cm.comparability_errors(cfg, meta) == []
 
 
 def test_filters_and_compute_all():
