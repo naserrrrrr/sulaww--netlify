@@ -369,3 +369,19 @@ def _self_test_pii() -> None:
 def ref(sheet: str, coord: str) -> str:
     """Canonical cell reference: exact sheet name (may contain trailing spaces) + '!' + A1 coordinate."""
     return f"{sheet}!{coord}"
+
+
+# ---------------------------------------------------------------------------
+# Total / subtotal row labels (shared by inspect_workbook.py and normalize.py)
+# ---------------------------------------------------------------------------
+# Applied to normalize_arabic(text).strip(): hamza/taa-marbuta are already folded (إجمالي → اجمالي, جملة → جمله).
+TOTAL_LABEL_RE = re.compile(
+    r"^(?:ال)?(?:مجموع|اجمالي|اجماليات|جمله|المجمل)(?:\s|$|ال)|^(?:grand\s+|sub-?)?totals?\b|^sum\b", re.IGNORECASE)
+
+
+def is_total_label(v: Any) -> bool:
+    """True when a cell text reads like a total/subtotal label («الإجمالي»، «جملة»، «Total»، «Grand total»)."""
+    if v is None or not isinstance(v, str):
+        return False
+    t = normalize_arabic(clean_text(v)).strip()
+    return bool(t) and bool(TOTAL_LABEL_RE.search(t))
