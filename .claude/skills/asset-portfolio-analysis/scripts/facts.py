@@ -18,6 +18,11 @@ Keys are stable, ASCII, dot-separated:
     anomalies.total | anomalies.high
     wb.<WB-id>.<evidence_key>             numeric evidence of a 01 anomaly (e.g. wb.WB-004.recomputed)
     excluded.<source_id>.r<row>.<field>   numeric values kept on excluded total rows (when normalize stores them)
+    sources.<source_id>.<field>.sum | .n_known | .n_zero | .max | .max_share
+                                          a revenue/expense field over EVERY record of a source (isolated included):
+                                          to describe an isolated statement apart from the metrics (max_share is the
+                                          largest line as a % of the sum, unit "pct")
+    sections.<source_id>.r<row>.records   records between the previous total row of the source and total row <row>
 Token grammar: {{f:<key>}} with key matching [A-Za-z0-9_.\-]+ (see FACT_TOKEN_RE).
 """
 from __future__ import annotations
@@ -95,7 +100,49 @@ def compute_facts(run_dir: str) -> "OrderedDict[str, dict]":
         for sid, d in sorted(by_src.items()):
             put(f"sources.{sid}.records", d["records"], "count", f"سجلات المصدر {sid}", f"03_records.json:records[source={sid}]")
             put(f"sources.{sid}.isolated", d["isolated"], "count", f"السجلات المعزولة من المصدر {sid}", f"03_records.json:records[source={sid},scope=isolated]")
+    # descriptive facts of each source's revenue/expense fields over all its records (an isolated statement is
+    # described apart from the metrics, never added to them)
+    meta = rec.get("field_meta") or {}
+
+    def money_field(f):
+        g = (meta.get(f) or {}).get("group")
+        return g in ("revenue", "expense") or (g is None and str(f).startswith(("rev.", "exp.")))
+    src_vals = OrderedDict()
+    for r in records:
+        sid = (r.get("source") or {}).get("source_id") or r.get("source_id")
+        for f, tv in (r.get("fields") or {}).items():
+            if not sid or f.endswith("__original") or not money_field(f) or not isinstance(tv, dict):
+                continue
+            if tv.get("joined_from"):
+                continue
+            if tv.get("s") in ("value", "derived", "zero_recorded", "zero_confirmed") and _num(tv.get("v")):
+                src_vals.setdefault((sid, f), []).append(tv["v"])
+    for (sid, f), vals in src_vals.items():
+        tot = sum(vals)
+        base = f"03_records.json:records[source={sid}].fields.{f}"
+        put(f"sources.{sid}.{f}.sum", round(tot, 2), "SAR", f"مجموع {f} لكل سجلات المصدر {sid}", base)
+        put(f"sources.{sid}.{f}.n_known", len(vals), "count", f"سجلات المصدر {sid} المعروف فيها {f}", base)
+        put(f"sources.{sid}.{f}.n_zero", sum(1 for v in vals if v == 0), "count", f"سجلات المصدر {sid} بقيمة صفر مسجلة في {f}", base)
+        put(f"sources.{sid}.{f}.max", max(vals), "SAR", f"أكبر قيمة {f} في المصدر {sid}", base)
+        if tot > 0:
+            put(f"sources.{sid}.{f}.max_share", round(max(vals) / tot * 100, 4), "pct",
+                f"حصة أكبر سطر من مجموع {f} في المصدر {sid} (%)", base)
     exr = rec.get("excluded_rows") or []
+    if isinstance(exr, list) and records:
+        tot_rows = {}
+        for e in exr:
+            if isinstance(e, dict) and isinstance(e.get("row"), int) and isinstance(e.get("values"), dict) and e["values"]:
+                tot_rows.setdefault(e.get("source_id"), []).append(e["row"])
+        for sid, rows in tot_rows.items():
+            rows = sorted(set(rows))
+            src_rows = [(r.get("source") or {}).get("row") for r in records
+                        if ((r.get("source") or {}).get("source_id") or r.get("source_id")) == sid]
+            for i, row in enumerate(rows):
+                lo = rows[i - 1] if i else None
+                n = sum(1 for x in src_rows if isinstance(x, int) and x < row and (lo is None or x > lo))
+                if n:
+                    put(f"sections.{sid}.r{row}.records", n, "count", f"سجلات القسم فوق صف الإجمالي {row} في المصدر {sid}",
+                        f"03_records.json:records[source={sid}, row<{row}]")
     if isinstance(exr, list):
         put("records.excluded_rows", len(exr), "count", "الصفوف المستبعدة (إجماليات وعناوين)", "03_records.json:excluded_rows")
         for e in exr:

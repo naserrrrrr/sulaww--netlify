@@ -112,6 +112,9 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .field { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
 .field-label { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .field.inline { flex-direction: row; align-items: center; gap: 8px; min-width: 0; }
+.field[hidden] { display: none; }
+.tech { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+.tech code { font-size: 10.5px; }
 select, input[type="search"] {
   min-height: 40px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); padding: 6px 12px; max-width: 100%;
 }
@@ -385,6 +388,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .ks-value { display: block; font-size: 15px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; }
   .ks-value.is-na { font-size: 12px; font-weight: 600; color: var(--muted); }
   .ks-link { grid-column: 1 / -1; font-size: 12.5px; }
+  .ks-caveat { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--ink-2); }
 }
 
 /* ===== Print ====================================================================== */
@@ -427,17 +431,23 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .meta-grid > div { padding: 6px 10px; }
   .summary-text { padding: 12px 16px; }
   .summary-text p { font-size: 13px; line-height: 1.75; max-width: none; }
-  .kpi, .chart-card, .item, .plan-col, .assess { break-inside: avoid; page-break-inside: avoid; }
-  .summary-text p, .plan-item { break-inside: avoid; }
+  .kpi, .chart-card { break-inside: avoid; page-break-inside: avoid; }
+  /* long gap/action items, assessment cards and plan columns may continue on the next page (whole-block moves left
+     pages a third empty); their heading stays with the first lines */
+  .item, .assess, .plan-col { break-inside: auto; page-break-inside: auto; }
+  .item-head, .assess h4, .plan-col > h3, .plan-col > .plan-head { break-after: avoid; page-break-after: avoid; }
+  .summary-text p, .plan-item, .item .chips, .assess .chips { break-inside: avoid; }
   details:not([open]) { display: none; }
   .chart-data { display: none; }
   .tip { display: none !important; }
   /* print stays short (≤ 8 A4 pages): four KPI columns, definitions kept to 2 lines (the full text is on screen and in
-     the supporting workbook); the asset-comparison chart draws compact rows on paper */
+     the supporting workbook) except under a yield card, whose scope, basis, valuation date and included/excluded
+     counts stay on paper (brief §6, §11); the asset-comparison chart draws compact rows on paper */
   .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .kpi { padding: 8px 10px; gap: 4px; }
   .kpi-def.clamp { -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
-  .kpi-meta { display: none; }
+  .kpi-meta { display: flex; font-size: 10px; line-height: 1.45; padding-top: 4px; gap: 1px; }
+  .kpi[data-kind="ratio"] .kpi-def.clamp { -webkit-line-clamp: unset; display: block; overflow: visible; }
   .kpi-value { font-size: 17px; }
   .kpi-title { font-size: 13px; }
   .kpi-label { font-size: 11px; }
@@ -619,13 +629,16 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // Such tokens are isolated left-to-right for display only: negative numbers, percentages, ISO dates (with time),
   // hyphen-joined digit groups, cell ranges (C2:D2), and ids/keys holding a digit, hyphen or dot (REG-7, DQ-002, R1,
   // rev.2025.excl_vat).
-  // «!A1» / «!C95:D95» after a sheet name stays one LTR token with its «!»; a minus may be U+2212 («−238,000»)
+  // «!A1» / «!C95:D95» after a sheet name: only the cell or range is isolated; the «!» stays a neutral between the
+  // sheet name and the isolate, so in Arabic text it sits between them («Sheet!A1», never «SheetA1!»).
+  // A minus may be U+2212 («−238,000»)
   var TOK_RE = /!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|[-−]?\d[\d,]*(?:\.\d+)?%|[-−]\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
   function tokSpans(s) {
     var out = [], m;
     TOK_RE.lastIndex = 0;
     while ((m = TOK_RE.exec(s)) !== null) {
       var tok = m[0], start = m.index;
+      if (tok.charAt(0) === '!') { start += 1; tok = tok.slice(1); }
       if (/^[-\u2212]/.test(tok) && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
         if (tok.slice(-1) !== '%') continue;          // "2025-12" or "x-5": not a negative number
         start += 1; tok = tok.slice(1);
@@ -711,13 +724,23 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   var REF1 = '\\$?[A-Z]{1,3}\\$?\\d+(?::\\$?[A-Z]{1,3}\\$?\\d+)?';
   var SHEET1 = "(?:'[^']+'|[^!'\u060C,;]{1,80})!";
   var REF_ONLY_RE = new RegExp('^\\s*' + SHEET1 + REF1 + '(?:\\s*[\u060C,;]\\s*(?:' + SHEET1 + ')?' + REF1 + ')*\\s*$');
-  function refc(x) { var s = str(x); return REF_ONLY_RE.test(s) ? h('bdi', { class: 'ref', dir: 'ltr' }, s) : h('bdi', null, s); }
+  // A sheet name with Arabic letters keeps the reading direction of the text around it: inside a left-to-right
+  // isolate «إدارة أملاك!Y5، إدارة أملاك!W5» would be reordered as one right-to-left run. Only the cell is isolated
+  // (addText), and a space before «!» (a sheet name stored with a trailing space) is not shown.
+  var AR_LETTER = /[\u0600-\u06FF]/;
+  function refText(s) { return String(s).replace(/\s+!(?=\$?[A-Z]{1,3}\$?\d)/g, '!'); }
+  function refc(x) {
+    var s = refText(str(x));
+    if (!REF_ONLY_RE.test(s)) return h('bdi', null, s);
+    return h('bdi', { class: 'ref', dir: AR_LETTER.test(s) ? 'rtl' : 'ltr' }, s);
+  }
   function dimFilterActive(f) {
     f = f || {};
     return FILTER_DIMS.some(function (d) { return f[d] !== null && f[d] !== undefined && f[d] !== ''; });
   }
   /** Arabic number-noun agreement: one, two (dual), 3–10 (plural), 11+ (singular accusative). */
   function nNoun(n, one, two, few, many) {
+    if (n === 0) return '0 ' + String(many).replace(/\u064B\u0627(?=\s|$)/g, '').replace(/\u064B/g, '');   // «0 سجل», never «0 سجلًا»
     if (n === 1) return one;
     if (n === 2) return two;
     return n + ' ' + (n >= 3 && n <= 10 ? few : many);
@@ -791,7 +814,35 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return { ar: m ? m.ar : (st ? str(st) : 'غير محدد'), tone: m ? m.tone : 'na' };
   }
   function reasonAr(r) { return REASON_AR[r] || statusAr(r); }
-  function fieldLabel(f) { return (FM[f] && FM[f].label) || str(f); }
+  // «<field>__original» keeps the stored value a documented derivation replaced (normalize derived_fields, when: always)
+  var ORIGINAL_SUFFIX = '__original';
+  function isOriginalKey(f) { return typeof f === 'string' && f.length > ORIGINAL_SUFFIX.length && f.slice(-ORIGINAL_SUFFIX.length) === ORIGINAL_SUFFIX; }
+  function fieldLabel(f) {
+    if (FM[f] && FM[f].label) return FM[f].label;
+    if (isOriginalKey(f)) {
+      var base = f.slice(0, -ORIGINAL_SUFFIX.length);
+      return ((FM[base] && FM[base].label) || base) + ' كما ورد (قبل الاشتقاق)';
+    }
+    return str(f);
+  }
+  /** Field keys (rev.2025.excl_vat) and metric ids (gross_yield_investment) in a text written by the scripts are shown
+   *  by their Arabic names; the board never reads engine keys (dashboard-spec §4). Unknown tokens stay as they are. */
+  var KEY_TOKEN_RE = /[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\*?/g;
+  function humanize(x) {
+    var s = str(x);
+    if (!/[a-z]/.test(s)) return s;
+    return s.replace(KEY_TOKEN_RE, function (m) {
+      var k = m.replace(/\*$/, '');
+      if (!/[._]/.test(k)) return m;
+      if (FM[k] || isOriginalKey(k)) return '«' + fieldLabel(k) + '»';
+      if (M05[k]) return '«' + metricShort(k) + '»';
+      if (/_$/.test(k) && /\*$/.test(m)) {
+        var fam = Object.keys(M05).filter(function (id) { return id.indexOf(k) === 0; });
+        if (fam.length) return '«' + fam.map(metricShort).filter(function (v, i, a) { return a.indexOf(v) === i; }).join('، ') + '»';
+      }
+      return m;
+    });
+  }
   function periodObj(id) { for (var i = 0; i < PERIODS.length; i++) if (PERIODS[i].id === id) return PERIODS[i]; return null; }
   function periodLabel(id) { var p = periodObj(id); return p ? str(p.label || p.id) : str(id); }
   function kindTag(kind) {
@@ -802,13 +853,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function pill(text, tone) { return h('span', { class: 'pill tone-' + (tone || 'neutral') }, h('span', { class: 'dot', 'aria-hidden': 'true' }), text); }
   function statusPill(st) { var m = metricStatus(st); return pill(m.ar, m.tone); }
   function levelAr(x) { return LEVEL_AR[x] || str(x); }
+  // feminine agreement for feminine headings (الأهمية، الموثوقية، قوة الدليل، قابلية التنفيذ، التكلفة)
+  var LEVEL_F = { high: 'مرتفعة', medium: 'متوسطة', low: 'منخفضة', strong: 'قوية', moderate: 'متوسطة', weak: 'ضعيفة', info: 'معلوماتية' };
+  function levelF(x) { return LEVEL_F[x] || str(x); }
+  var RANKING_FEM = { evidence_strength: 1, feasibility: 1, cost_level: 1 };
+  function rankLevel(k, x) { return RANKING_FEM[k] ? levelF(x) : levelAr(x); }
   /** Arabic number-noun agreement for "record": 1 سجل واحد · 2 سجلان · 3–10 سجلات · otherwise سجلًا. */
   function nRec(n) {
+    if (n === 0) return '0 سجل';
     if (n === 1) return 'سجل واحد';
     if (n === 2) return 'سجلان';
     return n + ' ' + (n >= 3 && n <= 10 ? 'سجلات' : 'سجلًا');
   }
-  function recNoun(n) { return n >= 3 && n <= 10 ? 'سجلات' : (n === 1 || n === 2 ? 'سجل' : 'سجلًا'); }
+  function recNoun(n) { return n >= 3 && n <= 10 ? 'سجلات' : (n <= 2 ? 'سجل' : 'سجلًا'); }
 
   // ---------------------------------------------------------------------------
   // Record helpers
@@ -935,7 +992,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (field === 'pct') return fmtPct(v);
     if (/^n_|^n$|^top$/.test(field)) return fmtPlain(v);
     if (field === 'hhi') return fmtNumber(v, 0);
-    if (field === 'value') return fmtUnit(v, r.unit);
+    if (field === 'value') return growthRiyalOnly(r) ? growthRiyalText(r) : fmtUnit(v, r.unit);
     return r.unit === 'SAR' || r.unit === '%' || !r.unit ? fmtMoney(v) : fmtPlain(v);
   }
   function evidenceChip(e) {
@@ -962,18 +1019,20 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (m) {
       var r = M05[m[1]];
       if (!r) { add(chip, 'مؤشر: ' + m[1] + ' — غير متاح'); return chip; }
+      var riyalOnly = growthRiyalOnly(r) && typeof r.value === 'number' && (!m[2] || m[2] === 'value');
       var val = m[2] && m[2] !== 'value' ? fieldValueText(r, m[2])
         : (r.value === null || r.value === undefined ? (r.status === 'not_comparable' ? 'غير قابل للمقارنة' : 'غير قابل للاحتساب') : fmtUnit(r.value, r.unit));
+      chip.setAttribute('data-metric-ref', m[1]);
       add(chip, 'مؤشر: ' + metricShort(m[1]) + (m[2] && m[2] !== 'value' ? ' (' + (FIELD_AR[m[2]] || m[2]) + ')' : '') + ' — ');
-      add(chip, h('span', { class: 'num' }, val));
+      add(chip, riyalOnly ? growthRiyalNodes(r) : h('span', { class: 'num' }, val));
       if (r.definition) chip.setAttribute('title', str(r.definition));
       return chip;
     }
     var fm = /^f:([A-Za-z0-9_.\-]+)$/.exec(ref);
     if (fm && FACTS[fm[1]]) {
       var fx = FACTS[fm[1]];
-      add(chip, str(fx.label || fm[1]) + ': ');
-      add(chip, h('span', { class: 'num' }, fx.unit === 'SAR' ? fmtMoney(fx.value) : fmtPlain(fx.value)));
+      add(chip, humanize(fx.label || fm[1]) + ': ');
+      add(chip, h('span', { class: 'num' }, fx.unit === 'SAR' ? fmtMoney(fx.value) : fx.unit === 'pct' ? fmtPct(fx.value) : fmtPlain(fx.value)));
       return chip;
     }
     if (ISSUE[ref]) { add(chip, idc(ref)); chip.setAttribute('title', str(ISSUE[ref].detail)); add(chip, ' مشكلة بيانات'); return chip; }
@@ -1149,7 +1208,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     item('تاريخ إعداد الدراسة', META.study_date ? h('span', { class: 'num' }, str(META.study_date)) : 'غير محدد', META.study_date_basis ? str(META.study_date_basis) : null);
     item('تاريخ التحليل', h('span', { class: 'num' }, str(META.analysis_date || '')), 'لا يُفترض أنه سنة البيانات');
     var vl = META.valuation || CFG.valuation || {};
-    item('التقييم المعتمد', vl.field ? str(vl.label || vl.year) : 'لا يوجد تقييم إجمالي', vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || ''));
+    item('التقييم المستخدم في المؤشرات', vl.field ? str(vl.label || vl.year) : 'لا يوجد تقييم إجمالي', vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || ''));
     item('نطاق العرض', (counts.in_scope !== undefined ? nRec(counts.in_scope) : '—') + ' ضمن نطاق الدراسة',
       'خارج المؤشرات: معزول ' + (counts.isolated || 0) + ' · مستبعد ' + (counts.excluded || 0));
     item('الملف المصدر', META.file_name ? h('span', { class: 'fname', title: str(META.file_name) }, str(META.file_name)) : 'غير معروف', META.sha256_short ? h('span', null, 'البصمة: ', h('code', null, str(META.sha256_short))) : null);
@@ -1206,7 +1265,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         (list(g.possible_causes).length ? ['أسباب محتملة: ' + list(g.possible_causes).map(str).join('؛ ')] : []);
       add(gbox, h('article', { class: 'item' + (g.is_proven_problem ? ' proven' : ''), 'data-role': 'top-gap', 'data-gap-id': str(g.id) },
         h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, str(g.title))),
-        h('div', { class: 'badges' }, provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
+        h('div', { class: 'badges' }, provenBadge(g), g.severity ? pill('الأهمية: ' + levelF(g.severity), 'navy') : null),
         h('p', null, h('span', { class: 'lbl' }, 'النطاق: '), scopeNodes(g.scope)),
         impact ? h('p', null, h('span', { class: 'lbl' }, 'الأثر: '), impact) : null,
         causes.length ? h('p', null, causes[0]) : null,
@@ -1223,7 +1282,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(abox, h('article', { class: 'item action', 'data-role': 'top-action', 'data-rec-id': str(r.id) },
         h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, recTitle(r))),
         h('div', { class: 'badges' }, r.target ? pill(str(r.target), 'navy') : null,
-          Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).slice(0, 3).map(function (k) { return pill(RANKING_AR[k] + ': ' + levelAr(rk[k]), 'neutral'); })),
+          Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).slice(0, 3).map(function (k) { return pill(RANKING_AR[k] + ': ' + rankLevel(k, rk[k]), 'neutral'); })),
         r.title && r.first_action ? h('p', null, h('span', { class: 'lbl' }, 'الإجراء الأول: '), str(r.first_action)) : null,
         r.problem ? h('p', null, h('span', { class: 'lbl' }, 'المشكلة: '), str(r.problem)) : null,
         h('p', null, h('span', { class: 'lbl' }, 'المسؤول: '), str(r.owner_role || 'غير محدد'), r.duration ? ' · ' : null, r.duration ? h('span', { class: 'lbl' }, 'المدة: ') : null, r.duration ? str(r.duration) : null),
@@ -1293,7 +1352,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (r && r.status === 'empty') return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية' : 'لا توجد سجلات مؤهلة في الملف';
     return metricStatus(r && r.status).ar;
   }
-  function resultPill(r) { return pill(resultStatusText(r), metricStatus(r && r.status).tone); }
+  function resultPill(r) {
+    if (growthRiyalOnly(r) && typeof r.value === 'number') return pill('قابلية المقارنة ' + growthCompWord(r) + ' — تغير بالريال فقط', 'warn');
+    return pill(resultStatusText(r), metricStatus(r && r.status).tone);
+  }
   function naText(r) {
     if (r.status === 'empty') return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية' : 'لا توجد سجلات مؤهلة';
     if (r.status === 'not_comparable') return 'غير قابل للمقارنة';
@@ -1304,7 +1366,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var known = typeof v === 'number' && isFinite(v);
     var el = h('div', { class: 'kpi-value' + (known ? '' : ' is-na'), 'data-role': 'kpi-value',
       'data-value': known ? String(v) : '', 'data-status': str(r.status) });
-    if (known) {
+    if (known && growthRiyalOnly(r)) {
+      el.setAttribute('data-shown', 'abs_change');
+      if (typeof r.abs_change === 'number') add(el, [h('span', { class: 'num' }, fmtMoneyNum(r.abs_change)), h('span', { class: 'unit' }, CUR)]);
+      else add(el, 'التغير بالريال غير متاح');
+    } else if (known) {
       if (r.unit === 'SAR') add(el, [h('span', { class: 'num' }, fmtMoneyNum(v)), h('span', { class: 'unit' }, CUR)]);
       else if (r.unit === '%') add(el, h('span', { class: 'num' }, fmtPct(v)));
       else add(el, h('span', { class: 'num' }, fmtPlain(v)));
@@ -1358,6 +1424,18 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return list(r.included_ids).filter(function (id) { var t = tvOf(REC[id], field); return t && t.s === 'not_applicable'; }).length;
   }
   function growthComparable(r) { return !!(r && r.comparability && r.comparability.status === 'confirmed'); }
+  /** A growth result whose comparability is not confirmed is shown as its change in riyals, never as a percentage
+   *  (metrics.md §5, brief §6): cards, evidence chips and the calculation log alike. */
+  function growthRiyalOnly(r) { return !!(r && r.kind === 'growth' && !growthComparable(r)); }
+  function growthCompWord(r) { return r && r.comparability && r.comparability.status === 'not_comparable' ? 'غير صالحة' : 'غير متحققة'; }
+  function growthRiyalText(r) {
+    return (typeof r.abs_change === 'number' ? fmtMoney(r.abs_change) : 'غير قابل للاحتساب') + growthRiyalNote(r);
+  }
+  function growthRiyalNote(r) { return ' (تغير بالريال؛ لا نسبة — قابلية المقارنة ' + growthCompWord(r) + ')'; }
+  /** The amount as a number span (no wrap) and the note as wrapping text. */
+  function growthRiyalNodes(r, attrs) {
+    return h('span', attrs || null, typeof r.abs_change === 'number' ? h('span', { class: 'num' }, fmtMoney(r.abs_change)) : 'غير قابل للاحتساب', growthRiyalNote(r));
+  }
   function revenueStartLine(r) {
     var ids = list(r.revenue_start_ids);
     if (!ids.length && !r.revenue_start) return null;
@@ -1398,12 +1476,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     }
     return lines.length ? h('p', { class: 'kpi-meta' }, lines.map(function (l) { return l; })) : null;
   }
+  function isolatedLines(n) { return nNoun(n, 'سطرًا معزولًا واحدًا', 'سطرين معزولين', 'أسطر معزولة', 'سطرًا معزولًا'); }
+  /** Isolated asset-like lines: the coverage card, and every count or sum card (asset count, recorded value, revenue,
+   *  zero-revenue value), must not read as a complete portfolio while the file lists properties outside the scope. */
   function coverageCaveat(r) {
-    if (r.kind !== 'coverage') return null;
     var n = isolatedAssetLike();
     if (!n) return null;
-    return h('p', { class: 'kpi-caveat', role: 'note' }, 'التغطية تخص السجلات ضمن النطاق فقط؛ في الملف سجلات معزولة تشبه الأصول أو تصف عقارات ' +
-      'لم يُتحقق من نطاقها، عددها ' + n + '، فلا تعني النسبة اكتمال سجل المحفظة.');
+    if (r.kind === 'coverage') {
+      return h('p', { class: 'kpi-caveat', role: 'note', 'data-role': 'isolated-caveat' }, 'التغطية تخص السجلات ضمن النطاق فقط؛ في الملف سجلات معزولة تشبه الأصول أو تصف عقارات ' +
+        'لم يُتحقق من نطاقها، عددها ' + n + '، فلا تعني النسبة اكتمال سجل المحفظة.');
+    }
+    if (r.kind !== 'count' && r.kind !== 'sum') return null;
+    return h('p', { class: 'kpi-caveat', role: 'note', 'data-role': 'isolated-caveat' }, 'للنطاق المحدد فقط: لا يشمل ' + isolatedLines(n) +
+      ' من أوراق تسرد عقارات لم يُتحقق من نطاقها.');
   }
   /** Phone strip under the title: up to three headline card values (CSS shows it at ≤ 480px only). */
   function renderStrip(all) {
@@ -1420,6 +1505,9 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(box, h('div', { class: 'ks-item' }, h('span', { class: 'ks-label' }, str(r.short_label || r.label || id)),
         h('span', { class: 'ks-value' + (known ? '' : ' is-na') }, txt)));
     });
+    var iso = isolatedAssetLike();
+    if (box.children.length && iso) add(box, h('p', { class: 'ks-caveat', role: 'note', 'data-role': 'isolated-caveat' },
+      'للنطاق المحدد فقط؛ خارج الأرقام ' + isolatedLines(iso) + ' من أوراق تسرد عقارات.'));
     if (box.children.length) add(box, h('a', { class: 'ks-link', href: '#sec-kpis' }, 'كل المؤشرات وتعريفاتها ←'));
   }
   function renderCards(all) {
@@ -1428,7 +1516,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     cardGroups().forEach(function (g) {
       var rs = g.specs.map(function (s) { return all.metrics[s.id]; }).filter(Boolean);
       if (!rs.length) return;
-      var card = h('article', { class: 'kpi', 'data-role': 'kpi-card', 'data-metric-id': str(rs[0].id), 'aria-label': str(rs.map(function (r) { return r.short_label || r.label; }).join(' و')) });
+      var card = h('article', { class: 'kpi', 'data-role': 'kpi-card', 'data-metric-id': str(rs[0].id), 'data-kind': rs.length === 1 ? str(rs[0].kind) : 'group', 'aria-label': str(rs.map(function (r) { return r.short_label || r.label; }).join(' و')) });
       if (rs.length === 1) {
         var r = rs[0];
         var title = str(r.short_label || r.label || r.id);
@@ -1587,6 +1675,17 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     list(CFG.breakdowns).forEach(function (b) { if (b && b.by && dims.indexOf(b.by) < 0) dims.push(b.by); });
     return dims;
   }
+  /** Why no distribution is drawn, worded for the board (config.breakdowns_reason when the analyst gave one). */
+  function chartNoBreakdown() {
+    var nAssets = RECORDS.filter(function (r) { return r.scope === 'in_scope' && isAssetType(r); }).length;
+    var why = str(CFG.breakdowns_reason) || (nAssets <= 1
+      ? (nAssets === 1 ? 'أصل واحد ضمن النطاق؛ لا معنى لتوزيع القيمة أو الإيراد على فئات.' : 'لا أصول ضمن النطاق لتوزيع القيمة أو الإيراد.')
+      : 'لم تُعدّ في هذه الدراسة توزيعات للقيمة والإيراد حسب فئات الأصول.');
+    var f = figure('distribution', 'توزيع القيمة والإيراد', null, true);
+    f.setAttribute('data-print', 'hide');
+    add(f._body, emptyState(why));
+    return f;
+  }
   function chartBreakdown(all, kind, W) {
     var id = kind === 'value' ? 'value-distribution' : 'revenue-distribution';
     var dim = state.bdDim;
@@ -1594,7 +1693,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var baseTitle = kind === 'value' ? 'توزيع القيمة المسجلة' : 'توزيع الإيراد المسجل';
     if (!spec) {
       var f0 = figure(id, baseTitle + ' حسب ' + dimLabel(dim), 'الوحدة: ' + CUR);
-      add(f0._body, emptyState('لا يوجد توزيع ' + (kind === 'value' ? 'للقيمة' : 'للإيراد') + ' حسب «' + dimLabel(dim) + '» في إعدادات المؤشرات.'));
+      add(f0._body, emptyState('لم يُعدّ توزيع ' + (kind === 'value' ? 'للقيمة' : 'للإيراد') + ' حسب «' + dimLabel(dim) + '» في هذه الدراسة؛ اختر بُعدًا آخر.'));
       return f0;
     }
     var r = all.breakdowns[spec.id] || {};
@@ -1647,6 +1746,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     items.sort(function (a, b) { return b.v - a.v || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
     return items;
   }
+  /** «أكبر أصل» · «أكبر أصلين» · «أكبر 3 أصول» · «أكبر 12 أصلًا». */
+  function topAssets(n) { return n === 1 ? 'أكبر أصل' : n === 2 ? 'أكبر أصلين' : 'أكبر ' + n + (n <= 10 ? ' أصول' : ' أصلًا'); }
   function chartConcentration(all, W) {
     var vSpec = findMetricSpec(function (m) { return m.kind === 'concentration' && (m.field === '{VAL}' || (FM[m.field] && FM[m.field].group === 'valuation')); });
     var rSpec = findMetricSpec(function (m) { return m.kind === 'concentration' && (m.field === '{REV}' || (FM[m.field] && FM[m.field].group === 'revenue')); });
@@ -1667,6 +1768,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       }
       any = true;
       var items = rankedValues(r);
+      if (items.length === 1) {
+        // one known value: no bar and no Herfindahl index (it says nothing with one asset; the calculation log keeps it)
+        add(blk, h('p', { class: 'conc-head' }, label), emptyState('أصل واحد معروف ' + (kind === 'value' ? 'القيمة' : 'الإيراد') +
+          ' ضمن النطاق (' + recName(items[0].id) + ')؛ التركز كامل بطبيعته ولا يدل على مقارنة.'));
+        add(fig._body, blk);
+        return;
+      }
       var total = typeof r.total === 'number' ? r.total : items.reduce(function (s, x) { return s + x.v; }, 0);
       var top = Math.max(1, Math.min(r.top || 3, items.length || 1));
       var shades = kind === 'value' ? ['#2C6A9E', '#5E8DBA', '#93B4D4', '#B9CEE3', '#D2E0EE'] : ['#1F9A72', '#4FB08D', '#86CDB4', '#AEDDCC', '#CDEBE0'];
@@ -1674,10 +1782,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var segs = items.slice(0, top).map(function (x, i) { return { id: x.id, v: x.v, share: total ? x.v / total : 0, color: shades[Math.min(i, shades.length - 1)], ink: inkFor(i), rank: i + 1 }; });
       var restV = items.slice(top).reduce(function (s, x) { return s + x.v; }, 0);
       if (restV > 0) segs.push({ id: null, v: restV, share: total ? restV / total : 0, color: '#DDE2E8', ink: '#0B1F2E', rank: null, n: items.length - top });
-      add(blk, h('p', { class: 'conc-head' }, label + ': أكبر ' + top + ' = ', chartNum(fmtPct(r.value), 'metrics.' + spec.id + '.value', r.value),
-        ' من المجموع المعروف' + (typeof r.hhi === 'number' ? ' · مؤشر هيرفندال ' : ''), typeof r.hhi === 'number' ? h('span', { class: 'num' }, fmtNumber(r.hhi, 0)) : null));
+      add(blk, h('p', { class: 'conc-head' }, label + ': ' + topAssets(top) + ' = ', chartNum(fmtPct(r.value), 'metrics.' + spec.id + '.value', r.value),
+        ' من المجموع المعروف'));
       var H = 30;
-      var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': label + ': حصة أكبر ' + top + ' سجلات ' + fmtPct(r.value) });
+      var svg = sv('svg', { class: 'chart-svg', viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': label + ': حصة ' + topAssets(top) + ' ' + fmtPct(r.value) });
       var x = W;
       segs.forEach(function (s, i) {
         var w = s.share * W;
@@ -1734,14 +1842,16 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var r = comparisonMetric(all);
     var fig = figure('asset-comparison', 'وزن الأصل في القيمة مقابل مساهمته في الإيراد',
       r ? [str(r.short_label || r.label), str(r.period_text), r.valuation_date ? 'تقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ') : null, true);
-    if (!r) { add(fig._body, emptyState('لا يوجد مؤشر عائد (إيراد ÷ تقييم) في الإعدادات تُبنى عليه المقارنة.')); return fig; }
+    // an empty comparison (no yield metric, or fewer than two assets) stays on screen only: on paper it was a page of
+    // its own (the print keeps to 8 A4 pages)
+    var emptyFig = function (why) { fig.setAttribute('data-print', 'hide'); add(fig._body, emptyState(why)); return fig; };
+    if (!r) return emptyFig('لا يوجد مؤشر عائد (إيراد ÷ تقييم) في الإعدادات تُبنى عليه المقارنة.');
     var numF = r.resolved_fields && r.resolved_fields.num, denF = r.resolved_fields && r.resolved_fields.den;
     var ids = list(r.included_ids);
-    if (r.status === 'empty') { add(fig._body, emptyState(emptyChartText(r))); return fig; }
-    if (r.status === 'not_comparable' || r.status === 'not_computable') { add(fig._body, emptyState(str(r.reason || 'غير قابل للاحتساب بالبيانات الحالية'))); return fig; }
+    if (r.status === 'empty') return emptyFig(emptyChartText(r));
+    if (r.status === 'not_comparable' || r.status === 'not_computable') return emptyFig(str(r.reason || 'غير قابل للاحتساب بالبيانات الحالية'));
     if (!numF || !denF || ids.length < 2) {
-      add(fig._body, emptyState('تلزم أصول (اثنان على الأقل) يتوافر لها الإيراد والتقييم معًا للمقارنة؛ المتاح ضمن التصفية الحالية: ' + ids.length + '.'));
-      return fig;
+      return emptyFig('تلزم أصول (اثنان على الأقل) يتوافر لها الإيراد والتقييم معًا للمقارنة؛ المتاح ضمن التصفية الحالية: ' + ids.length + '.');
     }
     var sumV = 0, sumR = 0;
     var rows = ids.map(function (id) { var v = fv(REC[id], denF), rv = fv(REC[id], numF); sumV += v; sumR += rv; return { id: id, v: v, rv: rv }; });
@@ -1821,6 +1931,18 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (one) parts.push('معروفة في فترة واحدة فقط: ' + nRec(one) + ' (خارج المقارنة)');
     return parts.join(' · ');
   }
+  /** A number over a bar is never cut («144.5 أ…»): a smaller font first, then the unit on a second line. */
+  function barValueLabel(lab, maxW, x, y, cls) {
+    var size = 12;
+    while (size > 9 && textW(lab, size, 600) > maxW) size -= 0.5;
+    if (textW(lab, size, 600) <= maxW) return svgText(lab, x, y, 'middle', cls, size < 12 ? { style: 'font-size:' + size + 'px' } : null);
+    var sp = lab.lastIndexOf(' ');
+    if (sp <= 0) return svgText(lab, x, y, 'middle', cls, { style: 'font-size:9px' });
+    var t = sv('text', { x: x.toFixed(1), y: (y - 10).toFixed(1), 'text-anchor': 'middle', class: cls, style: 'font-size:9.5px' });
+    add(t, sv('tspan', { x: x.toFixed(1), dy: '0' }, lab.slice(0, sp)));
+    add(t, sv('tspan', { x: x.toFixed(1), dy: '11' }, lab.slice(sp + 1)));
+    return t;
+  }
   function chartTrend(all, W) {
     var t = all.trend || {};
     var fig = figure('revenue-trend', str(t.label || 'تطور الإيراد عبر الفترات'), 'الوحدة: ' + CUR + ' · مجموع السجلات المعروف إيرادها في كل فترة', true);
@@ -1863,7 +1985,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       if (len) add(g, sv('path', { d: barPathV(bx, y0, bw, len), fill: '#1F9A72' }));
       if (sLen) add(g, sv('rect', { class: 'bar-same', x: (cx - bw - 1).toFixed(1), y: (y0 - sLen + 1).toFixed(1), width: (bw - 2).toFixed(1), height: (sLen - 1).toFixed(1) }));
       var lab = known ? (W < 560 || pts.length > 5 ? fmtCompact(p.value) : fmtMoneyNum(p.value)) : 'غير متاح';
-      add(g, svgText(fit(lab, slot - 4, 12, 600), cx, y0 - Math.max(len, sLen) - 7, 'middle', 'val' + (known ? '' : ' na')));
+      add(g, known ? barValueLabel(lab, slot - 4, cx, y0 - Math.max(len, sLen) - 7, 'val')
+        : svgText(fit(lab, slot - 4, 12, 600), cx, y0 - Math.max(len, sLen) - 7, 'middle', 'val na'));
       add(g, svgText(fit(str(p.period), slot - 4, 12.5, 700), cx, y0 + 18, 'middle', 'lbl', { 'font-weight': '700' }));
       // short form on narrow slots so neighbouring labels never overlap (mobile)
       add(g, svgText(narrowSlot ? p.n_known + '/' + p.n : p.n_known + ' من ' + p.n + ' معروف', cx, y0 + 35, 'middle', 'val na'));
@@ -1911,10 +2034,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     // on paper the concentration and trend charts take the full width: in a half column their notes wrap into a
     // page-tall card (the print stays within 8 A4 pages)
     var pw = !!state.printing;
-    var figs = [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn), chartComparison(all, Ww),
-      chartConcentration(all, pw ? Ww : Wn), chartTrend(all, pw ? Ww : Wn)];
-    if (pw) { figs[3].classList.add('wide'); figs[4].classList.add('wide'); }
-    else figs[4].classList.remove('wide');   // keep the grid tidy: the trend chart shares a row with concentration
+    // no breakdown configured: one short note in board language instead of two empty «… حسب نوع الأصل» cards
+    var dist = breakdownDims().length ? [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn)] : [chartNoBreakdown()];
+    var conc = chartConcentration(all, pw ? Ww : Wn), trend = chartTrend(all, pw ? Ww : Wn);
+    var figs = dist.concat([chartComparison(all, Ww), conc, trend]);
+    if (pw) { conc.classList.add('wide'); trend.classList.add('wide'); }
+    else trend.classList.remove('wide');   // keep the grid tidy: the trend chart shares a row with concentration
     figs.forEach(function (f) { add(grid, f); });
   }
 
@@ -1931,10 +2056,18 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (d.use === 'service' || d.use === 'admin') return 'أصل ' + dimValueLabel('use', d.use) + ': لا يُحكم عليه بالإيجار';
     return null;
   }
-  function rowData(rec, rf, vf) {
+  /** The yield the table compares with: not comparable for a period outside the metric's valid_periods (the card
+   *  next to the table says so; the row must not show this year's revenue over another year's valuation). */
+  function tableYieldBlock(all) {
+    var cm = all ? comparisonMetric(all) : null;
+    if (!cm || cm.status !== 'not_comparable') return null;
+    return str(cm.reason || cm.invalid_period_reason || 'التقييم لا يقابل إيراد هذه الفترة');
+  }
+  function rowData(rec, rf, vf, yBlock) {
     var v = vf ? fv(rec, vf) : null, rv = rf ? fv(rec, rf) : null;
     var na = yieldApplicable(rec);
-    var y = (!na && typeof v === 'number' && v > 0 && typeof rv === 'number') ? rv / v * 100 : null;
+    var nc = !na && yBlock ? yBlock : null;
+    var y = (!na && !nc && typeof v === 'number' && v > 0 && typeof rv === 'number') ? rv / v * 100 : null;
     var flags = [];
     if (rf && !isKnown(rec, rf) && rec.record_type !== 'other') {
       var tr = tvOf(rec, rf);
@@ -1942,7 +2075,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     }
     if (vf && !isKnown(rec, vf) && isAssetType(rec)) { var tv = tvOf(rec, vf); flags.push('التقييم: ' + statusAr(tv ? tv.s : 'absent')); }
     var ni = list(rec.issue_ids).length;
-    return { rec: rec, v: v, rv: rv, y: y, yNa: na, flags: flags, issues: ni, links: citeCount(rec.id) };
+    return { rec: rec, v: v, rv: rv, y: y, yNa: na, yNc: nc, flags: flags, issues: ni, links: citeCount(rec.id) };
   }
   var COLS = [
     { key: 'name', label: 'الأصل / السجل', sort: function (d) { return str(d.rec.name); } },
@@ -2011,16 +2144,17 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!all) return;
     updateTableHead();
     var rf = revField(), vf = valField();
+    var yBlock = tableYieldBlock(all);
     var ids = all.record_ids || all.records || [];
     var q = norm(state.search);
     var rows = ids.map(function (id) { return REC[id]; }).filter(Boolean)
       .filter(function (r) { return !q || searchText(r).indexOf(q) >= 0; })
-      .map(function (r) { return rowData(r, rf, vf); });
+      .map(function (r) { return rowData(r, rf, vf, yBlock); });
     var col = COLS.filter(function (c) { return c.key === state.sort.key; })[0] || COLS[0];
     var dir = state.sort.dir;
     rows.sort(function (a, b) {
       var c = cmp(col.sort(a), col.sort(b));
-      if (!c) c = a.rec.id < b.rec.id ? -1 : (a.rec.id > b.rec.id ? 1 : 0);
+      if (!c) c = natCmp(a.rec.id, b.rec.id);
       return c * dir;
     });
     var tb = clear($('#asset-table tbody'));
@@ -2038,7 +2172,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       add(tr, h('td', null, dimText(rec, 'income_nature')));
       add(tr, h('td', { class: 'n' }, vf ? moneyCell(d.v, tvOf(rec, vf)) : h('span', { class: 'na-val' }, 'لا يوجد تقييم')));
       add(tr, h('td', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf), managed) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
-      add(tr, h('td', { class: 'n' }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y)) : h('span', { class: 'muted small', title: d.yNa || 'يلزم الإيراد والتقييم معًا' }, '—')));
+      add(tr, h('td', { class: 'n', 'data-yield-status': d.yNc ? 'not_comparable' : null }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y))
+        : (d.yNc ? h('span', { class: 'muted small', title: d.yNc }, 'غير قابل للمقارنة') : h('span', { class: 'muted small', title: d.yNa || 'يلزم الإيراد والتقييم معًا' }, '—'))));
       var fl = h('td');
       d.flags.forEach(function (f) { add(fl, h('span', { class: 'flag' }, f)); });
       if (d.issues) add(fl, h('span', { class: 'flag' }, nNoun(d.issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات')));
@@ -2127,8 +2262,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var tb = h('tbody');
     fields.forEach(function (f) {
       var tvv = rec.fields[f];
-      add(tb, h('tr', null, h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, str(tvv.note)) : null),
-        h('td', null, fmtFieldValue(f, tvv)), h('td', null, tvv ? statusAr(tvv.s) : '—'), h('td', null, tvv && tvv.ref ? refc(tvv.ref) : '—')));
+      add(tb, h('tr', null, h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, humanize(tvv.note)) : null),
+        h('td', null, fmtFieldValue(isOriginalKey(f) ? f.slice(0, -ORIGINAL_SUFFIX.length) : f, tvv)),
+        h('td', null, isOriginalKey(f) ? h('span', { class: 'flag' }, 'قيمة مخزنة معيبة — غير مستخدمة') : (tvv ? statusAr(tvv.s) : '—')),
+        h('td', null, tvv && tvv.ref ? refc(tvv.ref) : '—')));
     });
     add(t, tb);
     add(fsec, h('div', { class: 'table-wrap' }, t));
@@ -2140,8 +2277,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var isec = h('div', { class: 'detail-sec' }, h('h4', null, 'ملاحظات البيانات على السجل (' + iss.length + ')'));
     if (!iss.length) add(isec, h('p', { class: 'small muted' }, 'لا توجد ملاحظات مسجلة.'));
     iss.forEach(function (x) {
-      add(isec, h('div', { class: 'cite' }, h('b', null, idc(x.id)), ' · ', levelAr(x.severity), ' — ', str(x.detail),
-        x.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(x.impact)) : null, x.treatment ? h('p', { class: 'small muted' }, 'المعالجة: ' + str(x.treatment)) : null));
+      add(isec, h('div', { class: 'cite' }, h('b', null, idc(x.id)), ' · الأهمية ', levelF(x.severity), ' — ', humanize(x.detail),
+        x.impact ? h('p', { class: 'small' }, 'الأثر: ' + humanize(x.impact)) : null, x.treatment ? h('p', { class: 'small muted' }, 'المعالجة: ' + humanize(x.treatment)) : null));
     });
     add(colA, isec);
 
@@ -2217,7 +2354,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function renderAny(x, depth) {
     depth = depth || 0;
     if (x === null || x === undefined) return '—';
-    if (typeof x === 'string') return x;
+    if (typeof x === 'string') return humanize(x);
     if (typeof x === 'number') return h('span', { class: 'num' }, fmtPlain(x));
     if (typeof x === 'boolean') return x ? 'نعم' : 'لا';
     if (depth > 4) return '…';
@@ -2236,6 +2373,25 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return '';
   }
 
+  /** A validation message: field keys and metric ids by their Arabic names; any other engine key it cites (a narrative
+   *  key such as top_gaps in a draft's blocking error) stays as a code-styled technical reference, never as prose. */
+  var ENGINE_KEY_RE = /[a-z][a-z0-9]*(?:[._][a-z0-9]+)+/g;
+  function humanizeNodes(x) {
+    var s = humanize(x), out = [], last = 0, m;
+    ENGINE_KEY_RE.lastIndex = 0;
+    while ((m = ENGINE_KEY_RE.exec(s)) !== null) {
+      if (m.index > last) out.push(s.slice(last, m.index));
+      out.push(h('code', null, m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) out.push(s.slice(last));
+    return out;
+  }
+  /** «2026-11-07T20:54:42» → «2026-11-07 20:54». */
+  function fmtStamp(x) {
+    var m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(str(x));
+    return m ? m[1] + ' ' + m[2] : str(x);
+  }
   function renderMethodology() {
     var b = clear(SEC.methodology.body);
     add(b, h('h4', null, 'أنواع العبارات'));
@@ -2270,18 +2426,35 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!vs.available) add(b, h('p', { class: 'small' }, 'لا توجد نتيجة تحقق مرفقة؛ هذه مسودة.'));
     else {
       add(b, h('p', { class: 'small' }, 'الأخطاء المانعة: ' + (vs.blocking_count || 0) + ' · التنبيهات: ' + (vs.warning_count || 0) +
-        (vs.acknowledged_count ? ' · تنبيهات معلَّلة في السرد: ' + vs.acknowledged_count : '') + (vs.checked_at ? ' · ' + str(vs.checked_at) : '')));
+        (vs.acknowledged_count ? ' · تنبيهات معلَّلة في السرد: ' + vs.acknowledged_count : '') + (vs.checked_at ? ' · ' + fmtStamp(vs.checked_at) : '')));
       var msgs = list(vs.blocking).concat(list(vs.warnings), list(vs.acknowledged));
-      if (msgs.length) add(b, h('ul', { class: 'small' }, list(vs.blocking).map(function (m) { return h('li', null, pill('مانع', 'red'), ' ', str(m)); })
-        .concat(list(vs.warnings).map(function (m) { return h('li', null, pill('تنبيه', 'warn'), ' ', str(m)); }),
-          list(vs.acknowledged).map(function (m) { return h('li', null, pill('معلَّل', 'neutral'), ' ', str(m)); }))));
+      if (msgs.length) add(b, h('ul', { class: 'small' }, list(vs.blocking).map(function (m) { return h('li', null, pill('مانع', 'red'), ' ', humanizeNodes(m)); })
+        .concat(list(vs.warnings).map(function (m) { return h('li', null, pill('تنبيه', 'warn'), ' ', humanizeNodes(m)); }),
+          list(vs.acknowledged).map(function (m) { return h('li', null, pill('معلَّل', 'neutral'), ' ', humanizeNodes(m)); }))));
     }
     setCount('methodology', null);
   }
 
+  // generic Arabic names of the field placeholders, for a metric whose fields could not be resolved
+  var PH_AR = { '{REV}': 'الإيراد', '{EXP}': 'مصروفات التشغيل', '{VAL}': 'التقييم', '{PREV_REV}': 'إيراد الفترة السابقة' };
+  function placeholderMissing(ph) {
+    if (!/^\{[A-Z_]+\}$/.test(str(ph))) return false;
+    try { return !ENG.resolveField(ph, getFilters()); } catch (e) { return true; }
+  }
+  function placeholderText(ph) {
+    var name = PH_AR[ph] || (FM[ph] ? fieldLabel(ph) : null);
+    if (!name) return 'الحقل';
+    return name + (placeholderMissing(ph) ? ' (غير متوفر في الملف)' : '');
+  }
+  /** «الحقول المستخدمة» of a metric whose fields did not resolve: the placeholders it needs, by their Arabic names. */
+  function unresolvedFieldsText(spec) {
+    var out = [];
+    ['field', 'num', 'den', 'a', 'b', 'curr', 'prev'].forEach(function (k) { if (spec && spec[k]) out.push(placeholderText(spec[k])); });
+    return out.length ? out.join(' · ') : null;
+  }
   function formulaWords(spec, r) {
     var rf = r.resolved_fields || {};
-    var F = function (k) { return rf[k] ? '«' + fieldLabel(rf[k]) + '»' : 'الحقل'; };
+    var F = function (k) { return rf[k] ? '«' + fieldLabel(rf[k]) + '»' : '«' + placeholderText(spec[k]) + '»'; };
     switch (spec.kind) {
       case 'count': return 'عدد السجلات المطابقة لشروط النطاق والتصفية.';
       case 'sum': return 'مجموع ' + F('field') + ' للسجلات المعروفة قيمتها؛ السجلات غير المعروفة تظهر مستبعدة ولا تُحسب صفرًا.';
@@ -2293,11 +2466,23 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       default: return str(spec.kind);
     }
   }
+  /** In-scope records of a metric that included and excluded none (a missing input such as expenses): listed under
+   *  «المستبعدة وسببها» with that reason, so a record in scope never vanishes from the log. */
+  function scopeIdsOf(spec, r) {
+    if (!r || r.status !== 'not_computable' || list(r.included_ids).length || list(r.excluded).length || !(r.n_scope > 0)) return [];
+    try {
+      var recs = ENG.filterRecords(getFilters()) || [];
+      var w = spec.where || null;
+      var ev = window.APAEngine && window.APAEngine.evalWhere;
+      var out = recs.filter(function (x) { return !w || !ev || ev(w, x); }).map(function (x) { return x.id; });
+      return out.length === r.n_scope ? out : [];
+    } catch (e) { return []; }
+  }
   function namesList(ids) {
     var ul = h('ul', { class: 'small' });
     ids.slice(0, 200).forEach(function (x) {
       var id = typeof x === 'object' ? x.id : x;
-      add(ul, h('li', null, recButton(id), typeof x === 'object' && x.reason ? ' — ' + reasonAr(x.reason) : null));
+      add(ul, h('li', null, recButton(id), typeof x === 'object' && x.reason ? ' — ' + reasonAr(x.reason) : (typeof x === 'object' && x.reason_text ? ' — ' + x.reason_text : null)));
     });
     if (ids.length > 200) add(ul, h('li', { class: 'muted' }, 'و' + (ids.length - 200) + ' سجلًا آخر'));
     if (!ids.length) add(ul, h('li', { class: 'muted' }, 'لا يوجد'));
@@ -2311,16 +2496,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var r = all.metrics[spec.id];
       if (!r) return;
       var rf = r.resolved_fields || {};
-      var fieldsTxt = Object.keys(rf).map(function (k) {
-        var v = rf[k];
-        return list(v).map(function (f) { return fieldLabel(f) + ' [' + f + ']'; }).join('، ');
-      }).filter(Boolean).join(' · ');
+      // the board reads the Arabic label; the key stays as a code-styled technical reference
+      var fieldsTxt = [];
+      Object.keys(rf).forEach(function (k) {
+        list(rf[k]).forEach(function (f) { fieldsTxt.push([fieldsTxt.length ? ' · ' : null, fieldLabel(f), ' ', h('code', null, str(f))]); });
+      });
+      if (!fieldsTxt.length) fieldsTxt = unresolvedFieldsText(spec);
       var pairs = [
-        ['القيمة', typeof r.value === 'number' ? [h('span', { class: 'num' }, fmtUnit(r.value, r.unit)), r.note ? ' — ' + str(r.note) : null]
+        ['القيمة', typeof r.value === 'number' ? [growthRiyalOnly(r) ? growthRiyalNodes(r, { 'data-role': 'calc-value' })
+          : h('span', { class: 'num', 'data-role': 'calc-value' }, fmtUnit(r.value, r.unit)), r.note ? ' — ' + str(r.note) : null]
           : naText(r) + (r.status === 'empty' ? ' — ' + emptyReason(r) : (r.reason ? ' — ' + str(r.reason) : ''))],
         ['التعريف', str(r.definition)],
         ['طريقة الحساب', formulaWords(spec, r)],
-        ['الحقول المستخدمة', fieldsTxt || '—'],
+        ['الحقول المستخدمة', fieldsTxt && fieldsTxt.length ? fieldsTxt : '—'],
         ['النطاق', str(r.scope_text)],
         ['الأساس', str(r.basis)],
         ['الفترة', str(r.period_text)],
@@ -2345,19 +2533,22 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         return fieldLabel(p.field) + ': ' + p.n_known + ' من ' + p.n + (p.n_not_applicable ? ' (لا ينطبق على ' + nRec(p.n_not_applicable) + '، خارج المقام)' : '');
       }).join(' · ')]);
       if (r.kind === 'diff' && typeof r.a_sum === 'number') pairs.push(['المجموعان', fmtMoney(r.a_sum) + ' − ' + fmtMoney(r.b_sum)]);
-      var art = h('article', { class: 'calc' },
+      var scopeIds = list(r.excluded).length ? [] : scopeIdsOf(spec, r);
+      var exList = scopeIds.length ? scopeIds.map(function (id) { return { id: id, reason_text: str(r.reason || r.unavailable_reason || 'مدخل غير متوفر') }; })
+        : list(r.excluded);
+      var art = h('article', { class: 'calc', 'data-metric-id': str(spec.id) },
         h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), resultPill(r)),
         kvList(pairs),
-        h('details', { class: 'sub' }, h('summary', null, 'السجلات المشمولة (' + list(r.included_ids).length + ') والمستبعدة (' + list(r.excluded).length + ')'),
+        h('details', { class: 'sub' }, h('summary', null, 'السجلات المشمولة (' + list(r.included_ids).length + ') والمستبعدة (' + exList.length + ')'),
           h('p', { class: 'small lbl' }, 'المشمولة:'), namesList(list(r.included_ids)),
-          h('p', { class: 'small lbl' }, 'المستبعدة وسببها:'), namesList(list(r.excluded))),
+          h('p', { class: 'small lbl' }, 'المستبعدة وسببها:'), namesList(exList)),
         h('details', { class: 'sub' }, h('summary', null, 'الشرط التقني (DSL)'), h('p', { class: 'small' }, h('code', null, JSON.stringify(spec.where || null)))));
       add(b, art);
     });
     var der = list(WB.derived_fields);
     if (der.length) {
       add(b, h('h4', null, 'حقول مشتقة صراحةً في التصنيف'));
-      add(b, simpleTable([{ label: 'الحقل', cell: function (x) { return fieldLabel(x.field) + ' [' + str(x.field) + ']'; } }, { label: 'المعادلة', cell: function (x) { return h('code', null, str(x.formula)); } },
+      add(b, simpleTable([{ label: 'الحقل', cell: function (x) { return [fieldLabel(x.field), ' ', h('code', null, str(x.field))]; } }, { label: 'المعادلة', cell: function (x) { return h('code', null, str(x.formula)); } },
         { label: 'متى', cell: function (x) { return x.when === 'if_unknown' ? 'إذا كان غير معروف' : 'دائمًا'; } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], der));
     }
     setCount('calculations', list(CFG.metrics).length);
@@ -2368,7 +2559,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(b, h('h4', null, 'الفجوات (' + GAPS.length + ')'));
     if (!GAPS.length) add(b, h('p', { class: 'muted' }, 'لا توجد فجوات في السرد.'));
     GAPS.forEach(function (g) {
-      add(b, h('article', { class: 'calc' }, h('h5', null, idc(g.id), ' — ' + str(g.title), provenBadge(g), g.severity ? pill('الأهمية: ' + levelAr(g.severity), 'navy') : null),
+      add(b, h('article', { class: 'calc' }, h('h5', null, idc(g.id), ' — ' + str(g.title), provenBadge(g), g.severity ? pill('الأهمية: ' + levelF(g.severity), 'navy') : null),
         kvList([['النطاق', scopeNodes(g.scope)], ['الأثر', g.impact && typeof g.impact === 'object' ? str(g.impact.text) : str(g.impact)],
           ['السبب المثبت', g.proven_cause ? str(g.proven_cause) : 'لا يوجد سبب مثبت'], ['أسباب محتملة', list(g.possible_causes).map(str).join('؛ ')],
           ['يلزم للتحقق', list(g.verification_needed).map(str).join('؛ ')], ['الإجراء المقترح', str(g.proposed_action)], ['الدليل', evidenceChips(g.evidence)]])));
@@ -2382,7 +2573,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
           ['الإجراء الأول', str(r.first_action)], ['البدائل', list(r.alternatives).map(str).join('؛ ')], ['الخيار الموصى به', str(r.recommended_option)],
           ['السبب', str(r.rationale)], ['المسؤول', str(r.owner_role)], ['المدة', str(r.duration)], ['التكلفة', str(r.cost)],
           ['الأثر المتوقع', str(r.expected_impact)], ['مؤشر النجاح', str(r.success_kpi)], ['الاعتماد المطلوب', r.approval_required ? str(r.approval_required) : 'لا يلزم'],
-          ['الترتيب', Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).map(function (k) { return RANKING_AR[k] + ': ' + levelAr(rk[k]); }).join(' · ')],
+          ['الترتيب', Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).map(function (k) { return RANKING_AR[k] + ': ' + rankLevel(k, rk[k]); }).join(' · ')],
           ['الدليل', evidenceChips(r.evidence)]])));
     });
     var st = list(NAR.strengths);
@@ -2408,11 +2599,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!rows.length) add(b, h('p', { class: 'muted' }, 'لا توجد مشكلات بيانات مسجلة.'));
     else add(b, simpleTable([
       { label: 'المعرف', cell: function (x) { return idc(x.id); } },
-      { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
+      { label: 'الأهمية', cell: function (x) { return levelF(x.severity); } },
       { label: 'الموضع', cell: function (x) { return refc(x.where); } },
-      { label: 'المشكلة', cell: function (x) { return str(x.detail); } },
-      { label: 'الأثر', cell: function (x) { return str(x.impact); } },
-      { label: 'المعالجة', cell: function (x) { return str(x.treatment); } },
+      { label: 'المشكلة', cell: function (x) { return [humanize(x.detail), x.field ? h('span', { class: 'tech' }, 'المرجع التقني: ', h('code', null, str(x.field))) : null]; } },
+      { label: 'الأثر', cell: function (x) { return humanize(x.impact); } },
+      { label: 'المعالجة', cell: function (x) { return humanize(x.treatment); } },
       { label: 'السجلات', cell: function (x) { var ids = list(x.record_ids); return ids.length ? ids.slice(0, 6).map(function (id, i) { return [i ? '، ' : null, REC[id] ? recButton(id) : bdi(id)]; }) : '—'; } }
     ], rows));
     setCount('issues', rows.length);
@@ -2433,7 +2624,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var ex = list(D.excluded_rows);
     if (ex.length) {
       add(b, h('h4', null, 'صفوف استُبعدت أثناء التطبيع (' + ex.length + ')'));
-      add(b, simpleTable([{ label: 'الورقة', cell: function (x) { return bdi(x.sheet); } }, { label: 'الصف', num: true, cell: function (x) { return str(x.row || (x.rows ? list(x.rows).join('، ') : '')); } }, { label: 'السبب', cell: function (x) { return str(x.reason); } }], ex));
+      add(b, simpleTable([{ label: 'الورقة', cell: function (x) { return bdi(x.sheet); } }, { label: 'الصف', num: true, cell: function (x) { return str(x.row || (x.rows ? list(x.rows).join('، ') : '')); } }, { label: 'السبب', cell: function (x) { return humanize(x.reason); } }], ex));
     }
     var ne = list(NAR.exclusions);
     if (ne.length) {
@@ -2463,7 +2654,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         { label: 'الدور', cell: function (x) { var d = dec[str(x.name).trim()]; var r = (d && d.role) || x.role_hint; return ROLE_AR[r] || str(r) || '—'; } },
         { label: 'القرار', cell: function (x) { var d = dec[str(x.name).trim()]; return d ? (DECISION_AR[d.decision] || str(d.decision)) : '—'; } },
         { label: 'الفترة', cell: function (x) { var d = dec[str(x.name).trim()]; return d && d.period ? str(d.period) : '—'; } },
-        { label: 'الموثوقية', cell: function (x) { var d = dec[str(x.name).trim()]; return d && d.reliability ? levelAr(d.reliability) : '—'; } },
+        { label: 'الموثوقية', cell: function (x) { var d = dec[str(x.name).trim()]; return d && d.reliability ? levelF(d.reliability) : '—'; } },
         { label: 'العلاقة بالسجل والسبب', cell: function (x) { var d = dec[str(x.name).trim()]; return d ? [str(d.relation_to_register), d.reason ? ' — ' + str(d.reason) : ''].join('') : '—'; } },
         { label: 'النطاق والجداول', cell: function (x) { return [str(x.dimensions), list(x.tables).map(function (t) { return str(t.name) + ' ' + str(t.ref); }).join('، ')].filter(Boolean).join(' · ') || '—'; } }
       ], sheets));
@@ -2471,8 +2662,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var an = list(WB.anomalies);
     if (an.length) {
       add(b, h('h4', null, 'ملاحظات على المصنف (' + an.length + ')'));
-      add(b, simpleTable([{ label: 'المعرف', cell: function (x) { return idc(x.id); } }, { label: 'الأهمية', cell: function (x) { return levelAr(x.severity); } },
-        { label: 'الموضع', cell: function (x) { return refc(x.where); } }, { label: 'التفاصيل', cell: function (x) { return str(x.detail); } }], an));
+      add(b, simpleTable([{ label: 'المعرف', cell: function (x) { return idc(x.id); } }, { label: 'الأهمية', cell: function (x) { return levelF(x.severity); } },
+        { label: 'الموضع', cell: function (x) { return refc(x.where); } }, { label: 'التفاصيل', cell: function (x) { return humanize(x.detail); } }], an));
     }
     var pii = list(WB.pii_columns);
     if (pii.length) add(b, h('p', { class: 'small', style: 'margin-top:12px' }, 'أعمدة بيانات شخصية لم تُنقل قيمها إلى اللوحة: ' + pii.map(function (p) { return str(p.sheet).trim() + '!' + str(p.col) + ' (' + str(p.header) + ')'; }).join('، ')));
@@ -2741,9 +2932,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     setCount('versions', has ? 1 + fu.length : (fu.length || null));
   }
 
+  /** Natural order of ids: ALC-r8 before ALC-r10, REG-2 before REG-10. */
+  var NAT = (typeof Intl !== 'undefined' && Intl.Collator) ? new Intl.Collator('en', { numeric: true, sensitivity: 'base' }) : null;
+  function natCmp(a, b) { a = str(a); b = str(b); return NAT ? NAT.compare(a, b) : (a < b ? -1 : a > b ? 1 : 0); }
   function renderAllRecords() {
     var b = clear(SEC.records.body);
-    var rows = RECORDS.slice().sort(function (a, c) { var o = { in_scope: 0, isolated: 1, excluded: 2 }; return ((o[a.scope] || 3) - (o[c.scope] || 3)) || (a.id < c.id ? -1 : a.id > c.id ? 1 : 0); });
+    var rows = RECORDS.slice().sort(function (a, c) { var o = { in_scope: 0, isolated: 1, excluded: 2 }; return ((o[a.scope] || 3) - (o[c.scope] || 3)) || natCmp(a.id, c.id); });
     add(b, simpleTable([
       { label: 'المعرف', cell: function (r) { return idc(r.id); } },
       { label: 'الاسم', cell: function (r) { return recButton(r.id, str(r.name || r.id)); } },
@@ -2770,8 +2964,15 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var sel = clear($('#bd-dim'));
     var dims = breakdownDims();
     var pref = ['asset_type', 'use', 'location', 'income_nature', 'ownership'];
-    state.bdDim = pref.filter(function (d) { return dims.indexOf(d) >= 0; })[0] || dims[0] || 'asset_type';
-    if (!dims.length) add(sel, h('option', { value: '' }, 'لا توجد توزيعات'));
+    var lab = sel.closest ? sel.closest('label') : null;
+    if (!dims.length) {
+      // nothing to choose: no empty selector on screen (the chart grid says why no distribution is drawn)
+      state.bdDim = null;
+      if (lab) lab.hidden = true;
+      return;
+    }
+    if (lab) lab.hidden = false;
+    state.bdDim = pref.filter(function (d) { return dims.indexOf(d) >= 0; })[0] || dims[0];
     dims.forEach(function (d) { add(sel, h('option', { value: d }, dimLabel(d) + (d === 'ownership' ? ' (قد تتداخل الفئات)' : ''))); });
     sel.value = state.bdDim;
     sel.addEventListener('change', function () { state.bdDim = sel.value; renderCharts(state.last); });

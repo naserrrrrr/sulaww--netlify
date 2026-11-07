@@ -77,7 +77,7 @@ SPEC_ATTR_AR = {"kind": "نوع الحساب", "where": "شرط النطاق", "
                 "a": "المطروح منه", "b": "المطروح", "fields": "الحقول", "prev": "الفترة السابقة", "curr": "الفترة الحالية",
                 "scale": "المقياس", "top": "عدد الأعلى", "unit": "الوحدة", "label": "التسمية", "short_label": "التسمية المختصرة",
                 "definition": "التعريف", "basis": "الأساس", "scope_text": "وصف النطاق", "card": "البطاقة",
-                "card_group": "مجموعة البطاقة", "base_where": "النطاق العام", "valuation": "التقييم المعتمد",
+                "card_group": "مجموعة البطاقة", "base_where": "النطاق العام", "valuation": "التقييم المستخدم في المؤشرات",
                 "filters": "مرشحات اللوحة"}
 META_KEYS = ("label", "group", "period", "year", "vat", "basis", "cash_basis", "completeness", "valuation_basis",
              "valuation_date", "unit")

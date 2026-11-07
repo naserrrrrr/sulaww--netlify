@@ -302,18 +302,25 @@ def default_zero_policy(field: str, kind: str, meta: dict) -> str:
     return "recorded"
 
 
+def flabel(field: str, meta: dict) -> str:
+    """«Arabic label» of a field for board-facing issue texts (the key itself stays in the issue's `field`)."""
+    base = field[:-len("__original")] if field.endswith("__original") else field
+    lab = (meta.get(base) or {}).get("label") or base
+    return f"«{lab} كما ورد قبل الاشتقاق»" if base != field else f"«{lab}»"
+
+
 def impact_for(field: str, kind: str, meta: dict) -> str:
     g = group_of(field, meta)
     m = meta.get(field) or {}
     if g == "revenue":
         p = m.get("period") or "؟"
-        return (f"يؤثر في مؤشرات الإيراد والعائد للفترة {p} (property_revenue، activity_revenue، gross_yield_*، "
-                f"revenue_growth، revenue_concentration_top3، data_coverage) متى كان {field} هو حقل إيراد الفترة المعتمد")
+        return (f"يؤثر في مؤشرات الإيراد والعائد للفترة {p} (الإيراد العقاري، إيراد الأنشطة، العائد الإجمالي، تغير "
+                f"الإيراد، تركّز الإيراد، تغطية البيانات) متى كان {flabel(field, meta)} هو حقل إيراد الفترة المعتمد")
     if g == "valuation":
-        return (f"يؤثر في القيمة المسجلة والعائد (recorded_value، gross_yield_*، zero_rev_investment_value، "
-                f"value_concentration_top3، data_coverage) متى كان {field} هو حقل التقييم المعتمد")
+        return (f"يؤثر في القيمة المسجلة والعائد (القيمة المسجلة، العائد الإجمالي، قيمة الأصول الاستثمارية بإيراد صفري، "
+                f"تركّز القيمة، تغطية البيانات) متى كان {flabel(field, meta)} هو حقل التقييم المعتمد")
     if g == "expense":
-        return "يؤثر في صافي الدخل التشغيلي (noi)"
+        return "يؤثر في صافي الدخل التشغيلي"
     if kind == "count_mixed" or field == "units":
         return "لا يدخل في أي مؤشر مجمّع؛ لا يُجمع ولا يُستنتج منه الإشغال"
     if kind == "area" or g == "area":
@@ -745,6 +752,66 @@ def eval_formula(formula: str, fields: dict):
 # ---------------------------------------------------------------------------
 # Issues
 # ---------------------------------------------------------------------------
+METRIC_AR = {
+    "asset_count": "عدد الأصول", "recorded_value": "القيمة المسجلة", "property_revenue": "الإيراد العقاري",
+    "activity_revenue": "إيراد الأنشطة", "gross_yield_investment": "العائد الإجمالي للأصول الاستثمارية",
+    "gross_yield_income_producing": "العائد الإجمالي للأصول المدرة", "gross_yield_owned": "العائد الإجمالي للأصول المملوكة",
+    "gross_yield_*": "العائد الإجمالي", "noi": "صافي الدخل التشغيلي", "revenue_growth": "تغير الإيراد",
+    "zero_rev_investment_value": "قيمة الأصول الاستثمارية بإيراد صفري", "value_concentration_top3": "تركّز القيمة",
+    "revenue_concentration_top3": "تركّز الإيراد", "data_coverage": "تغطية البيانات",
+}
+# a clause that tells the analyst which part of the mapping or of the engine to change is not for the board
+DEV_CLAUSE_RE = re.compile(r"02_mapping\.json|01_workbook_map\.json|\bmapping\b|derived_fields|field_overrides|dim_rules|"
+                           r"data_rows|exclude_rows|excluded_rows|skip_if_blank|default_scope|scope_reason|records/|"
+                           r"\brecords\b|sheets\[\]|\bpii\b|managed_for_others|managed_properties|id_rule|name_column|"
+                           r"key_column|\bcolumns\b|\brollup\b|\bstatus\b|zero_policy")
+_STATUS_CODES = ("isolated|excluded|in_scope|not_available|not_applicable|zero_as_missing|zero_recorded|zero_confirmed|"
+                 "error|unknown|status text|text|blank|filler|raw، hijri|raw")
+ENUM_AR = [(re.compile(r"\s*\((?:" + _STATUS_CODES + r")\)"), ""),
+           (re.compile(r"\bzero_as_missing\b"), "غير متاح (صفر لا يُعد قيمة)"), (re.compile(r"\bnot_available\b"), "غير متاح"),
+           (re.compile(r"\bisolated\b"), "معزولة"), (re.compile(r"\bunknown\b"), "غير معروف")]
+KEY_IN_TEXT_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\*?")
+
+
+def humanize_text(text: str, meta: dict) -> str:
+    """Field keys -> «Arabic label», metric ids -> Arabic names, engine enum words -> Arabic or nothing."""
+    if not isinstance(text, str) or not re.search(r"[A-Za-z]", text):
+        return text
+    for rx, to in ENUM_AR:
+        text = rx.sub(to, text)
+
+    def rep(m):
+        k = m.group(0)
+        if k in METRIC_AR:
+            return METRIC_AR[k]
+        base = k[:-len("__original")] if k.endswith("__original") else k
+        if base in meta and ("." in k or "_" in k):
+            return flabel(k, meta)
+        return k
+    return KEY_IN_TEXT_RE.sub(rep, text)
+
+
+def _split_clauses(text: str) -> list:
+    return [c for c in re.split(r"(?<=؛)\s*|(?<=[^\d\s]\.)\s+", text) if c and c.strip()]
+
+
+def board_wording(it: dict, meta: dict) -> None:
+    dev = [it["dev_note"]] if it.get("dev_note") else []
+    for key, fallback in (("treatment", "يلزم التحقق من المصدر وتوثيق المعالجة بدليل"), ("impact", None), ("detail", None)):
+        t = it.get(key)
+        if not isinstance(t, str) or not t:
+            continue
+        clauses = _split_clauses(t)
+        keep = [c for c in clauses if not DEV_CLAUSE_RE.search(c)]
+        moved = [c.strip().rstrip("؛").strip() for c in clauses if DEV_CLAUSE_RE.search(c)]
+        if moved and (keep or fallback):
+            dev += moved
+            t = " ".join(c.strip() for c in keep).strip().rstrip("؛").strip() if keep else fallback
+        it[key] = humanize_text(t, meta)
+    if dev:
+        it["dev_note"] = "؛ ".join(OrderedDict.fromkeys(dev))
+
+
 class Issues:
     def __init__(self):
         self.items = []
@@ -757,9 +824,13 @@ class Issues:
         self.items.append(it)
         return it
 
-    def finalize(self, by_id: dict):
+    def finalize(self, by_id: dict, meta: dict = None):
         """Issues that touch only isolated/excluded records say so in `impact` and sort after the issues that touch
-        in-scope records (or no record); severity orders each group. Ids are assigned in that order (DQ-001…)."""
+        in-scope records (or no record); severity orders each group. Ids are assigned in that order (DQ-001…).
+        The texts the board reads (detail, impact, treatment) carry Arabic labels, not field keys or metric ids, and no
+        instruction about 02_mapping.json: such clauses move to `dev_note` (dashboard-spec §4)."""
+        for it in self.items:
+            board_wording(it, meta or {})
         groups = []
         for it in self.items:
             rids = [r for r in it["record_ids"] if r in by_id]
@@ -1573,7 +1644,7 @@ def normalize(xlsx: str, mapping: dict, wb_map=None) -> dict:
     check_deeds(records, issues)
     check_classification(records, issues)
 
-    items = issues.finalize(by_id)
+    items = issues.finalize(by_id, meta)
     for it in items:
         for rid in it["record_ids"]:
             if rid in by_id:
@@ -1652,12 +1723,13 @@ def apply_derived(records: list, rules: list, issues: Issues, meta: dict) -> Non
                     failed.append(r["id"])
                     continue
                 new = {"v": None, "s": S_NOT_AVAILABLE, "raw": None, "ref": None,
-                       "note": f"تعذر الاشتقاق ({formula}): " + (err or ("حقول غير معروفة: " + "، ".join(missing)))}
+                       "note": f"تعذر الاشتقاق ({formula_words(formula, meta)}): " + (err or ("حقول غير معروفة: " + "، ".join(
+                           flabel(x, meta) if x in meta else x for x in missing)))}
                 failed.append(r["id"])
             else:
                 new = {"v": value, "s": S_DERIVED, "raw": None,
                        "ref": " + ".join(i["ref"] for i in inputs if i.get("ref")) or None,
-                       "note": f"مشتق: {formula} — {rule['reason']}", "formula": formula, "inputs": inputs}
+                       "note": f"مشتق: {formula_words(formula, meta)} — {rule['reason']}", "formula": formula, "inputs": inputs}
                 changed.append(r["id"])
             if cur is not None and when == "always":
                 r["fields"][field + "__original"] = copy.deepcopy(cur)
@@ -1666,16 +1738,27 @@ def apply_derived(records: list, rules: list, issues: Issues, meta: dict) -> Non
             new["derivation"] = {"rule": formula, "when": when}
             r["fields"][field] = new
         if changed or failed:
+            fw = formula_words(formula, meta)
             if when == "always":
-                treat = (f"استُبدلت قيمة {field} بالقيمة المشتقة ({formula}) وحُفظت القيمة الأصلية في الحقل "
-                         f"{field}__original للمراجعة")
+                treat = (f"استُبدلت قيمة {flabel(field, meta)} بالقيمة المشتقة ({fw}) وحُفظت القيمة المخزنة كما وردت "
+                         "للمراجعة دون استخدامها")
             else:
-                treat = f"مُلئت قيمة {field} غير المعروفة بالقيمة المشتقة ({formula}) دون تغيير القيم المعروفة"
-            detail = f"اشتقاق صريح من mapping: {rule['reason']}. سجلات مشتقة: {len(changed)}"
+                treat = f"مُلئت قيمة {flabel(field, meta)} غير المعروفة بالقيمة المشتقة ({fw}) دون تغيير القيم المعروفة"
+            detail = f"اشتقاق موثق في التحليل: {rule['reason']}. سجلات مشتقة: {len(changed)}"
             if failed:
-                detail += f"؛ تعذر الاشتقاق لـ {len(failed)} سجل (بقيت غير معروفة)"
+                detail += f"؛ تعذر الاشتقاق لـ {count_ar(len(failed), 'record')} (بقيت غير معروفة)"
             issues.add("derived_field", "medium" if when == "always" else "low", join_refs(refs) or field,
-                       changed + failed, detail, impact_for(field, "money", meta), treat, field=field)
+                       changed + failed, detail, impact_for(field, "money", meta), treat, field=field,
+                       dev_note=f"derived_fields: {field} = {formula} (when: {when})"
+                       + (f"؛ الأصل محفوظ في {field}__original" if when == "always" else ""))
+
+
+def formula_words(formula: str, meta: dict) -> str:
+    """A derivation formula with each field key replaced by its Arabic label («تقييم الأرض 2023» + «…»)."""
+    def rep(m):
+        k = m.group(0)
+        return flabel(k, meta) if k in meta else k
+    return re.sub(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+", rep, str(formula))
 
 
 def _norm_key(x) -> str:
@@ -1826,7 +1909,7 @@ def apply_rollups(records: list, by_id: dict, overrides: dict, issues: Issues, m
         ids = [rid] + list(ru["from"])
         if done:
             issues.add("rollup_applied", "low", f"02_mapping.json/records/{rid}/rollup", ids,
-                       f"جُمعت مبالغ {len(kids)} سجلات تابعة في الأصل {rid}: "
+                       f"جُمعت مبالغ {count_ar(len(kids), 'record')} تابعة في الأصل {rid}: "
                        + "؛ ".join(f"{f} = {fmt(t)}" for f, t in done) + f". الدليل: {ru['evidence']}",
                        "تدخل المبالغ مرة واحدة على مستوى الأصل؛ السجلات التابعة خارج النطاق",
                        "طُبّق التجميع كما ورد في 02_mapping.json")
@@ -1945,7 +2028,8 @@ def check_valuation_totals(records: list, issues: Issues, meta: dict) -> None:
                            f"إجمالي تقييم {y} المدون = {fmt(t['v'])} بينما الأرض + المبنى = {fmt(la['v'])} + {fmt(b['v'])}"
                            f" = {fmt(s)} (فرق {fmt(diff)}).{extra}",
                            impact_for(parts["total"], "money", meta),
-                           "لم يُصحَّح تلقائيًا؛ إن ثبت خطأ الصيغة فأضف derived_fields صريحًا أو استخدم سنة تقييم أخرى")
+                           "لم يُصحَّح تلقائيًا؛ يلزم التحقق من صيغة الإجمالي في الملف أو من تقرير التقييم",
+                           dev_note="إن ثبت خطأ الصيغة فأضف derived_fields صريحًا أو استخدم سنة تقييم أخرى")
 
 
 def _vat_pairs(meta: dict, fields_present: set) -> dict:
@@ -1995,7 +2079,7 @@ def check_vat(records: list, issues: Issues, meta: dict) -> None:
                 equal_refs.extend([ex.get("ref"), inc.get("ref")])
         if equal_ids:
             issues.add("vat_equal", "low", join_refs(equal_refs), equal_ids,
-                       f"الإيراد مع الضريبة يساوي الإيراد بدون ضريبة للفترة {p} في {len(equal_ids)} سجل؛ "
+                       f"الإيراد مع الضريبة يساوي الإيراد بدون ضريبة للفترة {p} في {count_ar(len(equal_ids), 'record')}؛ "
                        "قد يعني عدم خضوع الإيراد للضريبة أو عدم فصلها في الملف — لا يثبت أيهما من الملف وحده.",
                        impact_for(ex_f, "money", meta),
                        "استُخدم الحقل بدون ضريبة كما هو؛ لم تُطبَّق نسبة ضريبة افتراضية")
@@ -2067,56 +2151,59 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
             ex = [f"{rid}: {tv.get('raw')}" for rid, tv in (small[:2] + big[:2])]
             issues.add("percent_scale_mixed", "medium", join_refs([tv.get("ref") for _, tv in small + big]),
                        [rid for rid, _ in small + big],
-                       f"الحقل {f} يخلط نسبًا مدونة كسورًا (≤ 1: {len(small)} سجل) ونسبًا مئوية (> 1: {len(big)} سجل)"
+                       f"الحقل {f} يخلط نسبًا مدونة كسورًا (≤ 1: {count_ar(len(small), 'record')}) ونسبًا مئوية (> 1: {count_ar(len(big), 'record')})"
                        " — أمثلة: " + "؛ ".join(f"«{x}»" for x in ex) + ".",
                        impact_for(f, kind, meta),
                        "خُزّنت القيم كما هي؛ وحّد المقياس (0.5 تعني 50%؟) في records أو derived_fields مع الدليل قبل "
                        "استعمالها في حصة ملكية أو نسبة", field=f)
 
+    # {f}: the field's Arabic label; {nrec}: «سجل واحد / سجلان / 5 سجلات / 12 سجلًا». Analyst instructions (which part
+    # of 02_mapping.json to change) go to `dev_note`, never into the board-facing detail/impact/treatment.
     texts = {
-        "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {n} سجل",
-                            "لم يُحوَّل النص إلى رقم ولم يُعامل كصفر؛ القيمة غير معروفة مع حفظ النص الأصلي"),
-        "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {n} سجل",
+        "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {nrec}",
+                            "لم يُحوَّل النص إلى رقم ولم يُعامل كصفر؛ القيمة غير معروفة مع حفظ النص الأصلي", None),
+        "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {nrec}",
                               "لم تُحوَّل إلى رقم ولم تُجمع؛ القيمة غير معروفة مع حفظ النص الأصلي، ويلزم التحقق من "
-                              "المبلغ الفعلي في المصدر"),
-        "foreign_currency": ("high", "مبالغ بعملة غير عملة الدراسة في الحقل {f} ({n} سجل)",
-                             "لم تُحوَّل إلى أرقام ولم تُجمع (status text)؛ لا يُجمع مبلغان بعملتين. حوّل المبلغ بسعر "
-                             "صرف موثق في derived_fields أو records مع الدليل، أو اتركه غير معروف"),
-        "ambiguous_thousands_separator": ("medium", "أرقام نصية بفاصل ملتبس في الحقل {f} ({n} سجل)",
+                              "المبلغ الفعلي في المصدر", None),
+        "foreign_currency": ("high", "مبالغ بعملة غير عملة الدراسة في الحقل {f} ({nrec})",
+                             "لم تُحوَّل إلى أرقام ولم تُجمع؛ لا يُجمع مبلغان بعملتين، ويلزم سعر صرف موثق أو تبقى غير معروفة",
+                             "حوّل المبلغ بسعر صرف موثق في derived_fields أو records مع الدليل، أو اتركه غير معروف"),
+        "ambiguous_thousands_separator": ("medium", "أرقام نصية بفاصل ملتبس في الحقل {f} ({nrec})",
                                           "نقطة يتبعها ثلاث خانات بالضبط (مثل «12.500») قد تكون فاصل آلاف (12,500) "
-                                          "أو فاصلة عشرية (12.5)؛ لم تُحوَّل إلى رقم. تحقق من المصدر وثبّت القيمة في "
-                                          "records مع الدليل"),
-        "zero_from_blank_inputs": ("medium", "صيغ ناتجها المخزن 0 لأن مدخلاتها فارغة في الحقل {f} ({n} سجل)",
-                                   "عوملت القيمة كغير متاحة (not_available) لا كصفر مسجل؛ الصفر هنا نتيجة خانات فارغة "
-                                   "وليس رقمًا مدونًا"),
-        "excel_error": ("high", "خطأ صيغة Excel في الحقل {f} في {n} سجل",
-                        "عوملت القيمة كغير معروفة (error)؛ يلزم تصحيح الصيغة في المصدر"),
-        "zero_as_missing": ("medium", "قيمة صفرية في الحقل {f} ({n} سجل) حيث لا يُعد الصفر قيمة مقبولة",
-                            "عومل الصفر كغير متاح (zero_as_missing) ولم يدخل في المجاميع"),
-        "numeric_text_converted": ("low", "أرقام مدونة كنص في الحقل {f} ({n} سجل)",
-                                   "حُوِّلت إلى أرقام مع حفظ النص الأصلي في raw"),
-        "count_mixed_text": ("medium", "الحقل {f} يخلط أرقامًا وأوصافًا نصية ({n} سجل وصفه نصي)",
-                             "حُفظ الوصف النصي كما هو (status text) ولا يُجمع الحقل ولا يُعرض إجماليًا مكتملًا"),
-        "hijri_conversion": ("low", "تواريخ هجرية في الحقل {f} حُوِّلت إلى الميلادي ({n} سجل)",
-                             "حُوِّلت بتقويم أم القرى مع حفظ النص الهجري الأصلي (raw، hijri)"),
-        "date_note": ("low", "ملاحظات تحويل تاريخ في الحقل {f} ({n} سجل)",
-                      "حُوِّل التاريخ مع الملاحظة المذكورة؛ يلزم التحقق إن كان مؤثرًا"),
-        "date_unparsed": ("medium", "تعذر تحويل التاريخ في الحقل {f} ({n} سجل)",
-                          "حُفظ النص الأصلي دون تحويل (status text)"),
-        "formula_no_cache": ("medium", "خلايا صيغ بلا قيم مخزنة في الحقل {f} ({n} سجل)",
-                             "عوملت القيم كغير معروفة؛ افتح الملف في Excel واحفظه لإعادة الحساب"),
-        "pii_redacted": ("high", "قيم تحمل بيانات شخصية (جوال أو بريد أو آيبان أو رقم هوية) في الحقل {f} ({n} سجل)",
-                         "حُجب الجزء الشخصي ولم يُخزَّن؛ علّم العمود pii في mapping إن كان شخصيًا كله"),
+                                          "أو فاصلة عشرية (12.5)؛ لم تُحوَّل إلى رقم ويلزم التحقق من المصدر",
+                                          "ثبّت القيمة في records مع الدليل"),
+        "zero_from_blank_inputs": ("medium", "صيغ ناتجها المخزن 0 لأن مدخلاتها فارغة في الحقل {f} ({nrec})",
+                                   "عوملت القيمة كغير متاحة لا كصفر مسجل؛ الصفر هنا نتيجة خانات فارغة وليس رقمًا مدونًا",
+                                   None),
+        "excel_error": ("high", "خطأ صيغة Excel في الحقل {f} في {nrec}",
+                        "عوملت القيمة كغير معروفة؛ يلزم تصحيح الصيغة في المصدر", None),
+        "zero_as_missing": ("medium", "قيمة صفرية في الحقل {f} ({nrec}) حيث لا يُعد الصفر قيمة مقبولة",
+                            "عومل الصفر كغير متاح ولم يدخل في المجاميع", "zero_policy = missing"),
+        "numeric_text_converted": ("low", "أرقام مدونة كنص في الحقل {f} ({nrec})",
+                                   "حُوِّلت إلى أرقام مع حفظ النص الأصلي", None),
+        "count_mixed_text": ("medium", "الحقل {f} يخلط أرقامًا وأوصافًا نصية ({nrec} وصفه نصي)",
+                             "حُفظ الوصف النصي كما هو ولا يُجمع الحقل ولا يُعرض إجماليًا مكتملًا", None),
+        "hijri_conversion": ("low", "تواريخ هجرية في الحقل {f} حُوِّلت إلى الميلادي ({nrec})",
+                             "حُوِّلت بتقويم أم القرى مع حفظ النص الهجري الأصلي", None),
+        "date_note": ("low", "ملاحظات تحويل تاريخ في الحقل {f} ({nrec})",
+                      "حُوِّل التاريخ مع الملاحظة المذكورة؛ يلزم التحقق إن كان مؤثرًا", None),
+        "date_unparsed": ("medium", "تعذر تحويل التاريخ في الحقل {f} ({nrec})",
+                          "حُفظ النص الأصلي دون تحويل", None),
+        "formula_no_cache": ("medium", "خلايا صيغ بلا قيم مخزنة في الحقل {f} ({nrec})",
+                             "عوملت القيم كغير معروفة؛ افتح الملف في Excel واحفظه لإعادة الحساب", None),
+        "pii_redacted": ("high", "قيم تحمل بيانات شخصية (جوال أو بريد أو آيبان أو رقم هوية) في الحقل {f} ({nrec})",
+                         "حُجب الجزء الشخصي ولم يُخزَّن", "علّم العمود pii في mapping إن كان شخصيًا كله"),
     }
     for (typ, f), g in groups.items():
-        sev, det, treat = texts[typ]
+        sev, det, treat, dev = texts[typ]
         if typ == "zero_as_missing" and group_of(f, meta) not in ("valuation",):
             sev = "low"
-        detail = det.format(f=f, n=len(g["ids"]))
+        detail = det.format(f=flabel(f, meta), nrec=count_ar(len(g["ids"]), "record"))
         if g["examples"] and typ not in ("pii_redacted",):
             detail += " — أمثلة: " + "؛ ".join(f"«{x}»" for x in g["examples"])
+        extra = {"dev_note": dev} if dev else {}
         issues.add(typ, sev, join_refs(g["refs"]), g["ids"], detail + ".",
-                   impact_for(f, kinds.get(f) or "", meta), treat, field=f)
+                   impact_for(f, kinds.get(f) or "", meta), treat, field=f, **extra)
 
 
 def check_names(records: list, issues: Issues) -> None:
@@ -2133,7 +2220,7 @@ def check_names(records: list, issues: Issues) -> None:
         same_src = len({x["source"]["source_id"] for x in rs}) == 1
         issues.add("possible_duplicate_name", "medium" if same_src else "low",
                    join_refs([x["source"]["ref_name"] for x in rs]), [x["id"] for x in rs],
-                   f"أسماء متطابقة أو متشابهة جدًا ({len(rs)} سجلات): «{rs[0]['name']}»"
+                   f"أسماء متطابقة أو متشابهة جدًا ({count_ar(len(rs), 'record')}): «{rs[0]['name']}»"
                    + ("" if same_src else " — في مصادر مختلفة"),
                    "إن كانت السجلات أصلًا واحدًا فقد يتضاعف العدد والقيمة والإيراد؛ وقد تكون قطعًا مستقلة",
                    "لم تُدمج السجلات؛ يلزم مطابقة المعرّف والصك والموقع والمساحة قبل أي دمج")
@@ -2156,14 +2243,15 @@ def check_deeds(records: list, issues: Issues) -> None:
         if len(ids) < 2:
             continue
         issues.add("shared_deed", "medium", join_refs([tv.get("ref") for _, tv in items]), ids,
-                   f"رقم الصك «{items[0][1]['v']}» مشترك بين {len(ids)} سجلات.",
+                   f"رقم الصك «{items[0][1]['v']}» مشترك بين {count_ar(len(ids), 'record')}.",
                    "قد يمثل أصلًا واحدًا مسجلًا أكثر من مرة (ازدواج) أو أصلًا يحتاج فصلًا",
                    "لم تُدمج السجلات؛ يلزم التحقق من الصك وحدود كل سجل")
 
 
 def check_classification(records: list, issues: Issues) -> None:
-    labels = {"use": ("الاستخدام", "gross_yield_investment، gross_yield_income_producing، zero_rev_investment_value"),
-              "income_nature": ("طبيعة الدخل", "property_revenue، activity_revenue، gross_yield_*، noi، revenue_growth")}
+    labels = {"use": ("الاستخدام", "العائد الإجمالي للأصول الاستثمارية والمدرة، وقيمة الأصول الاستثمارية بإيراد صفري"),
+              "income_nature": ("طبيعة الدخل", "الإيراد العقاري، وإيراد الأنشطة، والعائد الإجمالي، وصافي الدخل التشغيلي، "
+                                               "وتغير الإيراد")}
     for dim, (lab, metrics) in labels.items():
         rs = [r for r in records if r["scope"] == "in_scope" and r["record_type"] != "total"
               and (r["dims"].get(dim) in (None, "unknown"))]
@@ -2171,9 +2259,10 @@ def check_classification(records: list, issues: Issues) -> None:
             continue
         issues.add("missing_classification", "medium", join_refs([r["source"]["ref_name"] for r in rs]),
                    [r["id"] for r in rs],
-                   f"{len(rs)} سجل ضمن النطاق بلا تصنيف «{lab}» (unknown).",
+                   f"{count_ar(len(rs), 'record')} ضمن النطاق بلا تصنيف «{lab}».",
                    f"تُستبعد هذه السجلات من المؤشرات المقيدة بهذا البعد: {metrics}",
-                   "لم يُفترض تصنيف؛ صنّفها في 02_mapping.json (dim_rules أو records) بدليل من الملف أو من الجهة")
+                   "لم يُفترض تصنيف؛ يلزم تصنيفها بدليل من الملف أو من الجهة",
+                   dev_note="صنّفها في 02_mapping.json (dim_rules أو records) بدليل")
 
 
 # ---------------------------------------------------------------------------

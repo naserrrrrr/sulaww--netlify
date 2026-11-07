@@ -102,7 +102,7 @@ Optional TV keys: `formula`, `no_cache`, `zero_from_blank_inputs`, `percent_in_a
 `calendar`, `hijri`.
 Zero policy per column (mapping `zero_policy`): `recorded` (default for revenue, expense, units, counts) → `zero_recorded`; `missing` (default for `val.*`, areas) → `zero_as_missing`.
 Dates: `{"v": "1989-12-10", "s": "value", "raw": "1410/5/12هـ", "calendar": "hijri", "hijri": "1410-05-12"}`.
-Text fields: `{"v": "منفوحة", "s": "value", "raw": "...", "ref": "..."}`.
+Text fields: `{"v": "حي النموذج", "s": "value", "raw": "...", "ref": "..."}`.
 
 ## 3. `02_mapping.json` (authored by Claude)
 
@@ -253,7 +253,7 @@ More rules:
                "merge_note": "...",                       // only when a name/id cell was read from a vertical merge
                "joined": [{"source_id": "EXP", "sheet": "...", "row": 5, "link_id": "L1"}]},   // only after a join
     "record_type": "asset", "scope": "in_scope", "scope_reason": null,
-    "dims": {"asset_type": "عمارة", "location": "...", "district": "منفوحة", "use": "investment", "ownership": ["owned"],
+    "dims": {"asset_type": "عمارة", "location": "...", "district": "حي النموذج", "use": "investment", "ownership": ["owned"],
              "waqf": "unknown", "income_nature": "rent", "managed_for_others": false, "rent_allocation": "...", "restriction": "..."},
     "dims_evidence": {...},
     "fields": {"rev.2025.excl_vat": TV, "val.2024.total": TV, "units": TV, ...},
@@ -262,7 +262,7 @@ More rules:
   "issues": [{"id": "DQ-001", "type": "...", "severity": "high|medium|low", "where": "ref", "record_ids": ["REG-1"],
               "detail": "...", "impact": "which metric is affected and how", "treatment": "how it was handled",
               "field": "...", "source_id": "...", "row": 18, "rows": [...], "count": 3, "dim": "...",
-              "mapping_override": true}],                 // extra keys only where the issue type has them
+              "mapping_override": true, "dev_note": "..."}],   // extra keys only where the issue type has them
   "excluded_rows": [{"source_id": "REG", "sheet": "...", "row": 18, "reason": "صف إجمالي (SUBTOTAL)", "auto": true,
                      "values": {"rev.2025.excl_vat": TV, ...}},
                     {"source_id": "REG", "sheet": "...", "row": 20, "auto": true, "after_data_rows": true,
@@ -277,6 +277,12 @@ More rules:
 ```
 `excluded_rows[].reason` is the `exclude_rows` reason, «صف إجمالي مكتشف آليًا: …» (`auto: true`) or «تُخطّي الصف لأن خانة …
 (skip_if_blank) فارغة رغم وجود بيانات في: …»; only total rows carry `values`.
+Issue texts are board-facing (dashboard «سجل مشكلات البيانات», workbook «مشكلات البيانات»): `detail`/`impact`/`treatment`
+name fields by their `field_meta` label in «…» and metrics by Arabic names, never `rev.2025.excl_vat`, `gross_yield_*` or
+engine words (`zero_as_missing`, `status text`); counts agree with the noun («4 سجلات»). Instructions for the analyst (which
+part of `02_mapping.json` to change: `derived_fields`, `records`, `dim_rules`, `pii` …) go to `dev_note`, which no output
+shows; the key stays in `field`. A field `<f>__original` (the stored value a documented `derived_fields` override replaced)
+has no `field_meta` entry: outputs label it «<label of f> كما ورد (قبل الاشتقاق)» and flag it «قيمة مخزنة معيبة — غير مستخدمة».
 Auto checks in normalize (issue types): `duplicate_id` (high), `possible_duplicate_name`, `shared_deed`, `total_like_row`,
 `valuation_total_mismatch`, `valuation_component_formula`, `vat_incl_lt_excl`, `vat_equal`, `text_in_numeric`, `excel_error`,
 `zero_as_missing`, `numeric_text_converted`, `count_mixed_text`, `formula_no_cache`, `hijri_conversion`, `date_note`,
@@ -352,6 +358,7 @@ Additional behaviour (issue types in brackets):
   "trend": {"enabled": true, "label": "...", "fields": [{"period": "2021", "field": "rev.2021.actual"}],
             "where": {...}, "comparable": {"status": "confirmed|unverified|not_comparable", "reason": "..."}},
   "filters": ["asset_type", "location", "use"],     // dims offered as dashboard filters (+ period always)
+  "breakdowns_reason": "...",                       // optional: board wording of why no distribution is drawn
   "parity_max_values_per_dim": 3,
   "init_warnings": [{"code": "revenue_incl_vat|yield_periods_limited|no_in_scope_records|expense_fields_partial", "period": "2025",
                      "field": "rev.2025.incl_vat", "text": "Arabic"}]   // written by --init-config; review before editing
@@ -526,7 +533,11 @@ Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py
   that are not metrics. Keys: `records.total|in_scope|isolated|excluded|excluded_rows|isolated_assetlike`,
   `records.in_scope.<record_type>`, `sources.<source_id>.records|isolated`, `sheets.total|hidden`,
   `issues.total|high|medium|low`, `anomalies.total|high`, `wb.<WB-id>.<evidence_key>` (numeric evidence of a 01 anomaly,
-  e.g. `wb.WB-004.recomputed`), `excluded.<source_id>.r<row>.<field>` (values kept on excluded total rows). Use them
+  e.g. `wb.WB-004.recomputed`), `excluded.<source_id>.r<row>.<field>` (values kept on excluded total rows),
+  `sources.<source_id>.<field>.sum|n_known|n_zero|max|max_share` (a revenue/expense field over **every** record of a source,
+  isolated included; `max_share` is the largest line as a % of the sum, unit `pct`) and `sections.<source_id>.r<row>.records`
+  (records between the previous total row and row `<row>`) — to describe an isolated statement apart from the metrics (lines
+  per section, its total, its largest line, its zero lines) without adding it to them. Use them
   instead of counting isolated records with a metric (that trips `isolated_in_metrics`).
 - `acknowledged_warnings`: a **warning** whose check id is listed with a reason of ≥ 8 words becomes level `acknowledged`
   (not counted in `warning_count`, listed apart). Blocking checks can never be acknowledged; an unknown id, a blocking id or
@@ -556,14 +567,17 @@ check's level. `acknowledged_warnings` entries are added outside the registry (t
 exists but no longer emits: every undeclared same-asset overlap is now blocking under `scenarios`).
 `reconciliation[]` (one per excluded total row and field with values):
 `{source_id, sheet, row, ref, field, recorded, sum_in_scope, n_in_scope_known, n_in_scope_unknown, difference,
-sum_all_records, matched_sum, status, status_ar}` with `status ∈ match | match_section | match_all_records |
+difference_basis, sum_all_records, matched_sum, status, status_ar}` with `difference` = recorded − the matched sum, else
+recorded − the in-scope sum, or − the sum of **all** the source's records when none is in scope or the match is on all
+records (`difference_basis: in_scope|all_records`; an isolated statement never shows «recorded − 0»), and `status ∈ match | match_section | match_all_records |
 match_section_all_records | match_without_text_numbers | match_original | mismatch | recorded_unknown` (same wording as
 the export sheet «المطابقة مع الإجماليات»; `match_original`: the total equals the sum of `<field>__original`, the values
 before a documented `derived_fields` override); only `mismatch` raises the `totals_reconciliation` warning.
 Data-integrity checks (blocking): `total_like_in_scope`, `unit_double_count`, `duplicate_ids_in_scope`, `overlapping_rows`,
 `dims_vocabulary`, `sheet_scope`, `mapping_context`, `fact_tokens`, `pii_export_patterns`; (warning): `total_like_records`,
 `unit_levels_mixed`, `duplicate_ids_kept`, `overlapping_rows_other`, `hidden_sheet_in_scope`, `totals_reconciliation`,
-`pii_review_patterns`, `message_numbers`, `totals_not_reconciled` (01 lists total rows after a source's `data_rows.to`
+`pii_review_patterns`, `message_numbers`, `export_growth_pct` (the supporting workbook shows a growth % whose comparability
+is not confirmed: a value cell or a «x.x%» text outside the review note; skipped while the workbook is older than 05/06), `totals_not_reconciled` (01 lists total rows after a source's `data_rows.to`
 that neither `excluded_rows` nor a record covers), `partial_ownership_full_amount` (an in-scope record with ownership
 `partial` or a share field below 100 whose full valuation/revenue enters `recorded_value` or a revenue metric, without a
 share-based field — e.g. `derived_fields` `val.<Y>.share` — or an `assumptions` entry naming it). `total_like_records`

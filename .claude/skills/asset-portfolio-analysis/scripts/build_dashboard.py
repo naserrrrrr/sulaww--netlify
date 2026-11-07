@@ -224,6 +224,12 @@ class TokenRenderer:
                 if res.get("revenue_start"):
                     return "بدء إيراد"
                 return NOT_COMPUTABLE
+            comp = res.get("comparability") if isinstance(res.get("comparability"), dict) else {}
+            if res.get("kind") == "growth" and comp.get("status") != "confirmed":
+                # metrics.md §5: an unconfirmed growth reads as its change in riyals, never as a percentage
+                ac = res.get("abs_change")
+                return (fmt_money(ac, self.cur) if isinstance(ac, (int, float)) and not isinstance(ac, bool)
+                        else NOT_COMPUTABLE) + " (تغير بالريال؛ لا نسبة)"
             return fmt_by_unit(v, unit, self.cur)
         if field not in res:
             self.unknown.append(ref)
@@ -249,6 +255,8 @@ class TokenRenderer:
         v = f["value"]
         if f.get("unit") == "SAR":
             return fmt_money(v, self.cur)
+        if f.get("unit") == "pct":
+            return fmt_pct(v)
         return fmt_plain(v)
 
     def render(self, s: str) -> str:

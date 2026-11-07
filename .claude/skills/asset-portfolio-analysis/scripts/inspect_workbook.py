@@ -2074,7 +2074,7 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
             an.add("zero_valuation", "medium", sv.name,
                    ref(sv.name, f"{col_letter(items[0][0])}{zrows[0]}:{col_letter(items[-1][0])}{zrows[-1]}"),
                    f"أعمدة تقييم تحتوي أصفارًا{fam_label}: {desc}. الصفر في التقييم يعني غالبًا «غير مقيّم» لا قيمة صفرية؛ "
-                   "يُعامل كغير متاح (zero_policy = missing) ما لم يثبت خلافه.",
+                   "يُعامل كغير متاح ما لم يثبت خلافه.",
                    {"columns": {col_letter(c): {"zeros": z, "numeric": nn, "header": header.get(c),
                                                 "rows": compress_ints(zr)[:20]} for c, (z, nn, zr) in items}},
                    order=(zrows[0], c0))

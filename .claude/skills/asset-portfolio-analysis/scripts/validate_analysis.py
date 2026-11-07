@@ -1946,17 +1946,32 @@ def g4b_reconciliation(ctx: Ctx):
                     if res[1] and abs(recorded - res[0]) <= tol:
                         status, matched = "match_original", res[0]
                         break
+            # a source with no in-scope value (isolated or supplementary sheet): the difference is taken against every
+            # record of the source — «recorded − 0» is never a difference (N3)
+            use_all = not full[1] or status in ("match_all_records", "match_section_all_records")
+            base = all_rec if use_all else full
+            diff = round(recorded - (matched if matched is not None else base[0]), 2)
             item.update(recorded=recorded, sum_in_scope=full[0], n_in_scope_known=full[1], n_in_scope_unknown=full[2],
-                        difference=round(recorded - full[0], 2), sum_all_records=all_rec[0], matched_sum=matched,
+                        difference=diff, difference_basis="all_records" if use_all else "in_scope",
+                        sum_all_records=all_rec[0], matched_sum=matched,
                         status=status, status_ar=RECON_STATUS_AR[status])
             rows.append(item)
             if status == "mismatch":
+                flab = f"«{as_dict(ctx.field_meta.get(field)).get('label') or field}»"
+                where_ar = f"الورقة «{str(sheet).strip()}»" if sheet else f"المصدر {sid}"
+                if not full[1]:
+                    warns.append((f"الإجمالي المدون {fmt_num(recorded)} للحقل {flab} في {where_ar} لا يطابق مجموع سجلاتها: "
+                                  f"لا سجلات ضمن النطاق؛ الفرق مع مجموع كل سجلات المصدر ({fmt_num(all_rec[0])} من "
+                                  f"{_n_values_ar(all_rec[1], True)}) = {fmt_num(diff)}. تحقق من صيغة الإجمالي والصفوف "
+                                  "المستبعدة، واذكر الفرق وسببه في مشكلات البيانات",
+                                  f"{ref} ← 03_records.json:excluded_rows[{sid}:{row}]"))
+                    continue
                 extra = f"، و{_n_values_ar(full[2], False)} قد تفسر جزءًا منه" if full[2] else ""
                 other = (f"؛ مجموع كل سجلات المصدر بما فيها المعزولة والمستبعدة {fmt_num(all_rec[0])}"
                          if abs(all_rec[0] - full[0]) > tol else "")
-                warns.append((f"الإجمالي المدون {fmt_num(recorded)} للحقل {field} لا يطابق مجموع السجلات ضمن النطاق من المصدر "
-                              f"{sid} ({fmt_num(full[0])} من {_n_values_ar(full[1], True)}{extra})؛ الفرق "
-                              f"{fmt_num(round(recorded - full[0], 2))}{other}. تحقق من صيغة الإجمالي والصفوف المستبعدة، "
+                warns.append((f"الإجمالي المدون {fmt_num(recorded)} للحقل {flab} في {where_ar} لا يطابق مجموع السجلات ضمن "
+                              f"النطاق ({fmt_num(full[0])} من {_n_values_ar(full[1], True)}{extra})؛ الفرق "
+                              f"{fmt_num(diff)}{other}. تحقق من صيغة الإجمالي والصفوف المستبعدة، "
                               "واذكر الفرق وسببه في مشكلات البيانات", f"{ref} ← 03_records.json:excluded_rows[{sid}:{row}]"))
     ctx._g4b_recon = (rows, warns)
     return ctx._g4b_recon
@@ -1967,15 +1982,17 @@ def g4b_md_reconciliation(report: dict) -> list:
     if not rows:
         return []
     lines = [f"## مطابقة الإجماليات المدونة مع مجموع السجلات ({len(rows)})", "",
-             "| الموضع | الحقل | المدون | مجموع السجلات ضمن النطاق | الفرق | مجموع كل سجلات المصدر | المجموع المطابق للمدون "
-             "| النتيجة |",
-             "|---|---|---|---|---|---|---|---|"]
+             "| الموضع | الحقل | المدون | مجموع السجلات ضمن النطاق | الفرق | أساس الفرق | مجموع كل سجلات المصدر "
+             "| المجموع المطابق للمدون | النتيجة |",
+             "|---|---|---|---|---|---|---|---|---|"]
 
     def num(x):
         return _md_cell(fmt_num(x) if x is not None else None)
     for r in rows:
         lines.append(f"| {_md_cell(r.get('ref'))} | {_md_cell(r.get('field'))} | {num(r.get('recorded'))} | "
-                     f"{num(r.get('sum_in_scope'))} | {num(r.get('difference'))} | {num(r.get('sum_all_records'))} | "
+                     f"{num(r.get('sum_in_scope'))} | {num(r.get('difference'))} | "
+                     f"{_md_cell({'all_records': 'كل سجلات المصدر', 'in_scope': 'ضمن النطاق'}.get(r.get('difference_basis'), '—'))} | "
+                     f"{num(r.get('sum_all_records'))} | "
                      f"{num(r.get('matched_sum'))} | {_md_cell(r.get('status_ar'))} |")
     lines.append("")
     return lines
@@ -2173,6 +2190,45 @@ def c_pii_export_patterns(ctx: Ctx):
     return _export_hits(exp, ("block",), "احذف الملف أو أعد تصديره (export_workbook.py) بعد إزالة مصدر هذه البيانات")
 
 
+def c_export_growth_pct(ctx: Ctx):
+    """metrics.md §5: a growth result whose comparability is not confirmed appears in the supporting workbook as its
+    change in riyals; its percentage only in a note marked for review — never as a value cell or a «x.x%» text."""
+    exp = g4b_export_cells(ctx)
+    if exp is None:
+        raise Skip(f"لا يوجد {EXPORT_NAME} في مجلد التشغيل ولم يُمرَّر --xlsx-out")
+    if exp["error"]:
+        raise Skip(exp["error"])
+    m05 = os.path.join(ctx.run_dir, "05_metrics.json")
+    if exp["stale"] or (os.path.isfile(m05) and os.path.getmtime(m05) > os.path.getmtime(exp["path"]) + 1):
+        raise Skip("المرفق الداعم أقدم من 05/06 وسيُعاد تصديره؛ يُفحص بعد التصدير")
+    ctx.need("metrics")
+    out = []
+    for mid, res in ctx.metrics.items():
+        res = as_dict(res)
+        v = res.get("value")
+        if res.get("kind") != "growth" or not is_num(v) or as_dict(res.get("comparability")).get("status") == "confirmed":
+            continue
+        texts = {f"{v:,.1f}%", f"{v:,.2f}%", f"{v:.1f}%", f"{v:.2f}%"}
+        labels = [str(res.get("label") or ""), str(res.get("short_label") or ""), mid]
+        hits = []
+        for sheet, coord, text, is_number, _header in exp["cells"]:
+            if is_number:
+                try:
+                    if abs(float(text) - v) <= 1e-9 * max(1.0, abs(v)):
+                        hits.append(f"{sheet}!{coord}")
+                except ValueError:
+                    pass
+            elif (any(t in text for t in texts) and "للمراجعة فقط" not in text
+                  and (re.search(r"نمو|تغير|growth", text) or any(lab and lab in text for lab in labels))):
+                # a «x.x%» text counts only in a growth context: another share may round to the same text
+                hits.append(f"{sheet}!{coord}")
+        if hits:
+            out.append((f"المرفق الداعم يعرض نسبة {mid} ({v:,.1f}%) وقابلية المقارنة غير مؤكدة؛ المطلوب التغير بالريال "
+                        "دون نسبة (النسبة في عمود الملاحظة للمراجعة فقط). أعد التصدير بالسكربت الحالي",
+                        "، ".join(hits[:8]) + (f" (+{len(hits) - 8})" if len(hits) > 8 else "")))
+    return out
+
+
 def c_pii_review_patterns(ctx: Ctx):
     """Review-level patterns (a 10-digit number starting with 1 or 2 may be a national id or a deed number) in every
     delivered output; one warning per output."""
@@ -2343,6 +2399,7 @@ G4B_TITLES = OrderedDict([
     ("mapping_context", "سياق الدراسة وخريطة الأوراق مكتملان في 02 بأدلتها"),
     ("fact_tokens", "صحة رموز الحقائق {{f:…}}"),
     ("pii_export_patterns", "خلو المرفق الداعم من بيانات اتصال أو حسابات بنكية"),
+    ("export_growth_pct", "المرفق الداعم لا يعرض نسبة نمو غير متحققة المقارنة"),
     ("total_like_records", "سجلات ضمن النطاق تشبه صفوف الإجمالي (تجاوز موثق، أو آخر صف يساوي مجموع غيره)"),
     ("unit_levels_mixed", "وحدات أو عقود ضمن النطاق بمبالغ إيراد أو تقييم (دون أصل محدد أو بتجاوز موثق)"),
     ("duplicate_ids_kept", "معرّفات مكررة أُبقيت ضمن النطاق بتجاوز موثق"),
@@ -2379,6 +2436,7 @@ G4B_CHECKS = [
     ("message_numbers", "warning", c_message_numbers),
     ("totals_not_reconciled", "warning", c_totals_not_reconciled),
     ("partial_ownership_full_amount", "warning", c_partial_ownership_full_amount),
+    ("export_growth_pct", "warning", c_export_growth_pct),
 ]
 
 
@@ -2523,7 +2581,8 @@ def c_growth_comparability(ctx: Ctx):
         comp = as_dict(res.get("comparability"))
         if comp.get("status") != "confirmed":
             card = " ويظهر كبطاقة" if res.get("card") else ""
-            out.append((f"نمو الإيراد محسوب{card} بينما قابلية المقارنة «{comp.get('status') or 'غير محددة'}»: "
+            comp_ar = {"unverified": "غير متحققة", "not_comparable": "غير صالحة"}.get(comp.get("status"), "غير محددة")
+            out.append((f"نمو الإيراد محسوب{card} بينما قابلية المقارنة {comp_ar}: "
                         f"{comp.get('reason') or 'لم يثبت تماثل الأساس الضريبي والمحاسبي واكتمال الفترة'}؛ "
                         "لا يُعرض حكمًا بالنمو قبل التحقق", f"05_metrics.json:{mid}"))
     return out
@@ -3110,6 +3169,8 @@ def nq_token_words(ctx, kind: str, mid: str, path: str) -> int:
             if res.get("revenue_start") and res.get("status") != "not_comparable":
                 return 2  # «بدء إيراد»
             return 3  # «غير قابل للاحتساب» / «غير قابل للمقارنة»
+        if res.get("kind") == "growth" and as_dict(res.get("comparability")).get("status") != "confirmed":
+            return 6  # «32,000 ر.س (تغير بالريال؛ لا نسبة)» (build_dashboard: an unconfirmed growth reads in riyals)
         return 2 if unit == "SAR" and is_num(v) else 1
     ok, v = resolve_path(res, path.split("."))
     last = path.split(".")[-1]
@@ -3578,7 +3639,8 @@ def nq_number_pool(ctx):
         add("count", as_dict(p).get("n_known"), "trend")
     for key, f in nq_facts(ctx).items():
         u = as_dict(f).get("unit")
-        add("count" if u == "count" else "money" if u in ("SAR", "number") else "any", as_dict(f).get("value"), f"f:{key}")
+        add("count" if u == "count" else "money" if u in ("SAR", "number") else "pct" if u == "pct" else "any",
+            as_dict(f).get("value"), f"f:{key}")
     return pools
 
 
@@ -3939,8 +4001,9 @@ def c_nq_growth_token_caveat(ctx: Ctx):
             ss, se = nq_bounds(n, m.start(), m.end(), NQ_SENT_SPLIT_RE)
             if not NQ_GROWTH_CAVEAT_RE.search(n[ss:se]):
                 seen.add(mid)
-                st = as_dict(ctx.metrics[mid].get("comparability")).get("status") or "غير محددة"
-                out.append((f"{{{{m:{mid}}}}} يُعرض تغيرًا بين فترتين قابليتهما للمقارنة «{st}» دون تنبيه في الجملة؛ اذكر أنه غير "
+                st = as_dict(ctx.metrics[mid].get("comparability")).get("status")
+                st = {"unverified": "غير متحققة", "not_comparable": "غير صالحة"}.get(st, "غير محددة")
+                out.append((f"{{{{m:{mid}}}}} يُعرض تغيرًا بين فترتين قابليتهما للمقارنة {st} دون تنبيه في الجملة؛ اذكر أنه غير "
                             "مؤكد التماثل (الضريبة والأساس والاكتمال) ولا تعرضه حكمًا بالنمو", where))
     return out
 

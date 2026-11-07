@@ -19,7 +19,9 @@
  *   state), table_search, table_sort (every sortable column; numeric columns must be ordered), table_detail,
  *   buttons, no_raw_tokens, privacy (the shared patterns of assets/pii_patterns.json: block level fails, review
  *   level is reported in `warnings`), desktop_screenshot, mobile_overflow (360 and 390 px, default view and with the
- *   details and an asset detail open), print (executive sections visible on paper), offline, console_errors.
+ *   details and an asset detail open), growth_no_pct (an unconfirmed growth never shows a %), no_raw_keys (no engine
+ *   keys in visible text outside <code>), bidi_refs («!» between an Arabic sheet name and its cell), print (executive
+ *   sections visible on paper, yield cards keep scope/basis/valuation date, at most 8 A4 pages), offline, console_errors.
  * Playwright is loaded from the local project, NODE_PATH or the global npm root.
  */
 import fs from 'node:fs';
@@ -34,6 +36,8 @@ const MAX_BUTTONS = 150;
 const MAX_SORT_HEADERS = 30;
 const MAX_TABLE_ROWS = 80;
 const MAX_CROPS = 14;
+const MIN_TAIL = 200;          // px: a shorter remainder joins the previous screenshot crop
+const MAX_PRINT_PAGES = 8;     // dashboard-spec §8: the executive print fits in 8 A4 pages
 const DETAIL_SECTIONS = ['calculations', 'issues', 'exclusions', 'assumptions', 'sources', 'workbook', 'questions',
   'scenarios', 'versions', 'methodology', 'records'];
 // sections of the executive view that must be on paper (brief §11: the executive view prints)
@@ -267,8 +271,18 @@ window.__apaCheck = (function () {
         empty: !!empty, emptyText: empty ? (empty.textContent || '').trim() : null, numbers: nums };
     });
   }
+  /** The yield metric the asset table compares with (same choice as the template's comparisonMetric). */
+  function comparisonMetric(all) {
+    if (!all || !all.metrics) return null;
+    var cfg = window.APA.data.config || {};
+    var pref = (cfg.dashboard && cfg.dashboard.comparison_metric) ? [cfg.dashboard.comparison_metric] : [];
+    pref = pref.concat(['gross_yield_investment', 'gross_yield_income_producing', 'gross_yield_owned']);
+    for (var i = 0; i < pref.length; i++) if (all.metrics[pref[i]]) return all.metrics[pref[i]];
+    var spec = (cfg.metrics || []).filter(function (m) { return m && m.kind === 'ratio' && m.num === '{REV}' && m.den === '{VAL}'; })[0];
+    return spec ? all.metrics[spec.id] : null;
+  }
   /** Value, revenue and yield cells of the visible rows, with the record values they must show. */
-  function tableCells(filters) {
+  function tableCells(filters, all) {
     var t = table();
     if (!t || !window.APA || typeof window.APA.resolveField !== 'function') return null;
     var idx = {};
@@ -282,7 +296,10 @@ window.__apaCheck = (function () {
       return tv && KNOWN.indexOf(tv.s) >= 0 && typeof tv.v === 'number' ? tv.v : null;
     };
     var cell = function (row, key) { var i = idx[key]; return i !== undefined && row.cells[i] ? (row.cells[i].textContent || '').replace(/\\s+/g, ' ').trim() : null; };
-    return { vf: vf, rf: rf, cols: Object.keys(idx), rows: rows().slice(0, ${MAX_TABLE_ROWS}).map(function (row) {
+    var cm = comparisonMetric(all);
+    // outside the yield metric's valid periods the card says «غير قابل للمقارنة»: no row may show a yield number
+    var yNc = !!(cm && cm.status === 'not_comparable');
+    return { vf: vf, rf: rf, yNc: yNc, cols: Object.keys(idx), rows: rows().slice(0, ${MAX_TABLE_ROWS}).map(function (row) {
       var id = row.getAttribute('data-record-id');
       var rec = recs[id];
       return { id: id, v: fval(rec, vf), rv: fval(rec, rf), value: cell(row, 'value'), revenue: cell(row, 'revenue'), yld: cell(row, 'yield') };
@@ -304,7 +321,8 @@ window.__apaCheck = (function () {
     var m = {};
     Object.keys(all.metrics || {}).forEach(function (id) {
       var r = all.metrics[id];
-      m[id] = { kind: r.kind, unit: r.unit, scope_text: r.scope_text || null, basis: r.basis || null, valuation_date: r.valuation_date || null };
+      m[id] = { kind: r.kind, unit: r.unit, scope_text: r.scope_text || null, basis: r.basis || null, valuation_date: r.valuation_date || null,
+        comp: r.comparability ? r.comparability.status || null : null, abs_change: typeof r.abs_change === 'number' ? r.abs_change : null };
     });
     return m;
   }
@@ -317,7 +335,7 @@ window.__apaCheck = (function () {
       out.expected = compact(all);
       out.meta = cardMeta(all);
       out.expectedRows = window.APA.filterRecords(out.filters).length;
-      out.table = tableCells(out.filters);
+      out.table = tableCells(out.filters, all);
     } catch (e) { out.error = String(e && e.message || e); }
     out.rows = rowIds();
     out.cards = cards();
@@ -385,6 +403,11 @@ function compareCards(snap) {
       else if (!hasArabicWords(c.text)) problems.push(`${id}: المؤشر غير قابل للاحتساب ويجب عرض نص عربي يوضح ذلك، المعروض «${c.text}»`);
     } else if (!c.text) {
       problems.push(`${id}: البطاقة لا تعرض نصًا للقيمة`);
+    } else if (snap.meta && snap.meta[id] && snap.meta[id].kind === 'growth' && snap.meta[id].comp !== 'confirmed') {
+      // metrics.md §5: an unconfirmed growth shows its change in riyals, never a percentage
+      const mt = snap.meta[id];
+      if (/[\d٠-٩]\s*[%٪]/.test(c.text)) problems.push(`${id}: قابلية المقارنة غير مؤكدة لكن البطاقة تعرض نسبة «${short(c.text, 60)}» (المطلوب التغير بالريال)`);
+      else if (mt.abs_change !== null && !shownMatches(c.text, mt.abs_change)) problems.push(`${id}: البطاقة «${short(c.text, 60)}» لا تعرض التغير بالريال ${mt.abs_change}`);
     } else if (!shownMatches(c.text, exp.value)) {
       // the number the board reads, not only the attribute (a formatting fault leaves data-value intact)
       problems.push(`${id}: الرقم المعروض «${short(c.text, 60)}» لا يطابق computeAll=${exp.value}`);
@@ -437,7 +460,9 @@ function compareTable(snap) {
     if (t.vf) checkMoney(row, 'value', row.v, 'القيمة');
     if (t.rf) checkMoney(row, 'revenue', row.rv, 'الإيراد');
     const y = row.yld;
-    if (y !== null && y !== undefined && leadingNumber(y)) {
+    if (t.yNc && y !== null && y !== undefined && leadingNumber(y)) {
+      problems.push(`${row.id}: خانة العائد تعرض رقمًا «${y}» ومؤشر العائد غير قابل للمقارنة لهذه الفترة (التقييم لا يقابل إيرادها)`);
+    } else if (y !== null && y !== undefined && leadingNumber(y)) {
       if (!(typeof row.v === 'number' && row.v > 0 && typeof row.rv === 'number')) problems.push(`${row.id}: خانة العائد تعرض رقمًا «${y}» دون إيراد وتقييم معروفين`);
       else if (!shownMatches(y, row.rv / row.v * 100)) problems.push(`${row.id}: خانة العائد «${y}» لا تساوي الإيراد ÷ التقييم × 100 (${(row.rv / row.v * 100).toFixed(4)})`);
     }
@@ -601,18 +626,21 @@ async function main() {
       for (const f of fs.readdirSync(screensDir)) if (/^desktop_\d+\.png$/.test(f)) fs.unlinkSync(path.join(screensDir, f));
       const vp = page.viewportSize() || { width: 1440, height: 900 };
       const fullH = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
-      const n = Math.min(MAX_CROPS, Math.ceil(fullH / vp.height));
+      // a remainder shorter than MIN_TAIL px is folded into the last crop (never a 13 px sliver)
+      const nFull = Math.max(1, Math.ceil((fullH - MIN_TAIL) / vp.height));
+      const n = Math.min(MAX_CROPS, nFull);
       const crops = [];
       for (let i = 0; i < n; i++) {
         const name = `desktop_${String(i + 1).padStart(2, '0')}.png`;
         const y = i * vp.height;
+        const hgt = (i === n - 1 && n === nFull) ? fullH - y : Math.min(vp.height, fullH - y);
         await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
-          clip: { x: 0, y, width: vp.width, height: Math.min(vp.height, fullH - y) } });
+          clip: { x: 0, y, width: vp.width, height: hgt } });
         crops.push('screens/' + name);
       }
       report.screenshots.push(...crops);
       add('desktop_screenshot', true, `لقطة سطح المكتب 1440×900 (الصفحة كاملة): screens/desktop.png، و${nAr(crops.length, 'لقطة واحدة', 'لقطتان', 'لقطات', 'لقطة')} بحجم الشاشة ` +
-        `(${crops[0] || '—'} …)` + (Math.ceil(fullH / vp.height) > n ? ` — أول ${n} شاشات من ${Math.ceil(fullH / vp.height)}` : ''));
+        `(${crops[0] || '—'} …)` + (nFull > n ? ` — أول ${n} شاشات من ${nFull}` : ''));
     });
 
     // ---- html lang / dir, API, structure -----------------------------------------------------------
@@ -975,10 +1003,11 @@ async function main() {
           const box = await det.boundingBox();
           if (box && box.height > 0) {
             const top = box.y + (await page.evaluate(() => window.scrollY));
-            const n = Math.min(30, Math.ceil(box.height / 1400));
+            const nAll = Math.max(1, Math.ceil((box.height - MIN_TAIL) / 1400));
+            const n = Math.min(30, nAll);
             for (let i = 0; i < n; i++) {
               const y = top + i * 1400;
-              const hgt = Math.min(1400, box.height - i * 1400);
+              const hgt = (i === n - 1 && n === nAll) ? box.height - i * 1400 : Math.min(1400, box.height - i * 1400);
               if (hgt <= 0) break;
               const name = `details_open_${String(i + 1).padStart(2, '0')}.png`;
               await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
@@ -1054,6 +1083,84 @@ async function main() {
         blockHits.length || reviewHits.length ? { block: blockSum, review: reviewSum } : undefined);
     });
 
+    // ---- with the details still open: growth shown as a %, raw engine keys, «Sheet!Cell» order ----------------
+    await section(['growth_no_pct', 'no_raw_keys', 'bidi_refs'], async () => {
+      // the asset detail panel too (its field notes and references are board-facing)
+      await page.evaluate(() => { const row = document.querySelector('tr[data-role="asset-row"]'); if (row) row.click(); });
+      await waitStable(page);
+      const r = await page.evaluate(() => {
+        const out = { growth: [], keys: [], bidi: { checked: 0, bad: [] } };
+        const visibleEl = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+        // (1) metrics.md §5: a growth result without confirmed comparability never shows a percentage
+        let all = null;
+        try { all = window.APA.computeAll(window.APA_UI.getFilters()); } catch (e) { all = null; }
+        Object.keys((all && all.metrics) || {}).forEach((id) => {
+          const m = all.metrics[id];
+          if (!m || m.kind !== 'growth' || (m.comparability && m.comparability.status === 'confirmed')) return;
+          const sel = `[data-metric-id="${id}"] [data-role="kpi-value"], [data-metric-id="${id}"] [data-role="calc-value"], [data-metric-ref="${id}"]`;
+          document.querySelectorAll(sel).forEach((el) => {
+            const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+            if (/[\d٠-٩]\s*[%٪]/.test(t)) out.growth.push(id + ': «' + t.slice(0, 90) + '»');
+          });
+        });
+        // (2) engine keys (rev.2025.excl_vat, zero_as_missing) in visible text outside <code> / .tech
+        const skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, CODE: 1 };
+        const KEY = /[a-z][a-z0-9]*(?:[._][a-z0-9]+)+/g;
+        const FILE = /\.(xlsx|xlsm|xls|ods|csv|json|html?|md|pdf|png)$/i;
+        const WEB = /^www\.|\.(com|sa|org|net|gov|edu)(\.|$)/i;
+        const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+          acceptNode: (n) => {
+            for (let p = n.parentNode; p && p !== document.body; p = p.parentNode) {
+              if (skip[p.nodeName] || (p.classList && p.classList.contains('tech'))) return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        const nodes = [];
+        for (let n = w.nextNode(); n; n = w.nextNode()) if (n.nodeValue && n.nodeValue.trim() && visibleEl(n.parentElement)) nodes.push(n);
+        nodes.forEach((n) => {
+          (n.nodeValue.match(KEY) || []).forEach((k) => { if (!FILE.test(k) && !WEB.test(k) && out.keys.length < 40) out.keys.push(k); });
+        });
+        // (3) «<Arabic>!<Cell>»: the «!» glyph must sit between the sheet name's last letter and the cell (dashboard-spec §7)
+        const blockOf = (el) => { for (let p = el; p; p = p.parentElement) { const d = getComputedStyle(p).display; if (d !== 'inline' && d !== 'contents') return p; } return document.body; };
+        const groups = new Map();
+        nodes.forEach((n) => { const b = blockOf(n.parentElement); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(n); });
+        const rectOf = (node, i) => { const rg = document.createRange(); rg.setStart(node, i); rg.setEnd(node, i + 1); const rr = rg.getBoundingClientRect(); return rr; };
+        const AR = /[\u0600-\u06FF]/;
+        groups.forEach((ns) => {
+          const chars = [];
+          ns.forEach((n) => { for (let i = 0; i < n.nodeValue.length; i++) chars.push([n, i, n.nodeValue[i]]); });
+          for (let i = 1; i < chars.length - 2 && out.bidi.checked < 3000; i++) {
+            if (chars[i][2] !== '!' || !/[$A-Z]/.test(chars[i + 1][2])) continue;
+            let j = i - 1;
+            while (j >= 0 && /\s/.test(chars[j][2])) j--;
+            if (j < 0 || !AR.test(chars[j][2])) continue;
+            const a = rectOf(chars[j][0], chars[j][1]), b = rectOf(chars[i][0], chars[i][1]), c = rectOf(chars[i + 1][0], chars[i + 1][1]);
+            if (!a.width || !b.width || !c.width) continue;
+            const line = (x) => x.top + x.height / 2;
+            if (Math.abs(line(a) - line(b)) > b.height / 2 || Math.abs(line(c) - line(b)) > b.height / 2) continue;   // wrapped
+            out.bidi.checked++;
+            const ax = a.left + a.width / 2, bx = b.left + b.width / 2, cx = c.left + c.width / 2;
+            if (!(bx > Math.min(ax, cx) && bx < Math.max(ax, cx))) {
+              let k = i + 1, cell = '';
+              while (k < chars.length && /[$A-Z0-9:]/.test(chars[k][2]) && cell.length < 12) { cell += chars[k][2]; k++; }
+              if (out.bidi.bad.length < 20) out.bidi.bad.push('…' + chars.slice(Math.max(0, j - 6), j + 1).map((x) => x[2]).join('') + '!' + cell);
+            }
+          }
+        });
+        return out;
+      });
+      add('growth_no_pct', r.growth.length === 0, r.growth.length
+        ? 'مؤشر تغير بقابلية مقارنة غير مؤكدة يُعرض نسبةً (المطلوب التغير بالريال دون نسبة، metrics.md §5): ' + short(r.growth.slice(0, 4), 400)
+        : 'لا نسبة نمو معروضة لمؤشر تغير غير مؤكد المقارنة (البطاقات وسجل الحسابات ورقاقات الدليل)');
+      add('no_raw_keys', r.keys.length === 0, r.keys.length
+        ? 'مفاتيح تقنية إنجليزية في النص الظاهر (تُعرض بالتسمية العربية، والمفتاح في <code> أو «المرجع التقني» فقط): ' + short([...new Set(r.keys)].slice(0, 12), 400)
+        : 'لا مفاتيح حقول أو مؤشرات أو حالات إنجليزية في النص الظاهر خارج المراجع التقنية');
+      add('bidi_refs', r.bidi.bad.length === 0, r.bidi.bad.length
+        ? `${r.bidi.bad.length} مرجع خلية بعد اسم ورقة عربي تظهر فيه «!» خارج موضعها (الخلية ملتصقة بالاسم): ` + short(r.bidi.bad.slice(0, 6), 400)
+        : `«!» بين اسم الورقة والخلية في ${r.bidi.checked} مرجعًا ظاهرًا بعد اسم ورقة عربي`);
+    });
+
     // ---- every visible button / [data-action] -----------------------------------------------------------
     await section(['buttons'], async () => {
       await page.reload({ waitUntil: 'load' });
@@ -1127,7 +1234,25 @@ async function main() {
             + (e.getAttribute('data-action') ? `[data-action=${e.getAttribute('data-action')}]` : '')),
           missing: ids.filter((id) => document.getElementById(id) && !shownOnPaper(document.getElementById(id))),
           absent: ids.filter((id) => !document.getElementById(id)),
-          cards, cardsTotal: document.querySelectorAll('[data-role="kpi-card"]').length
+          cards, cardsTotal: document.querySelectorAll('[data-role="kpi-card"]').length,
+          // brief §6/§11: on paper a yield card still shows its scope, basis, valuation date and included count
+          ratio: (() => {
+            const bad = [];
+            let all = null;
+            try { all = window.APA.computeAll(window.APA_UI.getFilters()); } catch (e) { return ['computeAll: ' + String(e && e.message || e)]; }
+            const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+            document.querySelectorAll('[data-role="kpi-card"][data-kind="ratio"]').forEach((card) => {
+              const id = card.getAttribute('data-metric-id');
+              const m = all && all.metrics[id];
+              if (!m || typeof m.value !== 'number' || !shownOnPaper(card)) return;
+              const txt = norm(card.innerText);
+              [['scope_text', 'النطاق'], ['basis', 'الأساس'], ['valuation_date', 'تاريخ التقييم']].forEach(([k, lab]) => {
+                if (m[k] && !txt.includes(norm(m[k]))) bad.push(`${id}: ${lab} «${norm(m[k]).slice(0, 50)}» غير ظاهر على الورق`);
+              });
+              if (!/مشمول/.test(txt)) bad.push(`${id}: عدد المشمول والمستبعد غير ظاهر على الورق`);
+            });
+            return bad;
+          })()
         };
       }, PRINT_SECTIONS);
       const pdfPath = path.join(screensDir, 'print.pdf');
@@ -1144,8 +1269,10 @@ async function main() {
       if (ph.absent.length) prob.push('أقسام العرض التنفيذي غير موجودة: ' + ph.absent.map((x) => '#' + x).join('، '));
       if (ph.cardsTotal && ph.cards < ph.cardsTotal) prob.push(`${nAr(ph.cardsTotal - ph.cards, 'بطاقة مؤشر واحدة', 'بطاقتا مؤشر', 'بطاقات مؤشرات', 'بطاقة مؤشر')} لا تظهر عند الطباعة`);
       if (!(size > 1000)) prob.push('ملف PDF للطباعة لم يُنشأ أو فارغ');
+      if (ph.ratio.length) prob.push('بطاقة العائد على الورق: ' + ph.ratio.slice(0, 4).join('؛ '));
+      if (pages && pages > MAX_PRINT_PAGES) prob.push(`الطباعة ${nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة')} A4 والحد ${MAX_PRINT_PAGES} (dashboard-spec §8)؛ اختصر نصوص العرض التنفيذي`);
       add('print', prob.length === 0, prob.length ? prob.join('؛ ')
-        : `عناصر [data-print=hide] (${ph.n}) مخفية عند الطباعة، وأقسام العرض التنفيذي (${PRINT_SECTIONS.length}) وبطاقاته (${ph.cards}) ظاهرة، ` +
+        : `عناصر [data-print=hide] (${ph.n}) مخفية عند الطباعة، وأقسام العرض التنفيذي (${PRINT_SECTIONS.length}) وبطاقاته (${ph.cards}) ظاهرة، ونطاق بطاقات العائد وأساسها وتاريخ تقييمها على الورق، ` +
           `وأُنشئ screens/print.pdf (A4، ${pages ? nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة') + '، ' : ''}${Math.round(size / 1024)} ك.ب)`, pages ? { pages } : undefined);
       await pp.close();
     });
