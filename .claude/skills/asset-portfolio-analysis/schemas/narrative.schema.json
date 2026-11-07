@@ -152,7 +152,13 @@
           "ref": {"$ref": "#/$defs/text"},
           "date": {"type": ["string", "null"]},
           "limits": {"type": ["string", "null"]}
-        }
+        },
+        "allOf": [
+          {"$comment": "A web source states its date and the limits of the comparison (brief §7).",
+           "if": {"required": ["type"], "properties": {"type": {"const": "web"}}},
+           "then": {"required": ["date", "limits"],
+                    "properties": {"date": {"$ref": "#/$defs/text"}, "limits": {"$ref": "#/$defs/text"}}}}
+        ]
       }
     },
     "version_comparison": {"type": ["object", "null"]},
@@ -163,13 +169,26 @@
         "required": ["rec_id", "status"],
         "properties": {
           "rec_id": {"$ref": "#/$defs/text"},
-          "status": {"$ref": "#/$defs/text"},
+          "status": {"enum": ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]},
           "evidence": {"type": ["array", "string", "null"]},
           "note": {"type": ["string", "null"]}
         }
       }
     },
-    "methodology_notes": {"type": "array", "items": {"type": "string"}}
+    "methodology_notes": {"type": "array", "items": {"type": "string"}},
+    "acknowledged_warnings": {
+      "$comment": "Warnings the analyst accepts with a reason of at least 8 words (validate_analysis.py lists them as acknowledged; a blocking check can never be acknowledged).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check_id", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "check_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "reason": {"type": "string", "pattern": "^\\s*(?:\\S+\\s+){7,}\\S+"}
+        }
+      }
+    }
   },
   "$defs": {
     "text": {"type": "string", "minLength": 1, "pattern": "\\S"},
@@ -230,6 +249,7 @@
                    "success_kpi", "approval_required", "ranking", "priority"],
       "properties": {
         "id": {"type": "string", "pattern": "^R\\S*$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 60, "pattern": "\\S"},
         "gap_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
         "target": {"type": "string"},
         "problem": {"type": "string"},

@@ -57,7 +57,8 @@ RANKING_KEYS = ("impact", "urgency", "evidence_strength", "feasibility", "cost_l
 REL_TOL = 1e-9
 
 _AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
-TOKEN_RE = re.compile(r"\{\{\s*m:([A-Za-z0-9_\-]+)((?:\.[A-Za-z0-9_]+)*)\s*\}\}")
+# Token grammar shared with build_dashboard.py: {{m:id}}, {{m:id.field}}, {{m:id.field.sub}} (B18)
+TOKEN_RE = re.compile(r"\{\{\s*m:\s*([A-Za-z0-9_\-]+)((?:\.[A-Za-z0-9_]+){0,2})\s*\}\}")
 LOOSE_TOKEN_RE = re.compile(r"\{\{|\}\}")
 # Saudi mobile, tolerant to one space/dash between digits (visible text and strings only — never raw numbers)
 PHONE_LOOSE_RE = re.compile(r"(?<!\d)(?:\+?966|00966|0)?[\s\-]?5(?:[\s\-]?\d){8}(?!\d)")
@@ -72,10 +73,12 @@ GENERIC_NON_PII = {normalize_arabic(x) for x in (
 )} | {normalize_arabic(x) for x in NA_TOKENS | NOT_APPLICABLE_TOKENS}
 
 NEGATIONS = {"ليس", "ليست", "لا", "غير", "دون", "بدون", "ولا", "وليس", "وليست", "لم", "ليسا", "ولم", "بلا"}
-NET_RE = re.compile(r"(?<![\w])(?:ال)?صافي(?:ا|ه)?(?![\w])")
-TOTAL_RETURN_RE = re.compile(r"(?<![\w])(?:ال)?عايدا?\s+(?:(?:ال)?استثماريا?\s+)?(?:ال)?كليا?(?![\w])")
-NET_YIELD_RE = re.compile(r"(?<![\w])(?:ال)?عايدا?\s+(?:ال)?صافيا?(?![\w])|(?<![\w])صافي\s+(?:ال)?عايد(?![\w])")
-BEFORE_EXP_RE = re.compile(r"قبل\s+(?:ال)?مصروفات")
+# optional و/ف + ب/ك/ل + ال prefixes («والعائد»، «وصافي»، «بالعائد»، «للعائد») — B4(b); «صافٍ» normalises to «صاف»
+_AR_PFX = r"(?<![\w])[وف]?(?:[بك]?ال|لل|[بلك])?"
+NET_RE = re.compile(_AR_PFX + r"صاف(?:يا|يه|ي)?(?![\w])(?!\s+(?:من\s+)?(?:ال)?(?:ضريب|اصول))")
+TOTAL_RETURN_RE = re.compile(_AR_PFX + r"عايدا?\s+(?:(?:ال)?استثماريا?\s+)?(?:ال)?كليا?(?![\w])")
+NET_YIELD_RE = re.compile(_AR_PFX + r"عايدا?\s+(?:ال)?صاف(?:يا|ي)?(?![\w])|" + _AR_PFX + r"صافي\s+(?:ال)?عايد(?![\w])")
+BEFORE_EXP_RE = re.compile(r"قبل\s+(?:\S+\s+)?(?:ال)?(?:مصروفات|مصاريف|نفقات)")  # «قبل خصم المصروفات» (B11)
 SCORE_RE = re.compile(r"من\s*100|/\s*100(?!\d)|(?<!\d)\d{1,2}\s*/\s*10(?!\d)|درجه\s*\d|\d+\s*نقاط?(?![\w])|(?<![\w])علامه\s*\d")
 PCT_RE = re.compile(r"\d+(?:[.,]\d+)?\s*[%٪]|بالمايه|في المايه")
 JUDGE_RE = re.compile(r"ممتاز|جيد|ضعيف|سيي|مقبول|متميز|رايع|مرتفع|منخفض|متدن|عالي|قوي|ممتازه|ضعيفه")
@@ -228,9 +231,9 @@ def negated(norm_text: str, start: int, window: int = 3) -> bool:
 
 
 def affirmative_hits(regex, text: str) -> list:
-    """Matches of regex in the normalised text that are not preceded by a negation word."""
+    """Matches of regex in the normalised text that are not negated in their clause (clause_negated, B11)."""
     n = normalize_arabic(text)
-    return [m.group(0) for m in regex.finditer(n) if not negated(n, m.start())]
+    return [m.group(0) for m in regex.finditer(n) if not clause_negated(n, m.start(), m.end())]
 
 
 def col_to_idx(col: str) -> int:
@@ -507,7 +510,11 @@ def _schema_msg(e) -> str:
         dim = (((e.validator_value or {}).get("properties") or {}).get("dimension") or {}).get("const")
         return f"البعد «{dim}» مفقود من التقييم" if dim else "عنصر مطلوب مفقود من القائمة"
     if v in ("pattern",):
+        if "{7,}" in str(e.validator_value):
+            return "سبب قبول التحذير أقل من ثماني كلمات"
         return f"القيمة {inst!r} لا تطابق الصيغة المطلوبة {e.validator_value}"
+    if v == "maxLength":
+        return f"النص أطول من {e.validator_value} حرفًا"
     if v == "minLength":
         return "نص فارغ"
     if v == "uniqueItems":
@@ -542,8 +549,11 @@ def c_narrative_schema(ctx: Ctx):
     return out
 
 
-def summary_word_count(text: str) -> int:
-    return word_count_ar(TOKEN_RE.sub(" 0 ", text))
+def summary_word_count(text: str, ctx: "Ctx" = None) -> int:
+    """Words of the summary as rendered: each token counts as the words it prints (B18)."""
+    if ctx is None:
+        return word_count_ar(NQ_FACT_RE.sub(" 0 ", TOKEN_RE.sub(" 0 ", text)))
+    return nq_rendered_word_count(ctx, text)
 
 
 def c_exec_summary_length(ctx: Ctx):
@@ -551,11 +561,11 @@ def c_exec_summary_length(ctx: Ctx):
     s = ctx.narrative.get("executive_summary")
     if not isinstance(s, str):
         raise Skip("الخلاصة التنفيذية ليست نصًا")
-    n = summary_word_count(s)
+    n = summary_word_count(s, ctx)
     if 120 <= n <= 180:
         return []
-    return [(f"الخلاصة التنفيذية {n} كلمة (المطلوب 120–180، كل رمز {{{{m:…}}}} يُحتسب كلمة واحدة)",
-             "06_narrative.json:executive_summary")]
+    return [(f"الخلاصة التنفيذية {n} كلمة بعد عرض الرموز (المطلوب 120–180؛ يُحتسب الرمز بطوله المعروض: المبلغ كلمتان، "
+             "و«غير قابل للاحتساب» ثلاث كلمات)", "06_narrative.json:executive_summary")]
 
 
 def c_metric_tokens(ctx: Ctx):
@@ -819,7 +829,9 @@ def _spec_texts(spec: dict, period_id):
 def _ratio_profile(spec, period, ctx):
     """(is_revenue_to_valuation_ratio, expense_resolved, n_valuation_years)."""
     meta = ctx.field_meta
-    names = [spec.get(k) for k in ("num", "den", "field", "a", "b", "prev", "curr")] + as_list(spec.get("fields"))
+    names = [spec.get(k) for k in ("num", "den", "field", "a", "b", "prev", "curr")]
+    if spec.get("kind") != "ratio":  # a ratio's value comes from num/den only; a `fields` list is decorative (B4c)
+        names += as_list(spec.get("fields"))
     resolved = [_resolve_ph(n, period, ctx.config) for n in names if isinstance(n, str)]
     exp_resolved = any(isinstance(f, str) and (field_group(f, meta) == "expense" or
                                                re.match(r"^(noi|net)[._]", f)) for f in resolved)
@@ -853,22 +865,14 @@ def _label_findings(ctx, test):
 
 
 def c_label_net(ctx: Ctx):
-    def test(spec, texts, prof):
-        is_rv, exp_res, _ = prof
-        if not is_rv or exp_res:
-            return None
-        hits = [k for k in ("label", "short_label", "definition") if affirmative_hits(NET_RE, texts.get(k, ""))]
-        if hits:
-            return (f"نسبة إيراد إلى تقييم موصوفة بـ«صافي» في {', '.join(hits)} دون أي حقل مصروفات؛ "
-                    "سمّها «الإيراد المسجل … إلى تقييم … للأصول نفسها، قبل المصروفات»")
-        return None
-    return _label_findings(ctx, test)
+    return nq_label_net(ctx)  # B4(c,d): every revenue-based kind, basis included (G4a block)
 
 
 def c_label_total_return(ctx: Ctx):
     def test(spec, texts, prof):
         _, exp_res, n_val_years = prof
-        hits = [k for k in ("label", "short_label", "definition") if affirmative_hits(TOTAL_RETURN_RE, texts.get(k, ""))]
+        hits = [k for k in ("label", "short_label", "definition", "basis")
+                if affirmative_hits(TOTAL_RETURN_RE, texts.get(k, ""))]
         if hits and not (exp_res and n_val_years >= 2):
             return ("تسمية «العائد الاستثماري الكلي» دون مدخلاته (صافي الدخل وقيمتا بداية الفترة ونهايتها والتدفقات) في "
                     f"{', '.join(hits)}")
@@ -891,8 +895,13 @@ def c_label_before_expenses(ctx: Ctx):
 def c_questions_max(ctx: Ctx):
     ctx.need("narrative")
     q = ctx.narrative.get("questions")
-    if isinstance(q, list) and len(q) > 3:
-        return [(f"{len(q)} أسئلة؛ الحد الأقصى ثلاثة أسئلة مؤثرة في كل دفعة", "06_narrative.json:questions")]
+    if not isinstance(q, list):
+        return []
+    # B17: an item packing several questions counts each «؟»
+    n = sum(max(1, len(re.findall(r"[؟?]", x))) if isinstance(x, str) else 1 for x in q)
+    if n > 3:
+        return [(f"{n} أسئلة (بعدّ علامات الاستفهام داخل البنود)؛ الحد الأقصى ثلاثة أسئلة مؤثرة في كل دفعة",
+                 "06_narrative.json:questions")]
     return []
 
 
@@ -1012,44 +1021,9 @@ def _scenario_type(item):
 
 
 def scenario_findings(ctx: Ctx):
-    """Return (blocking, warnings)."""
-    sc = as_dict(ctx.narrative.get("scenarios"))
-    if sc.get("status") != "prepared":
-        return [], []
-    blocking, warnings = [], []
-    items = [x for x in as_list(sc.get("items")) if isinstance(x, dict)]
-    if not items:
-        blocking.append(("السيناريوهات معلنة «prepared» دون بنود (items)", "06_narrative.json:scenarios"))
-    rec_ids = {r.get("id") for r in ctx.records} if "records" in ctx.data else None
-    for i, it in enumerate(items):
-        base = f"06_narrative.json:scenarios.items[{gid(it, i)}]"
-        for j, a in enumerate(as_list(it.get("assumptions"))):
-            if not isinstance(a, dict) or not nonempty(a.get("source")):
-                blocking.append(("افتراض بلا مصدر أو تفسير (source)؛ لا تُعد مبالغ أو نسب تحسن دون سند",
-                                 f"{base}.assumptions[{j}]"))
-        if not as_list(it.get("assumptions")):
-            blocking.append(("بند سيناريو بلا افتراضات موثقة", base))
-        if rec_ids is not None:
-            missing = [a for a in as_list(it.get("asset_ids")) if a not in rec_ids]
-            if missing:
-                blocking.append((f"أصول غير موجودة في 03: {short_list(missing)}", f"{base}.asset_ids"))
-    for i in range(len(items)):
-        for j in range(i + 1, len(items)):
-            a, b = items[i], items[j]
-            common = set(map(str, as_list(a.get("asset_ids")))) & set(map(str, as_list(b.get("asset_ids"))))
-            if not common:
-                continue
-            declared = b.get("id") in as_list(a.get("overlaps_with")) or a.get("id") in as_list(b.get("overlaps_with"))
-            if declared:
-                continue
-            where = f"06_narrative.json:scenarios.items[{a.get('id')}↔{b.get('id')}]"
-            if _scenario_type(a) == _scenario_type(b):
-                blocking.append((f"فرصتان من النوع نفسه على الأصول نفسها ({short_list(sorted(common))}) دون overlaps_with؛ "
-                                 "يُحتسب الأثر مرتين", where))
-            else:
-                warnings.append((f"فرصتان مختلفتان على الأصول نفسها ({short_list(sorted(common))}) دون overlaps_with؛ "
-                                 "تحقق من عدم ازدواج الأثر (مثل معالجة الشغور ورفع الإيجار)", where))
-    return blocking, warnings
+    """Return (blocking, warnings). B8: placeholder/unsourced numeric assumptions, net-effect arithmetic and any
+    undeclared same-asset overlap are blocking (G4a block); consistency warnings live in scenario_consistency."""
+    return nq_scenario_findings(ctx)[0], []
 
 
 def c_scenarios(ctx: Ctx):
@@ -2305,27 +2279,8 @@ G4B_CHECKS = [
 # WARNING checks
 # ---------------------------------------------------------------------------
 def c_assessment_scores(ctx: Ctx):
-    ctx.need("narrative")
-    out = []
-    for i, a in enumerate(as_list(ctx.narrative.get("assessment"))):
-        if not isinstance(a, dict) or nonempty(a.get("criterion")):
-            continue
-        txt = a.get("judgment") if isinstance(a.get("judgment"), str) else ""
-        n = normalize_arabic(TOKEN_RE.sub(" ", txt)).translate(_AR_INDIC)
-        reasons = []
-        if SCORE_RE.search(n):
-            reasons.append("درجة رقمية")
-        for m in PCT_RE.finditer(n):
-            window = n[max(0, m.start() - 40): m.end() + 40]
-            if JUDGE_RE.search(window):
-                reasons.append("نسبة مئوية مقرونة بحكم")
-                break
-        if SUPERLATIVE_RE.search(n):
-            reasons.append("حكم مطلق")
-        if reasons:
-            out.append((f"التقييم يستخدم {('، '.join(reasons))} دون معيار مفسّر (criterion = null)؛ اكتفِ بحكم وصفي تدعمه الأرقام "
-                        "أو اذكر المعيار المعتمد", f"06_narrative.json:assessment[{gid(a, i, 'dimension')}].judgment"))
-    return out
+    # B6: numeric scores anywhere are blocking (narrative_scores); a criterion counts only when it cites a source
+    return nq_assessment_judgments(ctx)
 
 
 def c_superlatives(ctx: Ctx):
@@ -2424,33 +2379,9 @@ def _matches(x, dec, candidates):
 
 
 def number_findings(ctx: Ctx):
-    """Return (warnings, infos) for hand-typed numbers >= 1,000 in the narrative."""
-    ctx.need("narrative")
-    metric_nums = _metric_numbers(ctx) if "metrics" in ctx.data else {}
-    file_nums = _file_numbers(ctx)
-    warns, infos = [], []
-    for path, s in walk_strings(ctx.narrative, skip_keys=frozenset(NUMBER_SKIP_KEYS | {"x_"})):
-        t = TOKEN_RE.sub(" ", s).translate(_AR_INDIC)
-        t = DATE_RE.sub(" ", t)
-        for m in NUMBER_RE.finditer(t):
-            raw = m.group(1)
-            x, dec = _parse_num(raw)
-            if x is None or x < 1000:
-                continue
-            if re.fullmatch(r"\d{4}", raw) and (1300 <= x <= 1500 or 1900 <= x <= 2100):
-                continue  # a year
-            c = _matches(x, dec, metric_nums.keys())
-            if c is not None:
-                # metric values first, then metric fields; breakdown/trend matches cannot be tokens
-                ids = sorted(metric_nums[c], key=lambda s: (s.startswith(("breakdown:", "trend")), "." in s, s))
-                tokenable = [i for i in ids if not i.startswith(("breakdown:", "trend"))]
-                hint = (f"استخدم الرمز {{{{m:{tokenable[0]}}}}} ليبقى متسقًا مع الحساب" if tokenable
-                        else "يطابق توزيعًا أو تطورًا زمنيًا؛ اذكره دون رقم يدوي أو أحل إلى الرسم")
-                infos.append((f"الرقم {raw} مكتوب يدويًا ويطابق {short_list(ids, 3)}؛ {hint}", f"06_narrative.json:{path}"))
-            elif _matches(x, dec, file_nums) is None:
-                warns.append((f"الرقم {raw} مكتوب يدويًا ولا يطابق أي مؤشر في 05 ولا قيمة في الملف؛ استخدم رمز {{{{m:…}}}} "
-                              "أو صحّحه أو اذكر مصدره", f"06_narrative.json:{path}"))
-    return warns, infos
+    """Return (warnings, infos) for hand-typed numbers in the narrative: any size, percentages and amounts in
+    ألف/مليون/مليار included (B5; implementation in the G4a block, reusable via nq_hand_numbers)."""
+    return nq_number_findings(ctx)
 
 
 def _effective_years(tv, field, fy, col_years):
@@ -2522,24 +2453,8 @@ def c_growth_comparability(ctx: Ctx):
 
 
 def c_drastic_recommendations(ctx: Ctx):
-    ctx.need("narrative")
-    out = []
-    for i, r in enumerate(as_list(ctx.narrative.get("recommendations"))):
-        if not isinstance(r, dict):
-            continue
-        all_txt = " ".join(s for _, s in walk_strings(r, skip_keys=frozenset({"id", "gap_ids", "evidence"})))
-        if not DRASTIC_RE.search(normalize_arabic(all_txt)):
-            continue
-        steps = " ".join([r.get("first_action") or ""] + [a for a in as_list(r.get("alternatives")) if isinstance(a, str)])
-        notes = []
-        if not STUDY_RE.search(normalize_arabic(steps)):
-            notes.append("الإجراء الأول والبدائل لا تتضمن دراسة أو تحققًا (جدوى، تقييم معتمد، قيود نظامية ووقفية) قبل المفاضلة")
-        if r.get("approval_required") in (None, ""):
-            notes.append("لا يُذكر الاعتماد المطلوب (مجلس الإدارة/الجهات المختصة)")
-        if notes:
-            out.append(("توصية تذكر البيع أو الهدم أو تغيير الاستخدام: " + "؛ ".join(notes),
-                        f"06_narrative.json:recommendations[{gid(r, i)}]"))
-    return out
+    # B7: the recommended drastic action itself is blocking (drastic_without_study); these are the softer notes
+    return nq_drastic_findings(ctx)[1]
 
 
 def c_proven_problem_cause(ctx: Ctx):
@@ -2652,17 +2567,9 @@ def c_isolated_in_metrics(ctx: Ctx):
 
 
 def c_narrative_claims(ctx: Ctx):
-    ctx.need("narrative")
-    has_exp = any(field_group(f, ctx.field_meta) == "expense" for f in ctx.field_meta)
-    has_exp = has_exp or any(as_dict(p).get("exp_field") for p in as_list(ctx.config.get("periods")))
-    out = []
-    for path, s in walk_strings(ctx.narrative, skip_keys=frozenset(NUMBER_SKIP_KEYS - {"evidence"})):
-        if affirmative_hits(TOTAL_RETURN_RE, s):
-            out.append(("السرد يذكر «العائد الاستثماري الكلي» إثباتًا؛ لا يُحسب إلا بقيم بداية ونهاية الفترة والدخل والتدفقات",
-                        f"06_narrative.json:{path}"))
-        if not has_exp and affirmative_hits(NET_YIELD_RE, s):
-            out.append(("السرد يصف العائد بأنه «صافٍ» ولا توجد بيانات مصروفات في الملف", f"06_narrative.json:{path}"))
-    return out
+    # B4(a): a term next to a token is judged by that metric (blocking: narrative_metric_naming); these are the
+    # token-less claims no metric of the run supports
+    return nq_naming_findings(ctx)[1]
 
 
 def c_followup_status(ctx: Ctx):
@@ -2700,6 +2607,1381 @@ def c_gaps_without_recommendation(ctx: Ctx):
 
 
 # ---------------------------------------------------------------------------
+# --- narrative quality checks (G4a) ---
+# Brief §6–§10: metric naming vs fields, growth comparability, scores, recommendations, plan, gaps,
+# scenarios, hand-typed numbers and summary length (review findings B1–B18). Helpers first, then checks.
+# ---------------------------------------------------------------------------
+try:
+    import facts as _nq_facts_mod  # sibling module: {{f:key}} facts
+    NQ_FACT_RE = _nq_facts_mod.FACT_TOKEN_RE
+except Exception:  # pragma: no cover - facts.py ships with the skill
+    _nq_facts_mod = None
+    NQ_FACT_RE = re.compile(r"\{\{\s*f:\s*([A-Za-z0-9_.\-]+)\s*\}\}")
+
+NQ_PH_RE = re.compile(r"tok(\d+)x")
+# sentences (claims, scores, partial naming) and clauses (negation scope)
+NQ_SENT_SPLIT_RE = re.compile(r"(?<!\d)\.|\.(?!\d)|[!؟?\n؛;]+")  # a dot splits unless it is a decimal point
+NQ_CLAUSE_SPLIT_RE = re.compile(r"(?<!\d)[.,،]|[.,،](?!\d)|[!؟?\n؛;:]|\s(?:لكن|ولكن|بينما|اما|واما|غير ان|الا ان|في حين)\s")
+# negators that cover their whole clause (before the term) — B11
+NQ_CLAUSE_NEG_RE = re.compile(
+    r"(?<![\w])[وف]?(?:يتعذر|تعذر|متعذر|يستحيل|يمتنع|ليس|ليست|ليسا)(?![\w])"
+    r"|(?<![\w])غير\s+(?:قابل|ممكن|متاح)|(?<![\w])[وف]?(?:لا|لم|لن)\s+[يت]\S+")
+# negators that may follow the term in the same clause: «… الكلي فيتعذر حسابه» — B11
+NQ_AFTER_NEG_RE = re.compile(
+    r"(?<![\w])[وف]?(?:يتعذر|تعذر|متعذر|يستحيل)(?![\w])|(?<![\w])غير\s+(?:قابل|ممكن)"
+    r"|(?<![\w])[وف]?(?:لا|لم|لن)\s+(?:يمكن|يجوز|يصح|[يت]حتسب|[يت]حسب)")
+# «صافي الدخل/الإيراد» and ROI wording (B4 a, e); same optional و/ف/ب/ل/ال prefixes as NET_RE (B4 b)
+NQ_NET_INCOME_RE = re.compile(
+    _AR_PFX + r"صافي\s+(?:ال)?(?:دخل|ايراد|ايرادات|ربح|ارباح)(?![\w])(?!\s+من\s+(?:ال)?ضريب)"
+    r"|" + _AR_PFX + r"(?:دخل|ايراد|ايرادات)\s+(?:ال)?صاف(?:يا|ي)?(?![\w])(?!\s+من\s+(?:ال)?ضريب)")
+NQ_ROI_RE = re.compile(
+    _AR_PFX + r"عايد\s+علي\s+(?:ال)?استثمار(?![\w])|(?<![a-z])roi(?![a-z])"
+    r"|" + _AR_PFX + r"عايدا?\s+(?:ال)?استثماريا?(?![\w])(?!\s+(?:ال)?كليا?(?![\w]))")
+NQ_NAMING_PATTERNS = (
+    ("net_yield", "العائد الصافي", NET_YIELD_RE),
+    ("net_income", "صافي الدخل", NQ_NET_INCOME_RE),
+    ("total", "العائد الاستثماري الكلي", TOTAL_RETURN_RE),
+    ("roi", "العائد على الاستثمار/العائد الاستثماري", NQ_ROI_RE),
+)
+NQ_SKIP_TEXT_KEYS = frozenset({"id", "ref", "gap_ids", "rec_id", "top_gaps", "top_actions", "sources", "asset_ids",
+                               "version_comparison", "metric", "where", "date", "contract_version", "record_ids",
+                               "acknowledged_warnings", "kind", "dimension", "severity", "ranking", "x_"})
+NQ_VAT_CLASS = {"excl": "excl", "none_evidenced": "excl", "incl": "incl"}
+NQ_BASIS_CLASS = {"actual": "realized", "recorded": "realized", "expected": "anticipated", "contract": "anticipated"}
+NQ_VAT_AR = {"excl": "بدون ضريبة", "incl": "شامل الضريبة", "none_evidenced": "لا ضريبة مثبتة في المصدر",
+             "unknown": "غير موضح"}
+NQ_BASIS_AR = {"actual": "فعلي", "expected": "متوقع", "recorded": "مسجل", "contract": "تعاقدي", "unknown": "غير موضح"}
+NQ_COMPL_AR = {"full_year": "سنة كاملة", "partial": "فترة جزئية", "unknown": "غير موضح"}
+NQ_EXCL_CLAIM_RE = re.compile(r"(?:بدون|دون|غير\s+شامله?|قبل|باستثناء|بعد\s+استبعاد)\s+(?:ال)?ضريب"
+                              r"|صافي\s+(?:من\s+)?(?:ال)?ضريب")
+NQ_INCL_CLAIM_RE = re.compile(r"(?<!غير )(?:شامله?|متضمنه?|يشمل|تشمل|مع|بما\s+فيها?)\s+(?:ال)?ضريب")
+NQ_YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d\d)(?!\d)")
+NQ_INCOME_PRODUCING_RE = re.compile(r"(?<!غير )(?<![\w])(?:ال)?مدره(?![\w])")
+NQ_PARTIAL_NAME_RE = re.compile(r"(?:ال|لل)?جزء\s+(?:ال)?(?:قابل\s+للاحتساب|محتسب|محسوب)|(?<!غير )قابل\s+للاحتساب")
+NQ_MONEY_FIELDS = {"num", "den", "num_known_total", "prev_sum", "curr_sum", "abs_change", "total", "top_sum",
+                   "a_sum", "b_sum"}
+# --- B5: hand-typed numbers -------------------------------------------------
+# runs on the raw text (digits translated) so line starts survive for list markers
+NQ_NUM_RE = re.compile(
+    r"(?<![\w.,٫٬\-/:–—])(\d{1,3}(?:[,٬]\d{3})+(?:[.٫]\d+)?|\d+(?:[.٫]\d+)?)(?![\w])(?![.,٫٬]\d)"
+    r"(\s*(?:%|٪|في\s*الم[ائ]+[ةه]|بالم[ائ]+[ةه]))?(\s*(?:[أا]لف|[آأا]لاف|مليون|ملايين|مليار|مليارات)(?![\w]))?")
+NQ_SCALE = {"الف": 1e3, "الاف": 1e3, "مليون": 1e6, "ملايين": 1e6, "مليار": 1e9, "مليارات": 1e9}
+NQ_TIME_UNIT_RE = re.compile(r"\s*(?:ال)?(?:يوم|يوما|ايام|اسبوع|اسبوعا|اسابيع|شهر|شهرا|اشهر|شهور|سنه|سنوات|سنتين|عام|"
+                             r"اعوام|ساعه|ساعات|دقيقه|دقايق|ربع)(?![\w])")
+NQ_ORDINAL_BEFORE_RE = re.compile(r"(?:الضابط|الضوابط|ضابط|القاعده|القواعد|المعيار|الملاحظه|المرحله|مرحله|البند|بند|الخطوه|خطوه|رقم|الاولويه|اولويه|المستوي|الفقره|"
+                                  r"الماده|ماده|الصف|صف|العمود|السطر|الاصدار|النسخه)\s*$")
+NQ_COUNT_NOUN_RE = re.compile(r"\s*(?:من\s+)?(?:ال)?(?:اصل|اصول|اصلا|سجل|سجلات|سجلا|عقار|عقارات|عقارا|ارض|اراض|"
+                              r"اراضي|قطعه|قطع|نشاط|انشطه|نشاطا|مبني|مباني|مبنيين|يتيم|يتيما|ايتام|مستفيد|مستفيدين|"
+                              r"مستفيدا|ورقه|اوراق|فجوه|فجوات|توصيه|توصيات)(?![\w])")
+# --- B6: scores ---------------------------------------------------------------
+NQ_SCORE_NUM_RE = re.compile(
+    r"(?<![\w.])\d+(?:\.\d+)?\s*(?:/|من)\s*(?:5|10|100)(?!\d)(?!\.\d)"
+    r"(?!\s*(?:من\s+)?(?:ال)?(?:اصل|اصول|سجل|عقار|وحد|قطع|ارض|اراض|مبان|مبني|نشاط|انشط|بند|فجو|توصي|ايتام|مستفيد))")
+NQ_SCORE_EXPLICIT_RE = re.compile(r"(?<![\w])(?:ب)?(?:ال)?(?:درجه|علامه)\s*\d|\d+(?:\.\d+)?\s*نقاط?\s*(?:من|/)\s*\d")
+NQ_SCORE_CTX_RE = re.compile(
+    r"(?<![\w])(?:ب)?(?:ال)?(?:درجه|علامه|نقاط|نقطه|ممتاز|ممتازه|جيد|جيده|ضعيف|ضعيفه|متوسط|متوسطه|مقبول)(?![\w])"
+    r"|score|rating|(?<![\w])[وف]?(?:[يت]حصل|حصلت|حصل)(?![\w])"
+    r"|(?<![\w])(?:ال)?تقييم\s+(?:ال)?(?:عام|اجمالي|كلي|نهايي|اداء|محفظه)(?![\w])"
+    r"|(?<![\w])(?:ال)?تقييم(?:ها|ه)?\s*:?\s*\d{1,3}(?![\d,٬])")
+NQ_PLACEHOLDER_SRC_RE = re.compile(
+    r"^(?:\W*(?:افتراض|افتراضي|افتراضنا|تقدير|تقديري|تقديرنا|تقدير\s+المحلل|راي\s+المحلل|حكم\s+المحلل|المحلل|"
+    r"اجتهاد|خبره|خبره\s+المحلل|حسب\s+تقديرنا|وفق\s+تقديرنا|عرف\s+السوق|متعارف\s+عليه|معلوم|عام|متوسط\s+السوق)\W*)+$")
+# --- B7: drastic actions ------------------------------------------------------
+_NQ_L = "\u0621-\u064a"
+_NQ_DP = rf"(?<![{_NQ_L}])[وف]?(?:[بلك]?ال|لل|[بلك])?"  # و/ف + ب/ل/ك + ال, or لل
+NQ_DRASTIC_RE = re.compile(
+    rf"{_NQ_DP}(?:بيع|هدم)(?:ه|ها|هم|هما)?(?![{_NQ_L}])"
+    rf"|{_NQ_DP}تخارج(?![{_NQ_L}])"
+    rf"|{_NQ_DP}(?:تغيير|تحويل)\s+(?:ال)?استخدام"
+    rf"|{_NQ_DP}استبدال(?:ه|ها)?\s+(?:ب|ال)?(?:اصل|ارض|عقار|وقف|مبني|اخر|غيره|غيرها)"
+    rf"|{_NQ_DP}ازاله\s+(?:ال)?(?:مبني|مباني|عقار|منشا|منشات|بناء)"
+    rf"|{_NQ_DP}(?:تسييل|تصفيه)\s+(?:ال)?(?:اصل|ارض|عقار|وقف|مبني)"
+    rf"|{_NQ_DP}تصرف\s+(?:ال)?(?:نهايي\s+)?(?:في|ب)\s*(?:ال)?(?:اصل|ارض|عقار|وقف|مبني)")
+NQ_YIELD_REASON_RE = re.compile(r"عايد|ايراد|دخل|مدر|ربح|اداء")
+NQ_OTHER_REASON_RE = re.compile(STUDY_RE.pattern + r"|قيد|نظام|وقف|شرط|احتياج|حاجه|خدم|مستفيد|صيان|تكلف|متهالك|"
+                                r"مخاطر|سلامه|امان|طلب|موقع|تخطيط|ترخيص|استراتيج|مجلس|التزام|اضرار|تلف")
+NQ_CONTINUITY_RE = re.compile(r"استمرار|بديل|المستفيدين|المستفيد|نقل\s+(?:ال)?خدم|انتقال")
+# --- B8: promises / scenarios --------------------------------------------------
+NQ_PROMISE_RE = re.compile(
+    r"(?<![\w])[وف]?(?:سيحقق|ستحقق|سيضمن|ستضمن|يضمن|تضمن|مضمون|مضمونه|حتما|حتمي|حتميه|بالتاكيد|لا\s+محاله)(?![\w])"
+    # «مؤكد» (normalised «موكد») only on an outcome: «زيادة مؤكدة»، «عائد مؤكد»، «بصورة مؤكدة» — not «صفر مؤكد»
+    r"|(?<![\w])(?:ال)?(?:زياده|نمو|عايد|ارتفاع|اثر|ربح|ارباح|دخل|تحسن|مكاسب|وفر|وفورات|ايراد|ايرادات|نتيجه|نتايج)"
+    r"\s+(?:(?!(?:ال)?صفر)\S+\s+)?(?:ال)?موكد(?:ه|ا)?(?![\w])|(?:بصوره|بشكل)\s+موكد(?:ه|ا)?(?![\w])")
+NQ_ONE_OFF_RE = re.compile(r"(?<![\w])[وف]?[بل]?(?:ال)?(?:بيع|تسييل|تخارج)(?![\w])|مره\s+واحده|لمره\s+واحده|تحصيل\s+(?:ال)?متاخرات")
+# --- B14/B15/B16 ----------------------------------------------------------------
+NQ_COMPLETION_RE = re.compile(
+    r"(?<![\w])[وف]?[بل]?(?:ال)?(?:انجاز|اتمام|اكتمال|استكمال|تشغيل|افتتاح|تسليم|انهاء)\s+((?:\S+\s+){0,2}?)"
+    r"(?:ال)?(?:مشروع|تطوير|بناء|انشاء|انشاءات|ترميم|مبني|مجمع)(?![\w])"
+    r"|(?<![\w])(?:ال)?(?:مشروع|تطوير|مبني|مجمع)\s+(?:\S+\s+){0,2}?(?:مكتمل|مكتمله|منجز|منجزه|مشغل|مشغله)(?![\w])"
+    r"|مؤجر(?:ه)?\s+بالكامل")
+NQ_STUDY_OBJ_RE = re.compile(r"دراس|عروض|عرض|تقييم|تصميم|مخطط|ترخيص|جدوي|كراس|طرح|مواصفات")
+NQ_GENERIC_PHRASES = tuple(normalize_arabic(p) for p in (
+    "رفع الكفاءة", "تحسين الكفاءة", "زيادة الكفاءة", "تعظيم العوائد", "تعظيم العائد", "تعظيم الاستفادة",
+    "تحسين الأداء", "تحسن الأداء", "رفع الأداء", "تطوير الأداء", "تعزيز الاستدامة", "تحقيق الاستدامة",
+    "الاستغلال الأمثل", "تحسين الوضع", "معالجة الوضع", "رفع العائد", "زيادة الإيرادات", "تنمية الموارد",
+    "تفعيل الأصول", "تطوير الأصول", "حوكمة الأصول", "متابعة الأداء"))
+NQ_DURATION_RE = re.compile(r"\d|يوم|ايام|اسبوع|اسابيع|شهر|اشهر|شهور|سنه|سنتين|سنوات|عام|ربع|نصف|خلال")
+NQ_JOB_RE = re.compile(r"مدير|مسوول|مسيول|رييس|لجنه|مجلس|اداره|قسم|فريق|مشرف|منسق|محاسب|مستشار|امين|وحده|"
+                       r"الجهه|شوون|نايب|عضو|مختص|محلل|مهندس|مراجع|مكتب|موظف|اخصايي|ممثل|الماليه|القانوني|"
+                       r"التنفيذي|العام|الادارة|manager|officer|head|committee|board|director")
+NQ_CLAIM_RE = re.compile(
+    r"(?<![\w])[وف]?(?:ال)?(?:شاغر|شاغره|شغور)(?![\w])|غير\s+مؤجر|(?:اقل|ادني|دون)\s+من\s+(?:سعر\s+|اسعار\s+)?(?:ال)?(?:سوق|مثل)"
+    r"|دون\s+(?:سعر\s+|اسعار\s+)?(?:ال)?(?:سوق|مثل)|(?:تعثر|ضعف|تدني|انخفاض)\s+(?:ال)?تحصيل|(?<![\w])(?:ال)?متاخرات"
+    r"|(?:ضعف|سوء)\s+(?:ال)?(?:تسويق|تاجير|اداره)|(?<![\w])اهمال|انتهاء\s+(?:ال)?عقود|عقود\s+منتهيه")
+NQ_HEDGE_RE = re.compile(r"(?<![\w])(?:قد|ربما|يحتمل|محتمل|محتمله|احتمال|يرجح|هل)(?![\w])|لم\s+يثبت|غير\s+مثبت|"
+                         r"للتحقق|(?:دون|بدون)\s+(?:بيان|تحديد|توضيح|ذكر)|غير\s+(?:محدد|معروف|موضح|مبين)|لا\s+(?:يبين|يوضح|يحدد)|التحقق\s+من|يلزم\s+التحقق|ان\s+وجد|افتراض|يستلزم\s+التحقق|يحتاج\s+(?:الي\s+)?تحقق")
+NQ_SUPPORT_METRIC_RE = re.compile(r"اشغال|شغور|تحصيل|متاخر|سوق|occupancy|collection|vacan|arrear|market")
+NQ_NONEARN_RE = re.compile(
+    r"غير\s+مدر|لا\s+يدر|بلا\s+ايراد|(?:ب)?ايراد\s+صفري|(?:ب)?عايد\s+(?:منخفض|متدن|ضعيف)|انخفاض\s+(?:ال)?عايد"
+    r"|(?:ضعف|ضعيف|تدني)\s+(?:ال)?(?:اداء|عايد)|(?:لا\s+يحقق|عدم\s+تحقيق|لا\s+يحقق)\s+(?:ال)?(?:ايراد|دخل|ايجار|عايد)")
+
+
+# ---- generic helpers ----------------------------------------------------------
+def nq_tokens(s: str):
+    """Replace {{m:..}} / {{f:..}} tokens by ASCII placeholders tokNx. Returns (text, [(kind, id, path)])."""
+    toks = []
+
+    def rep_m(m):
+        toks.append(("m", m.group(1), (m.group(2) or "").lstrip(".")))
+        return f" tok{len(toks) - 1}x "
+
+    def rep_f(m):
+        toks.append(("f", m.group(1), ""))
+        return f" tok{len(toks) - 1}x "
+    t = TOKEN_RE.sub(rep_m, s)
+    t = NQ_FACT_RE.sub(rep_f, t)
+    return t, toks
+
+
+def nq_bounds(norm: str, start: int, end: int, split_re):
+    s = 0
+    for m in split_re.finditer(norm, 0, start):
+        s = m.end()
+    m2 = split_re.search(norm, end)
+    return s, (m2.start() if m2 else len(norm))
+
+
+def clause_negated(norm: str, start: int, end: int) -> bool:
+    """Clause-level negation (B11): a negation word up to 3 words before, a clause negator anywhere before in
+    the clause (يتعذر، لا يمكن، غير قابل، ليس، لم/لا + فعل), or an impossibility phrase right after the term."""
+    cs, ce = nq_bounds(norm, start, end, NQ_CLAUSE_SPLIT_RE)
+    before = norm[cs:start]
+    if any(w in NEGATIONS for w in before.split()[-3:]):
+        return True
+    if NQ_CLAUSE_NEG_RE.search(before):
+        return True
+    after = norm[end:ce]
+    ph = NQ_PH_RE.search(after)
+    if ph:  # a value printed right after the term makes it a claim
+        after = after[:ph.start()]
+    return bool(NQ_AFTER_NEG_RE.search(" ".join(after.split()[:10])))
+
+
+def nq_default_period(ctx):
+    pid = as_dict(ctx.met_doc.get("default_filters")).get("period")
+    if pid is None:
+        ps = [p for p in as_list(ctx.config.get("periods")) if isinstance(p, dict)]
+        pid = ps[0].get("id") if ps else None
+    for p in _periods(ctx):
+        if p.get("id") == pid:
+            return p
+    return _periods(ctx)[0]
+
+
+def nq_specs(ctx):
+    return [s for s in as_list(ctx.config.get("metrics")) if isinstance(s, dict) and s.get("id")]
+
+
+def nq_spec_by_id(ctx):
+    return {s["id"]: s for s in nq_specs(ctx)}
+
+
+def nq_texts(spec: dict, pid) -> dict:
+    keys = ("label", "short_label", "definition", "basis", "period_text", "scope_text")
+    out = {k: spec.get(k) for k in keys}
+    tbp = as_dict(as_dict(spec.get("text_by_period")).get(pid)) if pid is not None else {}
+    for k in keys:
+        if tbp.get(k) is not None:
+            out[k] = tbp[k]
+    return {k: v for k, v in out.items() if isinstance(v, str)}
+
+
+def nq_period_of(field, meta):
+    if not isinstance(field, str):
+        return None
+    m = as_dict(meta.get(field))
+    p = m.get("period") or m.get("year")
+    if p:
+        return str(p)
+    mm = re.match(r"^(?:rev|exp|val|noi|net)\.([^.]+)\.", field)
+    return mm.group(1) if mm else None
+
+
+def nq_slots(spec: dict, period: dict, ctx):
+    """{slot: (raw, resolved)} for the value-carrying slots of the metric kind."""
+    kind = spec.get("kind")
+    names = {"ratio": ("num", "den"), "diff": ("a", "b"), "growth": ("prev", "curr"), "sum": ("field",),
+             "concentration": ("field",), "coverage": ("fields",), "count": ()}.get(
+        kind, ("field", "num", "den", "a", "b", "prev", "curr"))
+    out = OrderedDict()
+    for s in names:
+        if s == "fields":
+            for i, f in enumerate(as_list(spec.get("fields"))):
+                if isinstance(f, str):
+                    out[f"fields[{i}]"] = (f, _resolve_ph(f, period, ctx.config))
+            continue
+        raw = spec.get(s)
+        if raw is None and kind == "growth":
+            raw = "{REV_PREV}" if s == "prev" else "{REV}"
+        if isinstance(raw, str):
+            out[s] = (raw, _resolve_ph(raw, period, ctx.config))
+    return out
+
+
+def _nq_is_net_name(name) -> bool:
+    return isinstance(name, str) and bool(re.match(r"^(noi|net)[._]", name))
+
+
+def nq_net_backed(spec: dict, period: dict, ctx) -> bool:
+    """True when the metric's own inputs deduct expenses (diff − {EXP}/expense field, or a noi./net. field)."""
+    meta = ctx.field_meta
+    sl = nq_slots(spec, period, ctx)
+    kind = spec.get("kind")
+    if kind == "diff":
+        raw_b, res_b = sl.get("b", (None, None))
+        raw_a, res_a = sl.get("a", (None, None))
+        return raw_b == "{EXP}" or field_group(res_b, meta) == "expense" or _nq_is_net_name(res_a) or _nq_is_net_name(raw_a)
+    if kind == "ratio":
+        raw, res = sl.get("num", (None, None))
+        return _nq_is_net_name(res) or _nq_is_net_name(raw)
+    return any(_nq_is_net_name(r) or _nq_is_net_name(x) for x, r in sl.values())
+
+
+def nq_uses_revenue(spec: dict, period: dict, ctx) -> bool:
+    meta = ctx.field_meta
+    return any(raw in ("{REV}", "{REV_PREV}") or field_group(res, meta) == "revenue"
+               for raw, res in nq_slots(spec, period, ctx).values())
+
+
+def _nq_norm_texts(texts: dict, keys) -> str:
+    return " | ".join(normalize_arabic(texts.get(k, "")) for k in keys if texts.get(k))
+
+
+def nq_facts(ctx) -> dict:
+    if not hasattr(ctx, "_nq_facts"):
+        try:
+            ctx._nq_facts = dict(_nq_facts_mod.compute_facts(ctx.run_dir)) if _nq_facts_mod else {}
+        except Exception:
+            ctx._nq_facts = {}
+    return ctx._nq_facts
+
+
+def nq_text_items(ctx, skip=NQ_SKIP_TEXT_KEYS):
+    """(where, text) for every narrative string (09_message.md is handled separately: it has no tokens)."""
+    return [(f"06_narrative.json:{p}", s) for p, s in walk_strings(ctx.narrative, skip_keys=skip)]
+
+
+def nq_message_text(ctx):
+    p = os.path.join(ctx.run_dir, "09_message.md")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _nq_linked_token(norm: str, start: int, end: int, toks):
+    """The metric token a term refers to, within its clause: the first one after it, else the last one before it.
+    Returns (metric_id, path) or None (then the term is judged as a token-less claim)."""
+    cs, ce = nq_bounds(norm, start, end, NQ_CLAUSE_SPLIT_RE)
+    for m in NQ_PH_RE.finditer(norm, end, ce):
+        k, mid, path = toks[int(m.group(1))]
+        if k == "m":
+            return mid, path
+    last = None
+    for m in NQ_PH_RE.finditer(norm, cs, start):
+        k, mid, path = toks[int(m.group(1))]
+        if k == "m":
+            last = (mid, path)
+    return last
+
+
+def _nq_value_links(ctx, sentence: str):
+    """09_message.md has typed numbers, not tokens: link a percentage in the sentence to ratio metrics whose
+    value it matches (display rounding)."""
+    out = []
+    t = sentence.translate(_AR_INDIC)
+    for m in re.finditer(r"(\d+(?:[.٫]\d+)?)\s*[%٪]", t):
+        x, dec = _parse_num(m.group(1))
+        if x is None:
+            continue
+        for mid, res in ctx.metrics.items():
+            res = as_dict(res)
+            if res.get("unit") == "%" and is_num(res.get("value")) and abs(res["value"] - x) <= 0.5 * 10 ** -dec + 1e-9:
+                out.append((m.start(), m.end(), mid))
+    return out
+
+
+# ---- B18: rendered length of the executive summary ----------------------------
+def nq_token_words(ctx, kind: str, mid: str, path: str) -> int:
+    """Words a token occupies once rendered (mirrors build_dashboard.TokenRenderer)."""
+    if kind == "f":
+        f = nq_facts(ctx).get(mid)
+        if f is None:
+            return 2  # «غير متاح»
+        return 2 if f.get("unit") == "SAR" else 1
+    res = ctx.metrics.get(mid)
+    if not isinstance(res, dict):
+        return 2
+    unit = res.get("unit")
+    if not path or path == "value":
+        v = res.get("value")
+        if v is None:
+            if res.get("revenue_start") and res.get("status") != "not_comparable":
+                return 2  # «بدء إيراد»
+            return 3  # «غير قابل للاحتساب» / «غير قابل للمقارنة»
+        return 2 if unit == "SAR" and is_num(v) else 1
+    ok, v = resolve_path(res, path.split("."))
+    last = path.split(".")[-1]
+    if not ok:
+        return 2
+    if v is None:
+        return 3
+    if isinstance(v, bool):
+        return 1
+    if isinstance(v, str):
+        return max(1, word_count_ar(v))
+    if isinstance(v, list):
+        if last == "excluded":
+            return 1
+        if last == "per_field":
+            return max(1, len(v))
+        if not v:
+            return 2  # «لا يوجد»
+        recs = ctx.rec_by_id
+        names = [as_dict(recs.get(x if isinstance(x, str) else as_dict(x).get("id"))).get("name") or str(x) for x in v]
+        return sum(max(1, word_count_ar(str(n))) for n in names)
+    if isinstance(v, dict):
+        return max(1, word_count_ar(str(v.get("reason") or v.get("status") or "غير متاح")))
+    if last in NQ_MONEY_FIELDS and unit in ("SAR", "%", None):
+        return 2
+    return 1
+
+
+def nq_rendered_word_count(ctx, text: str) -> int:
+    t, toks = nq_tokens(text)
+    base = word_count_ar(NQ_PH_RE.sub(" ", t))
+    if "metrics" not in ctx.data:
+        return base + len(toks)
+    return base + sum(nq_token_words(ctx, k, mid, path) for k, mid, path in toks)
+
+
+# ---- B1: growth comparability recomputed from field_meta -------------------------
+def nq_comparability(prev_meta: dict, curr_meta: dict):
+    """Mirror of compute_metrics.comparability: (status, reasons). Known-and-different VAT basis (excl/none vs
+    incl), revenue basis (actual/recorded vs expected/contract) or any partial period ⇒ not_comparable; all of
+    VAT, basis and completeness known and equal ⇒ confirmed; otherwise unverified."""
+    pv, cv = prev_meta.get("vat") or "unknown", curr_meta.get("vat") or "unknown"
+    pb, cb = prev_meta.get("basis") or "unknown", curr_meta.get("basis") or "unknown"
+    pc, cc = prev_meta.get("completeness") or "unknown", curr_meta.get("completeness") or "unknown"
+    diffs = []
+    if "partial" in (pc, cc):
+        diffs.append(f"اكتمال الفترة: {NQ_COMPL_AR.get(pc, pc)} (السابقة) مقابل {NQ_COMPL_AR.get(cc, cc)} (الحالية)")
+    if pv in NQ_VAT_CLASS and cv in NQ_VAT_CLASS and NQ_VAT_CLASS[pv] != NQ_VAT_CLASS[cv]:
+        diffs.append(f"الضريبة: {NQ_VAT_AR.get(pv, pv)} (السابقة) مقابل {NQ_VAT_AR.get(cv, cv)} (الحالية)")
+    if pb in NQ_BASIS_CLASS and cb in NQ_BASIS_CLASS and NQ_BASIS_CLASS[pb] != NQ_BASIS_CLASS[cb]:
+        diffs.append(f"أساس الإيراد: {NQ_BASIS_AR.get(pb, pb)} (السابقة) مقابل {NQ_BASIS_AR.get(cb, cb)} (الحالية)")
+    if diffs:
+        return "not_comparable", diffs
+    same = pv == cv != "unknown" and pb == cb != "unknown" and pc == cc != "unknown"
+    if same:
+        return "confirmed", []
+    unk = [lab for lab, a, b in (("الضريبة", pv, cv), ("أساس الإيراد", pb, cb), ("اكتمال الفترة", pc, cc))
+           if a != b or a == "unknown"]
+    return "unverified", [f"{u} غير متطابق أو غير موضح" for u in unk]
+
+
+def c_nq_period_fields(ctx: Ctx):
+    """B1: every period's fields belong to that period (a newer file for the same year is not growth)."""
+    ctx.need("config", "records")
+    meta = ctx.field_meta
+    out = []
+    ids = [as_dict(p).get("id") for p in as_list(ctx.config.get("periods"))]
+    for p in [p for p in as_list(ctx.config.get("periods")) if isinstance(p, dict)]:
+        pid, where = p.get("id"), f"04_metrics_config.json:periods[{p.get('id')}]"
+        for key, want in (("rev_field", pid), ("exp_field", pid), ("prev_rev_field", p.get("prev_id"))):
+            f = p.get(key)
+            if not isinstance(f, str) or want is None:
+                continue
+            got = nq_period_of(f, meta)
+            if got is not None and str(got) != str(want):
+                out.append((f"{key} = {f} يخص الفترة {got} لا الفترة {want}؛ لا يُسمّى إيراد فترة بغير فترته", where))
+        rf, pf = p.get("rev_field"), p.get("prev_rev_field")
+        if isinstance(rf, str) and isinstance(pf, str):
+            a, b = nq_period_of(rf, meta), nq_period_of(pf, meta)
+            if rf == pf or (a is not None and a == b):
+                out.append((f"حقلا الفترتين ({pf} ← {rf}) من الفترة نفسها؛ رفع نسخة أحدث من بيانات السنة نفسها ليس نموًا زمنيًا",
+                            where))
+            if p.get("prev_id") is not None and p.get("prev_id") not in ids:
+                out.append((f"prev_id = {p.get('prev_id')} غير معرّف ضمن periods[]", where))
+    return out
+
+
+def c_nq_growth_comparability_basis(ctx: Ctx):
+    """B1: comparable_with_prev (and trend.comparable) must agree with the fields' own VAT/basis/completeness."""
+    ctx.need("config", "records")
+    meta = ctx.field_meta
+    has_growth = any(s.get("kind") == "growth" for s in nq_specs(ctx))
+    out = []
+    if has_growth:
+        for p in [p for p in as_list(ctx.config.get("periods")) if isinstance(p, dict)]:
+            rf, pf = p.get("rev_field"), p.get("prev_rev_field")
+            if not (isinstance(rf, str) and isinstance(pf, str)):
+                continue
+            where = f"04_metrics_config.json:periods[{p.get('id')}].comparable_with_prev"
+            cfg = as_dict(p.get("comparable_with_prev")).get("status")
+            status, reasons = nq_comparability(as_dict(meta.get(pf)), as_dict(meta.get(rf)))
+            periods_known = nq_period_of(rf, meta) is not None and nq_period_of(pf, meta) is not None
+            if status == "not_comparable" and cfg != "not_comparable":
+                out.append((f"الفترتان {p.get('prev_id')} ← {p.get('id')} غير قابلتين للمقارنة وفق وصف الحقلين ({pf} ← {rf}): "
+                            f"{'؛ '.join(reasons)}؛ لكن الحالة «{cfg or 'غير محددة'}» فيُحسب نمو مضلل. اجعلها not_comparable "
+                            "مع السبب", where))
+            elif cfg == "confirmed" and (status != "confirmed" or not periods_known):
+                why = "؛ ".join(reasons) if reasons else "فترة أحد الحقلين غير معروفة"
+                out.append((f"الحالة «confirmed» دون أن يثبت وصف الحقلين ({pf} ← {rf}) تماثل الضريبة والأساس والاكتمال: {why}؛ "
+                            "حدّث field_meta بالدليل أو اجعل الحالة unverified", where))
+    tr = as_dict(ctx.config.get("trend"))
+    fields = [as_dict(x) for x in as_list(tr.get("fields")) if isinstance(as_dict(x).get("field"), str)]
+    if tr.get("enabled", True) and len(fields) >= 2:
+        cfg = as_dict(tr.get("comparable")).get("status")
+        worst, notes = "confirmed", []
+        for a, b in zip(fields, fields[1:]):
+            st, rs = nq_comparability(as_dict(meta.get(a["field"])), as_dict(meta.get(b["field"])))
+            if st == "not_comparable":
+                worst = "not_comparable"
+                notes.append(f"{a.get('period')} ← {b.get('period')}: {'؛ '.join(rs)}")
+            elif st == "unverified" and worst == "confirmed":
+                worst = "unverified"
+        if worst == "not_comparable" and cfg != "not_comparable":
+            out.append((f"التطور الزمني يضم فترات غير قابلة للمقارنة ({' | '.join(notes)}) والحالة «{cfg or 'غير محددة'}»؛ "
+                        "اجعل trend.comparable = not_comparable", "04_metrics_config.json:trend.comparable"))
+        elif cfg == "confirmed" and worst != "confirmed":
+            out.append(("trend.comparable = «confirmed» دون أن يثبت وصف الحقول تماثل الفترات؛ اجعلها unverified أو وثّق "
+                        "التماثل في field_meta", "04_metrics_config.json:trend.comparable"))
+    return out
+
+
+# ---- B2: zero-revenue investment assets stay in investment yields ---------------
+def _nq_strip_where(w, num_names):
+    """Drop predicates that can remove zero-revenue records: gt/status/known on the numerator, any id test."""
+    if not isinstance(w, dict):
+        return w
+    if "all" in w or "any" in w:
+        op = "all" if "all" in w else "any"
+        parts = [x for x in (_nq_strip_where(x, num_names) for x in as_list(w[op])) if x is not None]
+        return {op: parts} if parts else None
+    if "not" in w:
+        inner = _nq_strip_where(w["not"], num_names)
+        return {"not": inner} if inner is not None else None
+    for op in ("gt", "status", "known"):
+        if op in w:
+            arg = w[op]
+            f = arg[0] if isinstance(arg, list) and arg else arg
+            return None if f in num_names else w
+    for op in ("eq", "in", "has"):
+        if op in w and isinstance(w[op], list) and w[op] and w[op][0] == "id":
+            return None
+    return w
+
+
+def c_nq_yield_zero_revenue(ctx: Ctx):
+    ctx.need("config", "records")
+    try:
+        import metric_engine as me
+        eng = me.Engine(ctx.config, ctx.records)
+    except Exception as exc:
+        raise Skip(f"تعذر تحميل محرك المؤشرات: {exc}")
+    recs = ctx.rec_by_id
+    zero = {"zero_recorded", "zero_confirmed"}
+    out = []
+    for spec in nq_specs(ctx):
+        if spec.get("kind") != "ratio":
+            continue
+        for period in _periods(ctx):
+            pid = period.get("id")
+            if not _ratio_profile(spec, period, ctx)[0]:
+                continue
+            texts = nq_texts(spec, pid)
+            if NQ_INCOME_PRODUCING_RE.search(_nq_norm_texts(texts, ("label", "short_label"))):
+                continue  # the «المدرة» scope may drop zero revenue by definition
+            num = _resolve_ph(spec.get("num"), period, ctx.config)
+            den = _resolve_ph(spec.get("den"), period, ctx.config)
+            if not (num and den):
+                continue
+            filters = {"period": pid} if pid is not None else None
+            try:
+                orig = eng.compute(spec, filters)
+                san = eng.compute(dict(spec, where=_nq_strip_where(spec.get("where"), {spec.get("num"), num})), filters)
+            except Exception:
+                continue
+            inc = set(as_list(orig.get("included_ids")))
+            dropped = [rid for rid in as_list(san.get("included_ids")) if rid not in inc
+                       and _fv(recs.get(rid) or {}, num)[0] in zero]
+            if dropped:
+                out.append((f"نسبة الإيراد إلى التقييم «{texts.get('label') or spec['id']}» (الفترة {pid}) تستبعد بشرط على "
+                            f"الإيراد أو بالمعرّف أصولًا إيرادها صفر مدوّن ولها تقييم: {short_list(sorted(dropped))}؛ لا يُستبعد أصل "
+                            "استثماري ذو إيراد صفري لتحسين العائد (إن كان المقصود نطاق «المدرة» فسمِّه بذلك)",
+                            f"04_metrics_config.json:{spec['id']}.where"))
+    zr, gy = as_dict(ctx.metrics.get("zero_rev_investment_value")), as_dict(ctx.metrics.get("gross_yield_investment"))
+    gspec = nq_spec_by_id(ctx).get("gross_yield_investment") if "config" in ctx.data else None
+    if zr and gy and gspec and not NQ_INCOME_PRODUCING_RE.search(
+            _nq_norm_texts(nq_texts(gspec, nq_default_period(ctx).get("id")), ("label", "short_label"))):
+        den = as_dict(gy.get("resolved_fields")).get("den")
+        inc = set(as_list(gy.get("included_ids")))
+        missing = [rid for rid in as_list(zr.get("included_ids")) if rid not in inc and den
+                   and _known(recs.get(rid) or {}, den) and _fv(recs.get(rid) or {}, den)[1] > 0]
+        if missing:
+            out.append((f"أصول استثمارية بإيراد صفري ولها تقييم ({short_list(sorted(missing))}) داخلة في "
+                        "zero_rev_investment_value وغائبة عن gross_yield_investment؛ نطاق العائد الاستثماري يجب أن يشمل "
+                        "غير المدرة", "05_metrics.json:gross_yield_investment"))
+    return out
+
+
+# ---- B3/B4: metric labels vs the fields they use --------------------------------
+def _nq_label_loop(ctx):
+    for spec in nq_specs(ctx):
+        for period in _periods(ctx):
+            yield spec, period, nq_texts(spec, period.get("id"))
+
+
+def _nq_collect(found):
+    """found: {(spec_id, msg): [period ids]} -> findings."""
+    return [(f"{msg} (الفترات: {short_list(pids)})", f"04_metrics_config.json:{sid}") for (sid, msg), pids in found.items()]
+
+
+def c_nq_label_vat_basis(ctx: Ctx):
+    """B3: the VAT wording of a metric matches field_meta.vat of the revenue field it uses."""
+    ctx.need("config", "records")
+    meta = ctx.field_meta
+    found = defaultdict(list)
+    for spec, period, texts in _nq_label_loop(ctx):
+        slot = {"ratio": "num", "diff": "a", "sum": "field", "concentration": "field"}.get(spec.get("kind"))
+        if not slot:
+            continue
+        raw, res = nq_slots(spec, period, ctx).get(slot, (None, None))
+        if not isinstance(res, str) or not (raw in ("{REV}", "{REV_PREV}") or field_group(res, meta) == "revenue"):
+            continue
+        vat = as_dict(meta.get(res)).get("vat") or "unknown"
+        vis = _nq_norm_texts(texts, ("label", "short_label", "basis", "period_text"))
+        allt = _nq_norm_texts(texts, ("label", "short_label", "basis", "period_text", "definition"))
+        excl, incl = bool(NQ_EXCL_CLAIM_RE.search(allt)), bool(NQ_INCL_CLAIM_RE.search(allt))
+        msg = None
+        if vat == "incl":
+            if excl:
+                msg = f"الوصف يذكر الإيراد «بدون ضريبة» بينما الحقل {res} شامل الضريبة"
+            elif not NQ_INCL_CLAIM_RE.search(vis):
+                msg = f"حقل الإيراد {res} شامل الضريبة ولا تذكر التسمية أو الأساس ذلك (اكتب «شامل الضريبة»)"
+        elif vat in ("excl", "none_evidenced"):
+            if incl:
+                msg = f"الوصف يذكر «شامل الضريبة» بينما الحقل {res} {NQ_VAT_AR[vat]}"
+        elif NQ_EXCL_CLAIM_RE.search(vis) or NQ_INCL_CLAIM_RE.search(vis):
+            msg = (f"التسمية أو الأساس يصف ضريبة الإيراد بينما أساس الضريبة في الحقل {res} غير موضح؛ لا تنسب وصفًا لم "
+                   "يثبته المصدر (أو وثّق field_meta.vat)")
+        if msg:
+            found[(spec["id"], msg)].append(period.get("id") or "-")
+    return _nq_collect(found)
+
+
+def _nq_where_fields(w) -> list:
+    """Field names a where-clause tests (known / status / gt), e.g. the {REV} status of zero_rev_investment_value."""
+    out = []
+    if isinstance(w, dict):
+        for op, arg in w.items():
+            if op in ("all", "any"):
+                for x in as_list(arg):
+                    out += _nq_where_fields(x)
+            elif op == "not":
+                out += _nq_where_fields(arg)
+            elif op in ("known", "status", "gt"):
+                f = arg[0] if isinstance(arg, list) and arg else arg
+                if isinstance(f, str):
+                    out.append(f)
+    return out
+
+
+def c_nq_label_years(ctx: Ctx):
+    """B3: years named in the label/period text are the revenue period and the valuation year actually used."""
+    ctx.need("config", "records")
+    meta = ctx.field_meta
+    found = defaultdict(list)
+    for spec, period, texts in _nq_label_loop(ctx):
+        expected, unknown = set(), False
+        used = list(nq_slots(spec, period, ctx).values())
+        used += [(f, _resolve_ph(f, period, ctx.config)) for f in _nq_where_fields(spec.get("where"))]
+        for raw, res in used:
+            if not res:
+                continue  # unresolved placeholder: the metric is not computable in this period
+            y = year_of_field(res, meta) if field_group(res, meta) == "valuation" else nq_period_of(res, meta)
+            ys = set(NQ_YEAR_RE.findall(str(y))) if y else set()
+            if not ys:
+                unknown = True
+            expected |= ys
+        if unknown or not expected:
+            continue
+        named = set()
+        for k in ("label", "short_label", "period_text"):
+            named |= set(NQ_YEAR_RE.findall(texts.get(k, "").translate(_AR_INDIC)))
+        extra = sorted(named - expected)
+        if extra:
+            found[(spec["id"], f"التسمية تذكر {', '.join(extra)} بينما الحقول المستخدمة تخص {', '.join(sorted(expected))}؛ "
+                               "التسمية يجب أن تطابق فترة الإيراد وسنة التقييم الفعليتين")].append(period.get("id") or "-")
+    return _nq_collect(found)
+
+
+def c_nq_yield_vat_inclusive(ctx: Ctx):
+    """B3 (warning): a revenue-to-valuation yield on a VAT-inclusive revenue field."""
+    ctx.need("config", "records")
+    meta = ctx.field_meta
+    found = defaultdict(list)
+    for spec, period, texts in _nq_label_loop(ctx):
+        if spec.get("kind") != "ratio" or not _ratio_profile(spec, period, ctx)[0]:
+            continue
+        num = _resolve_ph(spec.get("num"), period, ctx.config)
+        if num and as_dict(meta.get(num)).get("vat") == "incl":
+            found[(spec["id"], f"العائد محسوب على إيراد شامل الضريبة ({num})؛ عائد الدخل الإجمالي يُحسب دون الضرائب المحصلة للغير، "
+                               "فاختر حقلًا بدون ضريبة إن وُجد أو اذكر القيد")].append(period.get("id") or "-")
+    return _nq_collect(found)
+
+
+def nq_label_net(ctx: Ctx):
+    """B4(c,d): «صافي» on any revenue-based metric (any kind; label, short label, definition or basis) whose own
+    inputs deduct no expenses. A decorative `fields` list on a ratio does not count."""
+    ctx.need("config")
+    found = defaultdict(list)
+    for spec, period, texts in _nq_label_loop(ctx):
+        if not nq_uses_revenue(spec, period, ctx) or nq_net_backed(spec, period, ctx):
+            continue
+        hits = [k for k in ("label", "short_label", "definition", "basis") if affirmative_hits(NET_RE, texts.get(k, ""))]
+        if hits:
+            is_rv = _ratio_profile(spec, period, ctx)[0]
+            tail = ("سمّها «الإيراد المسجل … إلى تقييم … للأصول نفسها، قبل المصروفات»" if is_rv
+                    else "سمّه إيرادًا لا صافيًا (صافي الدخل التشغيلي = الإيراد ناقص مصروفات التشغيل)")
+            found[(spec["id"], f"وصف «صافي» في {', '.join(hits)} لمؤشر لا تتضمن مدخلاته مصروفات؛ {tail}")].append(
+                period.get("id") or "-")
+    return _nq_collect(found)
+
+
+def c_nq_label_roi(ctx: Ctx):
+    """B4(e): «العائد على الاستثمار» / «ROI» / «العائد الاستثماري» on a revenue metric without expenses."""
+    ctx.need("config")
+    found = defaultdict(list)
+    for spec, period, texts in _nq_label_loop(ctx):
+        if not nq_uses_revenue(spec, period, ctx) or nq_net_backed(spec, period, ctx):
+            continue
+        hits = [k for k in ("label", "short_label", "definition", "basis") if affirmative_hits(NQ_ROI_RE, texts.get(k, ""))]
+        if hits:
+            found[(spec["id"], f"تسمية «العائد على الاستثمار/العائد الاستثماري» في {', '.join(hits)} لمؤشر إيراد لا يخصم "
+                               "مصروفات ولا تكلفة استثمار؛ المسموح «الإيراد المسجل … إلى تقييم … قبل المصروفات»")].append(
+                period.get("id") or "-")
+    return _nq_collect(found)
+
+
+# ---- B4(a): naming claims in the narrative, decided per referenced metric ---------
+def nq_naming_findings(ctx: Ctx):
+    """Return (blocking, warnings). A term near a metric token is judged by that metric's own inputs;
+    a term with no token falls back to whether the run has any metric that supports it."""
+    ctx.need("narrative")
+    specs = nq_spec_by_id(ctx) if "config" in ctx.data else {}
+    period = nq_default_period(ctx) if "config" in ctx.data else {}
+    any_net = any(nq_net_backed(s, period, ctx) for s in specs.values())
+    any_net_ratio = any(s.get("kind") == "ratio" and nq_net_backed(s, period, ctx) for s in specs.values())
+
+    def ok_for(kind, spec):
+        if spec is None:
+            return True  # unknown metric: reported by metric_tokens
+        if kind in ("net_yield", "net_income", "roi"):
+            return nq_net_backed(spec, period, ctx)
+        prof = _ratio_profile(spec, period, ctx)
+        return nq_net_backed(spec, period, ctx) and prof[2] >= 2
+
+    blocking, warns = [], []
+    items = nq_text_items(ctx)
+    msg_text = nq_message_text(ctx)
+    for where, s in items:
+        t, toks = nq_tokens(s)
+        n = normalize_arabic(t)
+        for kind, term, rx in NQ_NAMING_PATTERNS:
+            for m in rx.finditer(n):
+                if clause_negated(n, m.start(), m.end()):
+                    continue
+                link = _nq_linked_token(n, m.start(), m.end(), toks)
+                if link is not None:
+                    mid = link[0]
+                    if not ok_for(kind, specs.get(mid)):
+                        blocking.append((f"السرد يصف {{{{m:{mid}{'.' + link[1] if link[1] else ''}}}}} بـ«{term}» بينما المؤشر "
+                                         "لا تتضمن مدخلاته مصروفات (أو قيمتي بداية ونهاية للعائد الكلي)؛ استخدم تسميته الدقيقة "
+                                         "مثل «الإيراد المسجل … إلى تقييم … قبل المصروفات»", where))
+                    continue
+                if kind == "total" or kind == "roi" or (kind == "net_yield" and not any_net_ratio) or \
+                        (kind == "net_income" and not any_net):
+                    warns.append((f"السرد يذكر «{term}» إثباتًا ولا يوجد مؤشر محسوب يدعمه في 04؛ لا يُسمّى الإيراد صافيًا ولا "
+                                  "عائدًا كليًا أو عائدًا على الاستثمار دون مدخلاته", where))
+    if msg_text and "metrics" in ctx.data:
+        for sent in NQ_SENT_SPLIT_RE.split(msg_text):
+            n = normalize_arabic(sent)
+            links = _nq_value_links(ctx, sent)
+            for kind, term, rx in NQ_NAMING_PATTERNS:
+                for m in rx.finditer(n):
+                    if clause_negated(n, m.start(), m.end()):
+                        continue
+                    bad = [mid for _, _, mid in links if not ok_for(kind, specs.get(mid))]
+                    if bad:
+                        warns.append((f"رسالة التسليم تصف رقم {bad[0]} بـ«{term}» والمؤشر لا يتضمن مدخلات ذلك", "09_message.md"))
+    return blocking, warns
+
+
+# ---- B5: hand-typed numbers --------------------------------------------------------
+def nq_number_pool(ctx):
+    """{'pct'|'money'|'count'|'any': {value: set(labels)}} from 05 results, plus facts."""
+    pools = {k: defaultdict(set) for k in ("pct", "money", "count", "any")}
+
+    def add(kind, v, label):
+        if is_num(v) and math.isfinite(v):
+            pools[kind][float(v)].add(label)
+            if kind != "any":
+                pools["any"][float(v)].add(label)
+    for mid, res in ctx.metrics.items():
+        res = as_dict(res)
+        unit = res.get("unit")
+        k = "pct" if unit == "%" else "count" if unit in ("count", "asset") else "money" if unit == "SAR" else "any"
+        add(k, res.get("value"), mid)
+        for key in NUM_KEYS_IN_RESULT[1:]:
+            add("money" if key in NQ_MONEY_FIELDS else "any", res.get(key), f"{mid}.{key}")
+        for key, val in res.items():
+            if key.startswith("n_") or key == "top":
+                add("count", val, f"{mid}.{key}")
+            elif isinstance(val, list) and key in ("included_ids", "excluded", "top_ids", "only_curr", "only_prev",
+                                                   "revenue_start_ids"):
+                add("count", len(val), f"{mid}.{key}")
+        if is_num(res.get("coverage_num_share")):
+            add("pct", res["coverage_num_share"] * 100, f"{mid}.coverage_num_share")
+        add("pct", res.get("pct"), f"{mid}.pct")
+        add("any", res.get("hhi"), f"{mid}.hhi")
+        for tsh in as_list(res.get("top_shares")):
+            tsh = as_dict(tsh)
+            add("money", tsh.get("value"), f"{mid}.top_shares")
+            if is_num(tsh.get("share")):
+                add("pct", tsh["share"] * 100, f"{mid}.top_shares")
+        for pf in as_list(res.get("per_field")):
+            pf = as_dict(pf)
+            add("count", pf.get("n_known"), f"{mid}.per_field")
+            add("count", pf.get("n"), f"{mid}.per_field")
+            if is_num(pf.get("n_known")) and is_num(pf.get("n")) and pf["n"]:
+                add("pct", pf["n_known"] / pf["n"] * 100, f"{mid}.per_field")
+    for bid, b in as_dict(ctx.met_doc.get("breakdowns")).items():
+        b = as_dict(b)
+        add("money", b.get("total"), f"breakdown:{bid}.total")
+        for row in as_list(b.get("rows")):
+            row = as_dict(row)
+            add("money", row.get("value"), f"breakdown:{bid}")
+            add("count", row.get("n_known"), f"breakdown:{bid}")
+            if is_num(row.get("share")):
+                add("pct", row["share"] * 100, f"breakdown:{bid}")
+    for p in as_list(as_dict(ctx.met_doc.get("trend")).get("points")):
+        add("money", as_dict(p).get("value"), "trend")
+        add("count", as_dict(p).get("n_known"), "trend")
+    for key, f in nq_facts(ctx).items():
+        u = as_dict(f).get("unit")
+        add("count" if u == "count" else "money" if u in ("SAR", "number") else "any", as_dict(f).get("value"), f"f:{key}")
+    return pools
+
+
+def nq_hand_numbers(ctx, items, pools=None, file_nums=None):
+    """Scan (where, text) items for numbers typed by hand. Returns (warnings, infos). Reusable for 09_message.md."""
+    pools = pools if pools is not None else (nq_number_pool(ctx) if "metrics" in ctx.data else
+                                             {k: {} for k in ("pct", "money", "count", "any")})
+    file_nums = file_nums if file_nums is not None else _file_numbers(ctx)
+    file_pct = {v * 100 for v in file_nums}
+    warns, infos = [], []
+    for where, s in items:
+        t = DATE_RE.sub(" ", NQ_FACT_RE.sub(" ", TOKEN_RE.sub(" ", s)).translate(_AR_INDIC))
+        for m in NQ_NUM_RE.finditer(t):
+            raw = m.group(1)
+            x, dec = _parse_num(raw)
+            if x is None:
+                continue
+            pct, scale = m.group(2), normalize_arabic(m.group(3) or "")
+            after, before = normalize_arabic(t[m.end():m.end() + 60]), t[max(0, m.start() - 40):m.start()]
+            before_n = normalize_arabic(before)
+            if not pct and not scale:
+                if re.fullmatch(r"\d{4}", raw) and (1300 <= x <= 1500 or 1900 <= x <= 2100):
+                    continue  # a year
+                if x in (30, 60, 90) or NQ_TIME_UNIT_RE.match(after):
+                    continue  # plan horizon or a duration
+                if re.search(r"(?:^|[\n(:\-–•*])\s*$", before) and re.match(r"\s*[).\-–]", after) and x <= 50:
+                    continue  # ordinal list marker
+                if NQ_ORDINAL_BEFORE_RE.search(before_n):
+                    continue
+            if scale:
+                x, dec_tol = x * NQ_SCALE.get(scale, 1), 0.5 * 10 ** -dec * NQ_SCALE.get(scale, 1)
+            else:
+                dec_tol = 0.5 * 10 ** -dec
+            shown = (raw + ("%" if pct else "") + (" " + scale if scale else "")).strip()
+
+            def match(cands):
+                for c in cands:
+                    if abs(x - c) <= dec_tol + 1e-9 or abs(x - c) <= 1e-9 * max(abs(c), 1):
+                        return c
+                return None
+            if pct:
+                pool, extra = pools["pct"], file_nums | file_pct
+            elif scale:
+                pool, extra = pools["any"], file_nums
+            elif NQ_COUNT_NOUN_RE.match(after):
+                pool, extra = pools["count"], set()
+            else:
+                pool, extra = pools["any"], file_nums
+            c = match(pool.keys())
+            if c is not None:
+                labels = sorted(pool[c], key=lambda z: (z.startswith(("breakdown:", "trend")), z.startswith("f:"), "." in z, z))
+                tok = [z for z in labels if not z.startswith(("breakdown:", "trend"))]
+                hint = ((f"استخدم الرمز {{{{f:{tok[0][2:]}}}}}" if tok[0].startswith("f:") else f"استخدم الرمز {{{{m:{tok[0]}}}}}")
+                        + " ليبقى متسقًا مع الحساب") if tok else "يطابق توزيعًا أو تطورًا زمنيًا؛ أحل إلى الرسم دون رقم يدوي"
+                infos.append((f"الرقم {shown} مكتوب يدويًا ويطابق {short_list(labels, 3)}؛ {hint}", where))
+            elif match(extra) is None:
+                kind = ("نسبة" if pct else "مبلغ" if scale else "عدد" if NQ_COUNT_NOUN_RE.match(after) else "رقم")
+                warns.append((f"{kind} مكتوب يدويًا «{shown}» لا يطابق أي مؤشر في 05 ولا حقيقة {{{{f:…}}}} ولا قيمة في الملف؛ "
+                              "استخدم رمزًا أو صحّحه أو اذكر مصدره (لا تختلق أرقامًا أو نسب تحسن)", where))
+    return warns, infos
+
+
+def nq_number_findings(ctx: Ctx):
+    ctx.need("narrative")
+    skip = frozenset(NUMBER_SKIP_KEYS | {"x_", "duration", "priority", "acknowledged_warnings", "status"})
+    items = [(f"06_narrative.json:{p}", s) for p, s in walk_strings(ctx.narrative, skip_keys=skip)]
+    return nq_hand_numbers(ctx, items)
+
+
+# ---- B6: scores -------------------------------------------------------------------------
+def nq_criterion_ok(ctx, criterion) -> bool:
+    """A criterion counts only when it cites a sources[] entry or a resolvable evidence ref (m:, DQ-, WB-, cell)."""
+    if not isinstance(criterion, str) or not nonempty(criterion):
+        return False
+    c = normalize_arabic(criterion)
+    if NQ_PLACEHOLDER_SRC_RE.match(c):
+        return False
+    for src in as_list(ctx.narrative.get("sources")):
+        r = normalize_arabic(as_dict(src).get("ref") or "")
+        if len(r) >= 4 and r in c:
+            return True
+    if all(k in ctx.data for k in ("records", "metrics", "wb")):
+        res = ctx.resolver()
+        for piece in re.split(r"[\s«»()،,؛;]+", criterion):
+            if piece and (piece.startswith(("m:", "DQ-", "WB-")) or "!" in piece) and res.resolve(piece.strip(".:"))[0]:
+                return True
+    return False
+
+
+def nq_score_hits(text: str) -> list:
+    t, _ = nq_tokens(text)
+    n = normalize_arabic(NQ_PH_RE.sub(" ", t))
+    out = []
+    for sent in NQ_SENT_SPLIT_RE.split(n):
+        for m in NQ_SCORE_EXPLICIT_RE.finditer(sent):
+            out.append(m.group(0))
+        if NQ_SCORE_CTX_RE.search(sent):
+            out += [m.group(0) for m in NQ_SCORE_NUM_RE.finditer(sent)]
+    return out
+
+
+def c_nq_narrative_scores(ctx: Ctx):
+    """B6: numeric scores (82 من 100، 8/10، درجة 4) anywhere in the narrative need an explained criterion."""
+    ctx.need("narrative")
+    ok_items = {i for i, a in enumerate(as_list(ctx.narrative.get("assessment")))
+                if isinstance(a, dict) and nq_criterion_ok(ctx, a.get("criterion"))}
+    out = []
+    for path, s in walk_strings(ctx.narrative, skip_keys=NQ_SKIP_TEXT_KEYS | {"criterion"}):
+        m = re.match(r"assessment\[(\d+)\]", path)
+        if m and int(m.group(1)) in ok_items:
+            continue
+        hits = nq_score_hits(s)
+        if hits:
+            out.append((f"درجة رقمية «{hits[0]}» دون معيار معتمد مفسّر يُحال إلى مصدر في sources[] أو دليل؛ اكتفِ بحكم وصفي "
+                        "تدعمه الأرقام", f"06_narrative.json:{path}"))
+    return out
+
+
+def nq_assessment_judgments(ctx: Ctx):
+    """Warnings: superlatives / percentages paired with a verdict in assessment judgments without a valid criterion."""
+    ctx.need("narrative")
+    out = []
+    for i, a in enumerate(as_list(ctx.narrative.get("assessment"))):
+        if not isinstance(a, dict) or nq_criterion_ok(ctx, a.get("criterion")):
+            continue
+        txt = a.get("judgment") if isinstance(a.get("judgment"), str) else ""
+        n = normalize_arabic(TOKEN_RE.sub(" ", txt)).translate(_AR_INDIC)
+        reasons = []
+        for m in PCT_RE.finditer(n):
+            if JUDGE_RE.search(n[max(0, m.start() - 40): m.end() + 40]):
+                reasons.append("نسبة مئوية مقرونة بحكم")
+                break
+        if SUPERLATIVE_RE.search(n):
+            reasons.append("حكم مطلق")
+        if reasons:
+            crit = "criterion = null" if not nonempty(a.get("criterion")) else "المعيار لا يُحال إلى مصدر أو دليل"
+            out.append((f"التقييم يستخدم {'، '.join(reasons)} دون معيار مفسّر ({crit})؛ اكتفِ بحكم وصفي تدعمه الأرقام أو "
+                        "اذكر الهدف المعتمد ومصدره", f"06_narrative.json:assessment[{gid(a, i, 'dimension')}].judgment"))
+    return out
+
+
+# ---- B7: sale / demolition / exit / change of use -----------------------------------
+def nq_drastic_findings(ctx: Ctx):
+    """Return (blocking, warnings) for recommendations of drastic actions."""
+    ctx.need("narrative")
+    recs = ctx.rec_by_id if "records" in ctx.data else {}
+    gaps = {g.get("id"): g for g in as_list(ctx.narrative.get("gaps")) if isinstance(g, dict)}
+    blocking, warns = [], []
+    for i, r in enumerate(as_list(ctx.narrative.get("recommendations"))):
+        if not isinstance(r, dict):
+            continue
+        where = f"06_narrative.json:recommendations[{gid(r, i)}]"
+
+        def hits(txt):
+            n = normalize_arabic(txt or "")
+            return n, [m for m in NQ_DRASTIC_RE.finditer(n) if not clause_negated(n, m.start(), m.end())]
+        fa_n, fa_hits = hits(r.get("first_action"))
+        ro_n, ro_hits = hits(r.get("recommended_option"))
+        alt_hits = [h for a in as_list(r.get("alternatives")) if isinstance(a, str) for h in hits(a)[1]]
+        all_txt = " ".join(s for _, s in walk_strings(r, skip_keys=frozenset({"id", "gap_ids", "evidence"})))
+        any_hit = bool(hits(all_txt)[1])
+        if not any_hit:
+            continue
+        reasons = []
+        if fa_hits or ro_hits:
+            for m in fa_hits:
+                if not STUDY_RE.search(fa_n[:m.start()]):
+                    reasons.append(f"الإجراء الأول نفسه «{m.group(0).strip()}» لا دراسة أو تحقق يسبقه")
+                    break
+            if not STUDY_RE.search(fa_n):
+                reasons.append("الإجراء الأول لا يتضمن دراسة أو تحققًا (جدوى، تقييم معتمد، قيود نظامية ووقفية)")
+            rn = normalize_arabic(r.get("rationale") or "")
+            if NQ_YIELD_REASON_RE.search(rn) and not NQ_OTHER_REASON_RE.search(rn):
+                reasons.append("المبرر انخفاض العائد أو الإيراد وحده")
+            if reasons:
+                blocking.append(("توصية ببيع أو هدم أو تخارج أو تغيير استخدام: " + "؛ ".join(dict.fromkeys(reasons)) +
+                                 "؛ بيّن الدراسة والمتطلبات والقيود اللازمة قبل المفاضلة", where))
+        notes = []
+        if r.get("approval_required") in (None, ""):
+            notes.append("لا يُذكر الاعتماد المطلوب (مجلس الإدارة/الجهات المختصة)")
+        if alt_hits and not (fa_hits or ro_hits) and not STUDY_RE.search(fa_n):
+            notes.append("البدائل تتضمن تصرفًا جذريًا والإجراء الأول لا يتضمن دراسة أو تحققًا")
+        targets = set(re.findall(r"[A-Za-z]+-\d+", " ".join([r.get("target") or ""] + [
+            as_dict(gaps.get(g)).get("scope") or "" for g in as_list(r.get("gap_ids"))])))
+        service = [t for t in targets if as_dict(as_dict(recs.get(t)).get("dims")).get("use") in ("service", "admin")]
+        if service and not NQ_CONTINUITY_RE.search(normalize_arabic(all_txt)):
+            notes.append(f"تمس أصلًا خدميًا أو إداريًا ({short_list(sorted(service))}) دون بيان استمرارية الخدمة للمستفيدين")
+        if notes:
+            warns.append(("توصية تذكر البيع أو الهدم أو التخارج أو تغيير الاستخدام: " + "؛ ".join(notes), where))
+    return blocking, warns
+
+
+# ---- B8: scenarios -----------------------------------------------------------------
+def _nq_source_cited(ctx, src_text: str) -> bool:
+    c = normalize_arabic(src_text)
+    for s in as_list(ctx.narrative.get("sources")):
+        r = normalize_arabic(as_dict(s).get("ref") or "")
+        if (len(r) >= 4 and r in c) or (len(c) >= 6 and c in r):
+            return True
+    if all(k in ctx.data for k in ("records", "metrics", "wb")):
+        res = ctx.resolver()
+        for piece in re.split(r"[\s«»()،,؛;]+", src_text):
+            if piece and (piece.startswith(("m:", "DQ-", "WB-")) or "!" in piece or piece in res.record_ids) \
+                    and res.resolve(piece.strip(".:"))[0]:
+                return True
+    return False
+
+
+def nq_scenario_findings(ctx: Ctx):
+    """Return (blocking, warnings) for prepared scenarios (brief §10)."""
+    sc = as_dict(ctx.narrative.get("scenarios"))
+    if sc.get("status") != "prepared":
+        return [], []
+    blocking, warns = [], []
+    items = [x for x in as_list(sc.get("items")) if isinstance(x, dict)]
+    if not items:
+        blocking.append(("السيناريوهات معلنة «prepared» دون بنود (items)", "06_narrative.json:scenarios"))
+    rec_ids = {r.get("id") for r in ctx.records} if "records" in ctx.data else None
+    for i, it in enumerate(items):
+        base = f"06_narrative.json:scenarios.items[{gid(it, i)}]"
+        if not as_list(it.get("assumptions")):
+            blocking.append(("بند سيناريو بلا افتراضات موثقة", base))
+        for j, a in enumerate(as_list(it.get("assumptions"))):
+            w = f"{base}.assumptions[{j}]"
+            if not isinstance(a, dict) or not nonempty(a.get("source")):
+                blocking.append(("افتراض بلا مصدر أو تفسير (source)؛ لا تُعد مبالغ أو نسب تحسن دون سند", w))
+                continue
+            src = a.get("source")
+            if NQ_PLACEHOLDER_SRC_RE.match(normalize_arabic(src)):
+                blocking.append((f"مصدر الافتراض «{src}» ليس مصدرًا ولا تفسيرًا؛ اربطه بمصدر في sources[] أو بمرجع من الملف، "
+                                 "أو احذف الرقم وحدد المعلومات المطلوبة لتقديره", w))
+            elif re.search(r"\d", (a.get("text") or "").translate(_AR_INDIC)) and not _nq_source_cited(ctx, src):
+                blocking.append(("افتراض رقمي (مبلغ أو نسبة) لا يُحال مصدره إلى عنصر في sources[] أو مرجع من الملف؛ لا تضع "
+                                 "مبالغ أو نسب تحسن اعتباطية", w))
+        if rec_ids is not None:
+            missing = [x for x in as_list(it.get("asset_ids")) if x not in rec_ids]
+            if missing:
+                blocking.append((f"أصول غير موجودة في 03: {short_list(missing)}", f"{base}.asset_ids"))
+        nets = []
+        for case in ("conservative", "base", "optimistic"):
+            cs = as_dict(it.get(case))
+            rv, ex, ne = cs.get("extra_revenue"), cs.get("extra_expense"), cs.get("net_effect")
+            if is_num(rv) and is_num(ex) and is_num(ne) and abs(ne - (rv - ex)) > max(1.0, 1e-6 * max(abs(rv), abs(ex))):
+                blocking.append((f"صافي الأثر {fmt_num(ne)} لا يساوي الإيراد الإضافي − المصروف الإضافي ({fmt_num(rv - ex)})",
+                                 f"{base}.{case}"))
+            if is_num(ne) and (not is_num(rv) or not is_num(ex)):
+                warns.append(("صافي الأثر رقم بينما الإيراد أو المصروف الإضافي غير محدد؛ غياب المصروف لا يعني صفرًا",
+                              f"{base}.{case}"))
+            y1, rr = cs.get("year1_effect"), cs.get("run_rate_effect")
+            if is_num(y1) and is_num(rr) and rr >= 0 and y1 > rr and it.get("recurring") is True:
+                warns.append(("أثر السنة الأولى أكبر من الأثر السنوي بعد اكتمال التنفيذ لفرصة متكررة؛ افصل الأثرين", f"{base}.{case}"))
+            nets.append(ne)
+        if all(is_num(x) for x in nets) and not (nets[0] <= nets[1] <= nets[2]):
+            warns.append(("صافي الأثر لا يتدرج من المحافظ إلى الأساسي إلى المحسن", base))
+        if all(not is_num(as_dict(it.get(c)).get(k)) for c in ("conservative", "base", "optimistic")
+               for k in ("extra_revenue", "net_effect")):
+            warns.append(("سيناريو «prepared» بلا أي مبلغ؛ إن لم تتوافر مدخلات فاجعل الحالة not_prepared مع المعلومات المطلوبة", base))
+        if it.get("recurring") is True and NQ_ONE_OFF_RE.search(normalize_arabic(
+                f"{it.get('opportunity') or ''} {it.get('opportunity_type') or ''}")):
+            warns.append(("فرصة بيع أو تحصيل لمرة واحدة موسومة «متكررة»؛ افصل الدخل المتكرر عن التحصيل لمرة واحدة أو بيع أصل",
+                          base))
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            a, b = items[i], items[j]
+            common = set(map(str, as_list(a.get("asset_ids")))) & set(map(str, as_list(b.get("asset_ids"))))
+            if not common:
+                continue
+            if b.get("id") in as_list(a.get("overlaps_with")) or a.get("id") in as_list(b.get("overlaps_with")):
+                continue
+            blocking.append((f"فرصتان على الأصول نفسها ({short_list(sorted(common))}) دون overlaps_with؛ يُحتسب الأثر مرتين "
+                             "(مثل معالجة الشغور ورفع الإيجار)", f"06_narrative.json:scenarios.items[{a.get('id')}↔{b.get('id')}]"))
+    return blocking, warns
+
+
+def c_nq_scenario_consistency(ctx: Ctx):
+    ctx.need("narrative")
+    return nq_scenario_findings(ctx)[1]
+
+
+def c_nq_promised_outcomes(ctx: Ctx):
+    """B8: no promised outcome («سيحقق»، «يضمن»، «مؤكد») in impacts, scenarios, plan or summary."""
+    ctx.need("narrative")
+    out = []
+    for path, s in walk_strings(ctx.narrative, skip_keys=NQ_SKIP_TEXT_KEYS | {"assumptions", "data_issues_extra",
+                                                                               "methodology_notes", "questions"}):
+        n = normalize_arabic(NQ_PH_RE.sub(" ", nq_tokens(s)[0]))
+        hits = [m.group(0) for m in NQ_PROMISE_RE.finditer(n) if not clause_negated(n, m.start(), m.end())]
+        if hits:
+            out.append((f"صياغة تَعِد بنتيجة مؤكدة («{hits[0]}»)؛ لا يُقدَّم أثر مالي أو عائد مؤكدًا دون سند، واذكره تقديرًا "
+                        "بافتراضاته", f"06_narrative.json:{path}"))
+    return out
+
+
+# ---- B10: partial yields named as such ------------------------------------------------
+def c_nq_partial_unnamed(ctx: Ctx):
+    ctx.need("narrative", "metrics")
+    partial = {mid for mid, r in ctx.metrics.items()
+               if as_dict(r).get("kind") == "ratio" and as_dict(r).get("status") == "partial"}
+    if not partial:
+        return []
+    out = []
+    for where, s in nq_text_items(ctx):
+        t, toks = nq_tokens(s)
+        n = normalize_arabic(t)
+        for m in NQ_PH_RE.finditer(n):
+            k, mid, path = toks[int(m.group(1))]
+            if k != "m" or mid not in partial or path not in ("", "value"):
+                continue
+            ss, se = nq_bounds(n, m.start(), m.end(), NQ_SENT_SPLIT_RE)
+            if not NQ_PARTIAL_NAME_RE.search(n[ss:se]):
+                out.append((f"{{{{m:{mid}}}}} نسبة جزئية (الحالة partial) ولا تُسمّى في الجملة «عائد الجزء القابل للاحتساب»؛ "
+                            f"اذكر ذلك مع عدد المشمول {{{{m:{mid}.n_included}}}}", where))
+    msg = nq_message_text(ctx)
+    if msg:
+        for sent in NQ_SENT_SPLIT_RE.split(msg):
+            linked = {mid for _, _, mid in _nq_value_links(ctx, sent) if mid in partial}
+            if linked and not NQ_PARTIAL_NAME_RE.search(normalize_arabic(sent)):
+                out.append((f"رسالة التسليم تذكر قيمة {short_list(sorted(linked), 2)} الجزئية دون تسميتها «عائد الجزء القابل "
+                            "للاحتساب»", "09_message.md"))
+    return out
+
+
+NQ_GROWTH_CAVEAT_RE = re.compile(r"غير\s+(?:مؤكد|مثبت|متحقق|موحد|قابل\s+للمقارنه)|لم\s+(?:يثبت|يتحقق|تتحقق)|للاطلاع|اساس\s+الضريبه|قبل\s+التحقق|يلزم\s+التحقق|"
+                                 r"دون\s+حكم|لا\s+يعد\s+(?:حكما|نموا)|تماثل|قابليه\s+المقارنه|بدء\s+ايراد")
+
+
+def c_nq_growth_token_caveat(ctx: Ctx):
+    """B1 (narrative side): a growth value whose comparability is not confirmed is not presented as growth."""
+    ctx.need("narrative", "metrics")
+    growth = {mid for mid, r in ctx.metrics.items() if as_dict(r).get("kind") == "growth"
+              and as_dict(as_dict(r).get("comparability")).get("status") != "confirmed"
+              and as_dict(r).get("status") in ("complete", "partial")}
+    out = []
+    for where, s in nq_text_items(ctx):
+        t, toks = nq_tokens(s)
+        n = normalize_arabic(t)
+        seen = set()
+        for m in NQ_PH_RE.finditer(n):
+            k, mid, path = toks[int(m.group(1))]
+            if k != "m" or mid not in growth or path not in ("", "value", "pct", "abs_change") or mid in seen:
+                continue
+            ss, se = nq_bounds(n, m.start(), m.end(), NQ_SENT_SPLIT_RE)
+            if not NQ_GROWTH_CAVEAT_RE.search(n[ss:se]):
+                seen.add(mid)
+                st = as_dict(ctx.metrics[mid].get("comparability")).get("status") or "غير محددة"
+                out.append((f"{{{{m:{mid}}}}} يُعرض تغيرًا بين فترتين قابليتهما للمقارنة «{st}» دون تنبيه في الجملة؛ اذكر أنه غير "
+                            "مؤكد التماثل (الضريبة والأساس والاكتمال) ولا تعرضه حكمًا بالنمو", where))
+    return out
+
+
+# ---- B14: plan and top lists -----------------------------------------------------------
+def c_nq_plan_completeness(ctx: Ctx):
+    ctx.need("narrative")
+    n = ctx.narrative
+    recs = [r for r in as_list(n.get("recommendations")) if isinstance(r, dict)]
+    if not recs:
+        return []
+    plan = as_dict(n.get("plan"))
+    out = []
+    for key, label in (("d30", "30"), ("d60", "60"), ("d90", "90")):
+        if not as_list(plan.get(key)):
+            out.append((f"خطة {label} يومًا فارغة رغم وجود توصيات؛ حدّد إجراءً ومخرجًا مرحليًا لكل مدة", f"06_narrative.json:plan.{key}"))
+    if not as_list(n.get("top_actions")):
+        out.append(("أهم الإجراءات (top_actions) فارغة رغم وجود توصيات", "06_narrative.json:top_actions"))
+    if as_list(n.get("gaps")) and not as_list(n.get("top_gaps")):
+        out.append(("أهم الفجوات (top_gaps) فارغة رغم وجود فجوات", "06_narrative.json:top_gaps"))
+    planned = {as_dict(it).get("rec_id") for k in ("d30", "d60", "d90") for it in as_list(plan.get(k))}
+    lone = [a for a in as_list(n.get("top_actions")) if a not in planned]
+    if lone:
+        out.append((f"إجراءات رئيسية لا يقابلها أي بند في خطة 30/60/90: {short_list(lone)}", "06_narrative.json:top_actions"))
+    return out
+
+
+def c_nq_top_lists_count(ctx: Ctx):
+    ctx.need("narrative")
+    n = ctx.narrative
+    out = []
+    for key, pool_key, label in (("top_gaps", "gaps", "الفجوات"), ("top_actions", "recommendations", "الإجراءات")):
+        pool = [x for x in as_list(n.get(pool_key)) if isinstance(x, dict)]
+        lst = as_list(n.get(key))
+        if lst and len(lst) < min(3, len(pool)):
+            out.append((f"{key} يضم {len(lst)} من {min(3, len(pool))} مطلوبة؛ الموجّه يطلب أبرز ثلاث {label}", f"06_narrative.json:{key}"))
+    return out
+
+
+def c_nq_plan_phasing(ctx: Ctx):
+    ctx.need("narrative")
+    out = []
+    for key in ("d30", "d60", "d90"):
+        for i, it in enumerate(as_list(as_dict(ctx.narrative.get("plan")).get(key))):
+            it = as_dict(it)
+            for fld in ("action", "deliverable"):
+                n = normalize_arabic(it.get(fld) or "")
+                for m in NQ_COMPLETION_RE.finditer(n):
+                    mid = (m.group(1) or "") if m.lastindex else ""
+                    if NQ_STUDY_OBJ_RE.search(mid) or clause_negated(n, m.start(), m.end()):
+                        continue
+                    out.append((f"بند الخطة يوحي بانتهاء مشروع تطوير أو تشغيله («{m.group(0)}»)؛ للمشروعات الطويلة حدّد المخرج "
+                                "المرحلي (دراسة، عروض، تقييم، تصميم)", f"06_narrative.json:plan.{key}[{i}].{fld}"))
+                    break
+    return out
+
+
+# ---- B15: recommendation specificity -------------------------------------------------
+_NQ_LEVEL = {"high": 3, "medium": 2, "low": 1, "strong": 3, "moderate": 2, "weak": 1}
+
+
+def c_nq_recommendation_quality(ctx: Ctx):
+    ctx.need("narrative")
+    recs = [(i, r) for i, r in enumerate(as_list(ctx.narrative.get("recommendations"))) if isinstance(r, dict)]
+    out = []
+    pr = [r.get("priority") for _, r in recs if isinstance(r.get("priority"), int)]
+    if pr:
+        dups = sorted({p for p in pr if pr.count(p) > 1})
+        if dups or sorted(pr) != list(range(1, len(pr) + 1)):
+            out.append((f"الأولويات {short_list(pr)} ليست ترتيبًا متسلسلًا فريدًا (1…{len(pr)})"
+                        + (f"؛ مكررة: {short_list(dups)}" if dups else "") + "؛ رتّب التوصيات بحسب الأثر والإلحاح وقوة الدليل "
+                        "وقابلية التنفيذ والتكلفة", "06_narrative.json:recommendations[].priority"))
+
+    def score(r):
+        rk = as_dict(r.get("ranking"))
+        vals = [_NQ_LEVEL.get(rk.get(k)) for k in ("impact", "urgency", "evidence_strength", "feasibility")]
+        cost = _NQ_LEVEL.get(rk.get("cost_level"))
+        return None if None in vals or cost is None else vals + [4 - cost]
+    for ia, a in recs:
+        for ib, b in recs:
+            sa, sb = score(a), score(b)
+            if sa is None or sb is None or not (isinstance(a.get("priority"), int) and isinstance(b.get("priority"), int)):
+                continue
+            if a["priority"] < b["priority"] and all(y >= x for x, y in zip(sa, sb)) and any(y > x for x, y in zip(sa, sb)):
+                out.append((f"التوصية {b.get('id')} تتفوق في كل معايير الترتيب على {a.get('id')} لكن أولويتها أدنى "
+                            f"({b['priority']} مقابل {a['priority']})", f"06_narrative.json:recommendations[{gid(b, ib)}].priority"))
+    for i, r in recs:
+        base = f"06_narrative.json:recommendations[{gid(r, i)}]"
+        for fld in ("target", "first_action", "recommended_option", "expected_impact", "success_kpi"):
+            v = normalize_arabic(re.sub(r"[^\w\s]", " ", r.get(fld) or ""))
+            for ph in NQ_GENERIC_PHRASES:
+                if ph in v and word_count_ar(v) - word_count_ar(ph) < 3:
+                    out.append((f"عبارة عامة «{r.get(fld)}» في {fld}؛ حدّد الإجراء أو المؤشر القابل للقياس", f"{base}.{fld}"))
+                    break
+        if nonempty(r.get("duration")) and not NQ_DURATION_RE.search(normalize_arabic(r.get("duration"))):
+            out.append((f"المدة «{r.get('duration')}» غير محددة؛ اذكر مدة أو مرحلة زمنية", f"{base}.duration"))
+        if nonempty(r.get("owner_role")) and not NQ_JOB_RE.search(normalize_arabic(r.get("owner_role"))):
+            out.append(("المسؤول لا يظهر بصفة وظيفية (قد يكون اسمًا شخصيًا)؛ اذكر المسمى الوظيفي", f"{base}.owner_role"))
+    for key in ("d30", "d60", "d90"):
+        for i, it in enumerate(as_list(as_dict(ctx.narrative.get("plan")).get(key))):
+            ow = as_dict(it).get("owner_role")
+            if nonempty(ow) and not NQ_JOB_RE.search(normalize_arabic(ow)):
+                out.append(("مسؤول بند الخطة لا يظهر بصفة وظيفية؛ اذكر المسمى الوظيفي", f"06_narrative.json:plan.{key}[{i}].owner_role"))
+    return out
+
+
+# ---- B16: gaps -------------------------------------------------------------------------
+def _nq_scope_targets(ctx, scope: str):
+    """(valid_format, record_ids, group) for a gap scope: portfolio | group:<dim>=<value> | record ids | cell refs."""
+    s = (scope or "").strip()
+    if not s:
+        return False, [], None
+    if normalize_arabic(s) in ("portfolio", "المحفظه", "كامل المحفظه", "المحفظه كامله"):
+        return True, [], None
+    m = re.fullmatch(r"group:\s*([A-Za-z_]+)\s*=\s*(\S+)", s)
+    if m:
+        return True, [], (m.group(1), m.group(2))
+    parts = [p for p in re.split(r"\s*[,،|+]\s*|\s+و(?=[A-Za-z])|\s+", s) if p]
+    ids = ctx.rec_by_id if "records" in ctx.data else {}
+    res = ctx.resolver() if all(k in ctx.data for k in ("records", "metrics", "wb")) else None
+    if res is not None and "!" in s and res.resolve(s)[0]:
+        return True, [p for p in parts if p in ids], None
+    rids, ok = [], bool(parts)
+    for p in parts:
+        if p in ids:
+            rids.append(p)
+        elif res is not None and "!" in p and res.resolve(p)[0]:
+            continue
+        else:
+            ok = False
+    return ok, rids, None
+
+
+def c_nq_gap_completeness(ctx: Ctx):
+    ctx.need("narrative")
+    out = []
+    for i, g in enumerate(as_list(ctx.narrative.get("gaps"))):
+        if not isinstance(g, dict):
+            continue
+        base = f"06_narrative.json:gaps[{gid(g, i)}]"
+        ok, _, _ = _nq_scope_targets(ctx, g.get("scope"))
+        if not ok:
+            out.append((f"نطاق الفجوة «{g.get('scope')}» غير محدد بصيغة معروفة (portfolio، group:<بعد>=<قيمة>، أو معرّفات سجلات "
+                        "موجودة)", f"{base}.scope"))
+        proven = g.get("is_proven_problem") is True and nonempty(g.get("proven_cause"))
+        if not proven and not as_list(g.get("verification_needed")):
+            out.append(("الفجوة غير مثبتة السبب ولا تذكر ما يلزم للتحقق (verification_needed فارغ)", f"{base}.verification_needed"))
+        if not nonempty(g.get("proven_cause")) and not as_list(g.get("possible_causes")):
+            out.append(("لا سبب مثبت ولا أسباب محتملة للفجوة", f"{base}.possible_causes"))
+        imp = as_dict(g.get("impact"))
+        txt = imp.get("text") if isinstance(imp.get("text"), str) else ""
+        if not nonempty(imp.get("metric")) and not TOKEN_RE.search(txt) and word_count_ar(txt) < 4:
+            out.append((f"أثر الفجوة «{txt}» غير محدد؛ اذكر حجم الأثر القابل للقياس أو مؤشره", f"{base}.impact"))
+    return out
+
+
+def c_nq_gap_unsupported_claims(ctx: Ctx):
+    """B16: vacancy / below-market rent / collection weakness stated as fact without a supporting metric or source;
+    service or admin assets judged as non-earning."""
+    ctx.need("narrative")
+    metrics = ctx.metrics if "metrics" in ctx.data else {}
+    support_ids = {mid for mid, r in metrics.items()
+                   if NQ_SUPPORT_METRIC_RE.search(normalize_arabic(f"{mid} {as_dict(r).get('label') or ''}"))}
+    ext_sources = [normalize_arabic(as_dict(s).get("ref") or "") for s in as_list(ctx.narrative.get("sources"))
+                   if as_dict(s).get("type") in ("web", "user")]
+
+    def claims(txt):
+        n = normalize_arabic(NQ_PH_RE.sub(" ", nq_tokens(txt or "")[0]))
+        out_ = []
+        for m in NQ_CLAIM_RE.finditer(n):
+            cs, ce = nq_bounds(n, m.start(), m.end(), NQ_CLAUSE_SPLIT_RE)
+            if clause_negated(n, m.start(), m.end()) or NQ_HEDGE_RE.search(n[cs:ce]):
+                continue
+            out_.append(m.group(0))
+        return out_
+    out = []
+    recs = ctx.rec_by_id if "records" in ctx.data else {}
+    for i, g in enumerate(as_list(ctx.narrative.get("gaps"))):
+        if not isinstance(g, dict):
+            continue
+        base = f"06_narrative.json:gaps[{gid(g, i)}]"
+        refs = [as_dict(e).get("ref") if isinstance(e, dict) else e for e in as_list(g.get("evidence"))]
+        notes = " ".join(normalize_arabic(as_dict(e).get("note") or "") for e in as_list(g.get("evidence")))
+        texts = {"title": g.get("title"), "proven_cause": g.get("proven_cause"), "impact.text": as_dict(g.get("impact")).get("text")}
+        supported = any(isinstance(r, str) and r.startswith("m:") and r[2:].split(".")[0] in support_ids for r in refs) or \
+            any(len(src) >= 4 and (src in notes or any(src in normalize_arabic(t or "") for t in texts.values())) for src in ext_sources)
+        if not supported:
+            for k, t in texts.items():
+                hs = claims(t)
+                if hs:
+                    out.append((f"الفجوة تقرر «{hs[0]}» حقيقةً دون مؤشر داعم (إشغال/تحصيل) أو مقارنة سوقية موثقة؛ ضعه سببًا محتملًا "
+                                "وما يلزم للتحقق", f"{base}.{k}"))
+                    break
+        _, rids, grp = _nq_scope_targets(ctx, g.get("scope"))
+        svc = [x for x in rids if as_dict(as_dict(recs.get(x)).get("dims")).get("use") in ("service", "admin")]
+        if grp and grp[0] == "use" and grp[1] in ("service", "admin"):
+            svc.append(f"group:use={grp[1]}")
+        gtxt = normalize_arabic(" ".join(str(t or "") for t in texts.values()))
+        if svc and NQ_NONEARN_RE.search(gtxt):
+            out.append((f"الفجوة تحكم على أصل خدمي أو إداري ({short_list(svc)}) بعدم تحقيق إيراد؛ غرضه خدمة المستفيدين فلا يُحكم "
+                        "بضعف أدائه لمجرد عدم تحقيق إيجار", f"{base}.title"))
+    global_ok = bool(support_ids) or bool(ext_sources)
+    if not global_ok:
+        parts = [("executive_summary", ctx.narrative.get("executive_summary"))]
+        parts += [(f"assessment[{gid(a, i, 'dimension')}].judgment", as_dict(a).get("judgment"))
+                  for i, a in enumerate(as_list(ctx.narrative.get("assessment")))]
+        parts += [(f"strengths[{i}].text", as_dict(s).get("text")) for i, s in enumerate(as_list(ctx.narrative.get("strengths")))]
+        for path, t in parts:
+            hs = claims(t) if isinstance(t, str) else []
+            if hs:
+                out.append((f"النص يقرر «{hs[0]}» حقيقةً دون مؤشر داعم أو مصدر خارجي موثق؛ صغه احتمالًا يلزم التحقق منه",
+                            f"06_narrative.json:{path}"))
+    return out
+
+
+CHECK_TITLES.update([
+    ("period_fields", "حقول كل فترة في 04 تخص الفترة نفسها"),
+    ("growth_comparability_basis", "قابلية مقارنة الفترات مطابقة لوصف الحقول (الضريبة والأساس والاكتمال)"),
+    ("yield_zero_revenue_scope", "عدم استبعاد أصل استثماري ذي إيراد صفري من العائد"),
+    ("label_vat_basis", "وصف الضريبة في تسمية المؤشر مطابق لحقل الإيراد المستخدم"),
+    ("label_years", "سنوات التسمية مطابقة لفترة الإيراد وسنة التقييم المستخدمتين"),
+    ("label_roi", "عدم تسمية نسبة الإيراد «العائد على الاستثمار» أو «العائد الاستثماري»"),
+    ("narrative_metric_naming", "تسمية المؤشرات في السرد مطابقة لمدخلاتها (صافٍ، كلي، على الاستثمار)"),
+    ("narrative_scores", "عدم منح درجات رقمية دون معيار معتمد مفسّر"),
+    ("drastic_without_study", "لا بيع أو هدم أو تخارج أو تغيير استخدام دون دراسة تسبقه أو لانخفاض العائد وحده"),
+    ("plan_completeness", "خطة 30/60/90 وأهم الإجراءات غير فارغة وكل إجراء رئيسي مجدول"),
+    ("yield_vat_inclusive", "عائد الدخل الإجمالي على إيراد بدون الضرائب المحصلة للغير"),
+    ("partial_unnamed", "تسمية النسبة الجزئية «عائد الجزء القابل للاحتساب» في السرد"),
+    ("growth_token_caveat", "عدم عرض تغير غير مؤكد التماثل حكمًا بالنمو في السرد"),
+    ("promised_outcomes", "عدم تقديم الأثر المالي أو العائد وعدًا مؤكدًا"),
+    ("scenario_consistency", "اتساق أرقام السيناريوهات وتوقيت أثرها وتكرارها"),
+    ("plan_phasing", "مخرجات مرحلية في خطة 30/60/90 دون إيحاء بانتهاء مشروع"),
+    ("top_lists_count", "أبرز ثلاث فجوات وثلاثة إجراءات"),
+    ("recommendation_quality", "تحديد التوصيات وترتيبها ومسؤولها بصفته الوظيفية"),
+    ("gap_completeness", "اكتمال عناصر الفجوة (النطاق، الأسباب، ما يلزم للتحقق، الأثر)"),
+    ("gap_unsupported_claims", "عدم تحويل الاحتمال إلى حقيقة في الفجوات والسرد"),
+])
+# --- end of narrative quality checks (G4a) ---
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 CHECKS = [
@@ -2729,6 +4011,17 @@ CHECKS = [
     ("pii_keys", "blocking", c_pii_keys),
     ("pii_html_patterns", "blocking", c_pii_html_patterns),
     ("pii_values", "blocking", c_pii_values),
+    # narrative quality (G4a)
+    ("period_fields", "blocking", c_nq_period_fields),
+    ("growth_comparability_basis", "blocking", c_nq_growth_comparability_basis),
+    ("yield_zero_revenue_scope", "blocking", c_nq_yield_zero_revenue),
+    ("label_vat_basis", "blocking", c_nq_label_vat_basis),
+    ("label_years", "blocking", c_nq_label_years),
+    ("label_roi", "blocking", c_nq_label_roi),
+    ("narrative_metric_naming", "blocking", lambda ctx: nq_naming_findings(ctx)[0]),
+    ("narrative_scores", "blocking", c_nq_narrative_scores),
+    ("drastic_without_study", "blocking", lambda ctx: nq_drastic_findings(ctx)[0]),
+    ("plan_completeness", "blocking", c_nq_plan_completeness),
     ("assessment_scores", "warning", c_assessment_scores),
     ("superlatives", "warning", c_superlatives),
     ("hand_typed_numbers", "warning", lambda ctx: number_findings(ctx)[0]),
@@ -2746,6 +4039,17 @@ CHECKS = [
     ("narrative_claims", "warning", c_narrative_claims),
     ("followup_status", "warning", c_followup_status),
     ("source_hash", "warning", c_source_hash),
+    # narrative quality (G4a)
+    ("yield_vat_inclusive", "warning", c_nq_yield_vat_inclusive),
+    ("partial_unnamed", "warning", c_nq_partial_unnamed),
+    ("growth_token_caveat", "warning", c_nq_growth_token_caveat),
+    ("promised_outcomes", "warning", c_nq_promised_outcomes),
+    ("scenario_consistency", "warning", c_nq_scenario_consistency),
+    ("plan_phasing", "warning", c_nq_plan_phasing),
+    ("top_lists_count", "warning", c_nq_top_lists_count),
+    ("recommendation_quality", "warning", c_nq_recommendation_quality),
+    ("gap_completeness", "warning", c_nq_gap_completeness),
+    ("gap_unsupported_claims", "warning", c_nq_gap_unsupported_claims),
     ("numbers_as_tokens", "info", lambda ctx: number_findings(ctx)[1]),
     ("gaps_without_recommendation", "info", c_gaps_without_recommendation),
 ]
