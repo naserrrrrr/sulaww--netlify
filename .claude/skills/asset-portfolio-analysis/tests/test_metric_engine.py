@@ -224,9 +224,14 @@ def test_diff_and_missing_expense():
     res = eng.compute(spec, {"period": "2024"})
     assert res["status"] == "not_computable" and res["reason"] == "لا مصروفات لهذه الفترة"
     assert res["n_included"] == 0 and res["value"] is None
+    # the scope is listed (scope_ids) so the log counts and lists the same records
+    assert len(res["scope_ids"]) == res["n_scope"] > 0 and res["scope_ids"] == sorted(res["scope_ids"])
     # field defined but no record of R has it at all
     res = eng.compute(dict(spec, b="exp.none"), {"period": "2025"})
     assert res["status"] == "not_computable" and res["reason"] == me.NO_EXPENSE_REASON
+    assert len(res["scope_ids"]) == res["n_scope"] > 0 and res["excluded"] == []
+    # a computed result carries no scope_ids
+    assert "scope_ids" not in eng.compute(spec, {"period": "2025"})
 
 
 def test_growth():
@@ -322,9 +327,10 @@ def test_unresolved_placeholder():
     assert res["status"] == "not_computable" and res["reason"] == "لا يوجد تقييم" and res["value"] is None
     assert res["n_scope"] == 7  # |R| (base_where AND where); only the field placeholder is unresolved
     assert res["n_included"] == 0 and res["excluded"] == []
+    assert len(res["scope_ids"]) == 7  # the records of R, listed with the reason in the calculation log
     # a placeholder inside where: n_scope falls back to base_where AND filters (8 in-scope records)
     res = eng.compute(dict(spec, field="rev.2025", where={"known": "{VAL}"}))
-    assert res["status"] == "not_computable" and res["n_scope"] == 8
+    assert res["status"] == "not_computable" and res["n_scope"] == 8 and len(res["scope_ids"]) == 8
     res = eng.compute(dict(spec, unavailable_reason=None))
     assert res["reason"] == me.DEFAULT_UNAVAILABLE
 

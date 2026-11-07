@@ -11,6 +11,8 @@ values)، «مشكلات البيانات»، «الفجوات والتوصيا�
 06 has recommendation_followup / version_comparison)، «الافتراضات والمصادر». Right-to-left, navy headers, filters on
 every table, gray = not available (never a zero; the original text of a non-numeric cell is shown next to its
 status), red = a proven problem only. Values only, except SUM totals in the calculation detail of «الحسابات».
+Board wording: engine keys (fields, metrics, issue types, check ids, gap scopes, evidence tokens) are shown by their
+Arabic labels; the keys themselves only in code-styled «المرجع التقني» columns/rows.
 
 Personal data: fields whose key, label or mapping kind is personal (assets/pii_patterns.json via apa_common) are
 dropped; block-level patterns (mobile, landline, e-mail, IBAN; Arabic-Indic digits included) are masked in every text
@@ -32,7 +34,8 @@ import re  # noqa: E402
 from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    KNOWN_STATUSES, PII_KEY_RE, REDACTED, clean_text, is_pii_header, load_json, load_vocab, mask_pii, pii_value_hits,
+    KNOWN_STATUSES, PII_KEY_RE, REDACTED, clean_text, is_pii_header, issue_type_ar, load_json, load_vocab, mask_pii,
+    pii_value_hits,
 )
 
 try:
@@ -47,6 +50,8 @@ except ImportError:  # pragma: no cover
 
 NAVY = "1F3864"
 FONT = "Arial"
+CODE_FONT = "Consolas"
+TECH = "المرجع التقني"
 GRAY_FILL, GRAY_TXT = "E7E6E6", "595959"
 RED_FILL, RED_TXT = "FFC7CE", "9C0006"
 AMBER_FILL, AMBER_TXT = "FFF2CC", "7F6000"
@@ -124,15 +129,16 @@ def metric_value_cell(res: dict, missing_text: str):
     return C(missing_text, fill=GRAY_FILL, color=GRAY_TXT), UNIT_AR.get(unit, unit or "—")
 
 
-def result_notes(res: dict) -> str:
-    """Reason, engine note (e.g. empty_as_zero), coverage per field (not-applicable outside the denominator) and
-    revenue starts kept outside the growth %."""
+def result_notes(res: dict, flabel=None) -> str:
+    """Reason, engine note (e.g. empty_as_zero), coverage per field (by its Arabic label: not-applicable outside the
+    denominator) and revenue starts kept outside the growth %."""
+    flabel = flabel or (lambda f: f)
     parts = [res.get("reason"), res.get("note")]
     if res.get("kind") == "coverage":
         pf = [p for p in res.get("per_field") or [] if isinstance(p, dict)]
         if pf:
             parts.append("التغطية لكل حقل: " + "؛ ".join(
-                f"{p.get('field')}: {p.get('n_known', 0)} من {p.get('n', 0)}"
+                f"«{flabel(p.get('field'))}»: {p.get('n_known', 0)} من {p.get('n', 0)}"
                 + (f" (لا ينطبق على {p['n_not_applicable']} خارج المقام)" if p.get("n_not_applicable") else "")
                 for p in pf))
     if res.get("kind") == "growth" and res.get("revenue_start_ids"):
@@ -149,6 +155,19 @@ def result_notes(res: dict) -> str:
     return "؛ ".join(out)
 
 
+# engine words that may appear inside a free text (normalize.ENUM_AR mirrors them for the issue log)
+ENUM_TEXT_AR = [
+    (re.compile(r"\s*\((?:zero_as_missing|not_available|not_applicable|zero_recorded|zero_confirmed|isolated|excluded|in_scope|raw، hijri|raw|hijri)\)"), ""),
+    (re.compile(r"\bzero_as_missing\b"), "غير متاح (صفر لا يُعد قيمة)"), (re.compile(r"\bnot_available\b"), "غير متاح"),
+    (re.compile(r"\bisolated\b"), "معزولة"), (re.compile(r"\bin_scope\b"), "ضمن النطاق"),
+    (re.compile(r"(?<![A-Za-z_])pii(?![A-Za-z_])"), "بيانات شخصية"), (re.compile(r"\bportfolio\b"), "المحفظة كاملة"),
+]
+_KEY_IN_TEXT_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*\*?")
+FIELD_PART_AR = {"abs_change": "التغير بالريال", "num": "البسط", "den": "المقام", "n_included": "المشمول",
+                 "n_scope": "سجلات النطاق", "coverage_num_share": "حصة الإيراد المعروف", "prev_sum": "مجموع الفترة السابقة",
+                 "curr_sum": "مجموع الفترة الحالية", "start_change": "تغير بدء الإيراد", "total": "المجموع",
+                 "top_sum": "مجموع الأكبر", "a_sum": "مجموع الإيراد", "b_sum": "مجموع المصروف", "hhi": "مؤشر هيرفندال"}
+SEVERITY_AR_EXTRA = {"info": "معلوماتية"}
 KIND_AR = {"count": "عدّ", "sum": "مجموع", "ratio": "نسبة من مجاميع متطابقة", "diff": "فرق", "growth": "تغير بين فترتين",
            "concentration": "تركّز", "coverage": "تغطية بيانات"}
 SOURCE_TYPE_AR = {"file": "ملف", "web": "مصدر ويب", "user": "إفادة المستخدم"}
@@ -160,7 +179,7 @@ RECON_STATUS_AR = {
     "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
-    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق (derived_fields)؛ الفرق سببه الاشتقاق لا نقص في السجلات",
+    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق في التصنيف؛ الفرق سببه الاشتقاق لا نقص في السجلات",
     "mismatch": "فرق غير مفسَّر",
     "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
 }
@@ -176,7 +195,7 @@ VC_SUBTYPE_AR = {
     "new_valuation_year": "سنة تقييم جديدة", "valuation_added": "تقييم أضيف", "valuation_absent_in_new": "تقييم غير موجود",
     "valuation_value_changed": "تغير تقييم السنة نفسها", "metric_added": "مؤشر جديد", "metric_removed": "مؤشر حُذف",
     "metric_label": "تغير وصف مؤشر", "metric_definition": "تغير تعريف مؤشر", "config": "تغير إعداد عام",
-    "period_field": "تغير الحقل المعتمد للفترة", "period_comparability": "تغير حكم قابلية المقارنة",
+    "period_field": "تغير حقل الفترة المستخدم في المؤشرات", "period_comparability": "تغير حكم قابلية المقارنة",
     "field_meta": "تغير وصف حقل",
 }
 VC_RELATION_AR = {"same_period": "الفترة نفسها — رفع نسخة أحدث ليس نموًا زمنيًا", "new_period": "فترة جديدة",
@@ -191,11 +210,13 @@ DIM_AR_DEFAULT = {"income_generation": "توليد الدخل", "income_stabilit
 # Cell spec and sheet writer
 # ---------------------------------------------------------------------------
 class C:
-    """A cell value with optional formatting."""
-    __slots__ = ("v", "fmt", "fill", "color", "bold", "wrap", "formula", "raw_ok")
+    """A cell value with optional formatting. `code`: a technical reference (field key, metric id, issue type) in a
+    monospace gray font — the only place an engine key appears in the workbook (column «المرجع التقني»)."""
+    __slots__ = ("v", "fmt", "fill", "color", "bold", "wrap", "formula", "raw_ok", "code")
 
-    def __init__(self, v, fmt=None, fill=None, color=None, bold=False, wrap=True, formula=False, raw_ok=False):
+    def __init__(self, v, fmt=None, fill=None, color=None, bold=False, wrap=True, formula=False, raw_ok=False, code=False):
         self.v, self.fmt, self.fill, self.color, self.bold, self.wrap = v, fmt, fill, color, bold, wrap
+        self.code = code
         self.formula = formula  # only deliberate formulas (SUM totals) are written unescaped
         self.raw_ok = raw_ok    # a deed number: review-level digits are kept (block-level patterns are still masked)
 
@@ -277,7 +298,8 @@ class Sheet:
             cell.fill = PatternFill("solid", fgColor=NAVY)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True, readingOrder=2)
         else:
-            cell.font = Font(name=FONT, size=10, bold=spec.bold, color=spec.color)
+            cell.font = (Font(name=CODE_FONT, size=9, color=GRAY_TXT) if spec.code
+                         else Font(name=FONT, size=10, bold=spec.bold, color=spec.color))
             if spec.fill:
                 cell.fill = PatternFill("solid", fgColor=spec.fill)
             if spec.fmt:
@@ -306,11 +328,26 @@ class Sheet:
         self.merged_notes.append((self.row, ncols, str(text)))
         self.row += 1
 
-    def table(self, name, headers, rows, freeze=None, filters=True):
-        """Write a table with a navy header row; returns (header_row, first_data_row, last_row)."""
+    def tech_row(self, keys, label_col=1):
+        """A row of technical references (field keys) above a header: «المرجع التقني» then each column's key."""
+        r = self.row
+        c = self.ws.cell(row=r, column=label_col, value=TECH + ":")
+        c.font = Font(name=FONT, size=9, italic=True, color=GRAY_TXT)
+        c.alignment = Alignment(horizontal="right", readingOrder=2)
+        for j, k in enumerate(keys, 1):
+            if k and j != label_col:
+                self._put(r, j, C(k, code=True))
+        self.fixed_heights.add(r)
+        self.row += 1
+
+    def table(self, name, headers, rows, freeze=None, filters=True, tech=None):
+        """Write a table with a navy header row (and, with `tech`, a row of technical references above it); returns
+        (header_row, first_data_row, last_row)."""
         headers = _unique_headers(headers)
         if not rows:
             rows = [[C("لا توجد بنود", color=GRAY_TXT)] + [None] * (len(headers) - 1)]
+        if tech:
+            self.tech_row(tech)
         hr = self.row
         for j, h in enumerate(headers, 1):
             self._put(hr, j, h, header=True)
@@ -516,6 +553,10 @@ def ar(vocab, dim, value):
     return table.get(value, value) if isinstance(table, dict) else value
 
 
+def list_of(x):
+    return x if isinstance(x, list) else ([] if x in (None, "") else [x])
+
+
 def _opt(path):
     if os.path.isfile(path):
         try:
@@ -555,6 +596,8 @@ class Export:
         PRIVACY.fields_dropped = sorted(self.pii_fields & present)
         self.spec_by_id = {m.get("id"): m for m in self.config.get("metrics") or [] if isinstance(m, dict)}
         self.vc_file = _opt(os.path.join(run_dir, "version_comparison.json"))
+        an = self.analysis if isinstance(self.analysis, dict) else {}
+        self.facts = an.get("facts") if isinstance(an.get("facts"), dict) else {}
 
     def _pii_fields(self) -> set:
         """Fields never written: mapped as kind pii, a personal key (PII_KEY_RE), group/kind pii in field_meta, or a
@@ -582,7 +625,81 @@ class Export:
         return out
 
     def r(self, x):
-        return render_tokens(x, self.metrics)
+        return self.hz(render_tokens(x, self.metrics))
+
+    def scope_ar(self, scope):
+        """A gap scope as the board reads it: «portfolio» -> المحفظة كاملة, «group:dim=value» -> the group by labels."""
+        s = str(scope or "").strip()
+        if not s:
+            return "غير محدد"
+        if s == "portfolio":
+            return "المحفظة كاملة"
+        m = re.match(r"^group:([A-Za-z_]+)=(.+)$", s)
+        if m:
+            dim, val = m.group(1), m.group(2)
+            dim_ar = (self.vocab.get("dims") or {}).get(dim)
+            return f"مجموعة: {dim_ar if isinstance(dim_ar, str) else dim} = {ar(self.vocab, dim, val)}"
+        return self.hz(s)
+
+    @staticmethod
+    def excluded_of(res: dict) -> list:
+        """Records a metric excluded, with their reason; a not_computable metric that included and excluded none lists
+        its scope (engine scope_ids) with the reason, as the dashboard's calculation log does."""
+        if res.get("excluded"):
+            return list(res["excluded"])
+        why = res.get("reason") or res.get("unavailable_reason") or "مدخل غير متوفر"
+        return [{"id": i, "reason_text": why} for i in res.get("scope_ids") or []]
+
+    def metric_label(self, mid: str) -> str:
+        res = self.metrics.get(mid) or {}
+        return res.get("short_label") or res.get("label") or (self.spec_by_id.get(mid) or {}).get("label") or mid
+
+    def hz(self, x):
+        """Board wording of a text: field keys -> «Arabic label», metric ids -> «metric label», engine enum words ->
+        Arabic (dashboard-spec §4, BP-10); keys stay only in the «المرجع التقني» columns."""
+        if not isinstance(x, str) or not re.search(r"[a-z]", x):
+            return x
+        for rx, to in ENUM_TEXT_AR:
+            x = rx.sub(to, x)
+
+        def rep(m):
+            k = m.group(0)
+            star = k.endswith("*")
+            k0 = k.rstrip("*")
+            if k0 in self.metrics:
+                return f"«{self.metric_label(k0)}»"
+            if star and k0.endswith("_"):
+                fam = list(OrderedDict.fromkeys(self.metric_label(i) for i in self.metrics if i.startswith(k0)))
+                if fam:
+                    return "«" + "، ".join(fam) + "»"
+            base = k0[:-len(ORIGINAL_SUFFIX)] if k0.endswith(ORIGINAL_SUFFIX) else k0
+            if ("." in k0 or "_" in k0) and (base in self.meta or k0 in self.meta):
+                return f"«{self.field_label(k0)}»"
+            return k
+        return _KEY_IN_TEXT_RE.sub(rep, x)
+
+    def ev_text(self, ref) -> str:
+        """An evidence reference as the board reads it: «m:id[.field]» -> metric label (and value), «f:key» -> fact
+        label; cell references, record, issue and anomaly ids stay as they are."""
+        ref = (ref.get("ref") if isinstance(ref, dict) else ref)
+        if not isinstance(ref, str):
+            return ref
+        m = re.match(r"^m:([A-Za-z0-9_\-]+)(?:\.([A-Za-z0-9_.]+))?$", ref)
+        if m:
+            mid, fld = m.group(1), m.group(2)
+            if mid in self.metrics:
+                return "مؤشر: " + self.metric_label(mid) + (f" ({FIELD_PART_AR.get(fld, fld)})" if fld and fld != "value" else "")
+            bd = (self.met_doc.get("breakdowns") or {}).get(mid)
+            if bd:
+                return "توزيع: " + str((bd or {}).get("label") or mid)
+            if mid == "trend":
+                return "التطور الزمني للإيراد"
+            return "مؤشر غير متاح"
+        fm = re.match(r"^f:(.+)$", ref)
+        if fm:
+            fx = (self.facts or {}).get(fm.group(1)) or {}
+            return "حقيقة من الملف: " + str(fx.get("label") or "قيمة مدونة")
+        return self.hz(ref)
 
     def allowed_field(self, f):
         return f not in self.pii_fields
@@ -623,9 +740,10 @@ class Export:
         acks = [c for c in v.get("checks") or [] if isinstance(c, dict) and (c.get("level") == "acknowledged" or c.get("acknowledged"))]
         ids = OrderedDict()
         for c in acks:
-            ids[c.get("id")] = ids.get(c.get("id"), 0) + 1
+            title = c.get("title") if isinstance(c.get("title"), str) and c.get("title") != c.get("id") else "فحص آلي"
+            ids[title] = ids.get(title, 0) + 1
         n_ack = v.get("acknowledged_count") if is_num(v.get("acknowledged_count")) else len(acks)
-        ack_txt = (f" · مُقرّ بها {n_ack}" + (": " + "، ".join(f"{k}×{n}" if n > 1 else str(k) for k, n in ids.items()) if ids else "")
+        ack_txt = (f" · مُقرّ بها {n_ack}" + (": " + "؛ ".join(f"«{k}» ×{n}" if n > 1 else f"«{k}»" for k, n in ids.items()) if ids else "")
                    if n_ack else "")
         when = str(v.get("generated_at") or v.get("checked_at") or "")[:16].replace("T", " ")
         return (f"أخطاء مانعة {v.get('blocking_count')} · تحذيرات مفتوحة {v.get('warning_count')}{ack_txt}"
@@ -670,23 +788,23 @@ class Export:
                          else status_cell(res.get("status"), self.vocab, res),
                          f"{res.get('n_included', 0)} من {res.get('n_scope', 0)}",
                          res.get("scope_text"), res.get("basis"), res.get("valuation_date"),
-                         result_notes(res) or ("بطاقة في الداشبورد" if res.get("card") else "")])
+                         self.hz(result_notes(res, self.field_label)) or ("بطاقة في الداشبورد" if res.get("card") else "")])
         sh.table("tblKpis", ["المؤشر", "القيمة", "الوحدة", "الحالة", "المشمول من النطاق", "النطاق", "الأساس",
                              "تاريخ التقييم", "السبب أو الملاحظة"], rows)
         gaps = {g.get("id"): g for g in self.narrative.get("gaps") or [] if isinstance(g, dict)}
         recs = {x.get("id"): x for x in self.narrative.get("recommendations") or [] if isinstance(x, dict)}
-        sh.heading("أهم ثلاث فجوات وأهم ثلاثة إجراءات")
-        rows = []
-        tg = list(self.narrative.get("top_gaps") or [])[:3]
-        ta = list(self.narrative.get("top_actions") or [])[:3]
-        for i in range(max(len(tg), len(ta))):
-            g = gaps.get(tg[i]) if i < len(tg) else None
-            a = recs.get(ta[i]) if i < len(ta) else None
-            if g or a:
-                rows.append([i + 1, self.r(g.get("title")) if g else "—", self.r(a.get("first_action")) if a else "—",
-                             (a or {}).get("owner_role") or "—"])
-        sh.table("tblTop", ["الفجوة", "الإجراء أو القرار المطلوب", "#", "المسؤول المقترح"],
-                 [[r[1], r[2], r[0], r[3]] for r in rows], filters=False)
+        # two separate lists (brief §11.8): the n-th gap and the n-th action are not a pair; an action names the gaps it
+        # addresses (gap_ids) explicitly
+        tg = [gaps[g] for g in list(self.narrative.get("top_gaps") or []) if g in gaps][:3]
+        ta = [recs[a] for a in list(self.narrative.get("top_actions") or []) if a in recs][:3]
+        sh.heading("أهم ثلاث فجوات")
+        sh.table("tblTopGaps", ["الفجوة", "الإثبات", "#", "المعرّف"],
+                 [[self.r(g.get("title")), "مشكلة مثبتة" if g.get("is_proven_problem") is True else "محتملة — تحتاج تحققًا",
+                   i, g.get("id")] for i, g in enumerate(tg, 1)], filters=False)
+        sh.heading("أهم ثلاثة إجراءات أو قرارات مطلوبة")
+        sh.table("tblTopActions", ["الإجراء أو القرار المطلوب", "المسؤول المقترح", "#", "يعالج الفجوة"],
+                 [[self.r(a.get("first_action") or a.get("title")), a.get("owner_role") or "—", i,
+                   "، ".join(str(x) for x in a.get("gap_ids") or []) or "—"] for i, a in enumerate(ta, 1)], filters=False)
         sh.ws.freeze_panes = "A4"
         sh.finish(fixed={1: 40, 2: 22, 3: 7, 4: 20, 5: 11, 6: 34, 7: 30, 8: 16, 9: 30}, print_titles=False, fit_width=1)
 
@@ -699,6 +817,12 @@ class Export:
             base = f[:-len(ORIGINAL_SUFFIX)]
             return f"{(self.meta.get(base) or {}).get('label') or base} كما ورد قبل الاشتقاق (قيمة مخزنة معيبة — غير مستخدمة)"
         return f
+
+    def header_label(self, f: str) -> str:
+        """A column header: the field's Arabic label; a field the mapping left unlabelled reads «حقل بلا تسمية» (its key
+        is in the «المرجع التقني» row above the header)."""
+        lab = self.field_label(f)
+        return "حقل بلا تسمية في التصنيف" if lab == f and re.fullmatch(r"[A-Za-z0-9_.]+", str(f)) else lab
 
     def _metric_fields(self) -> set:
         """Fields the metrics read: the valuation field, every period's revenue fields, resolved metric fields."""
@@ -746,9 +870,11 @@ class Export:
                 ("income_nature", "طبيعة الدخل"), ("ownership", "الملكية والحقوق"), ("waqf", "صفة الوقف"),
                 ("managed_for_others", "مدار للغير"), ("rent_allocation", "تخصيص الريع"), ("restriction", "قيود الريع")]
         headers = ["المعرّف", "الاسم", "نوع السجل", "النطاق", "سبب النطاق"] + [lab for _, lab in dims]
-        headers += [f"{self.field_label(f)} ({f})" for f in numeric]
-        headers += [f"{self.field_label(f)} ({f})" for f in text]
+        headers += [self.header_label(f) for f in numeric]
+        headers += [self.header_label(f) for f in text]
         headers += ["المرجع", "مراجع القيم الرقمية", "مشكلات البيانات"]
+        # the field keys sit in a «المرجع التقني» row above the Arabic headers, never in the headers themselves
+        tech = [None] * (5 + len(dims)) + list(numeric) + list(text) + [None] * 3
         rows = []
         for rec in self.records:
             d = rec.get("dims") or {}
@@ -780,11 +906,12 @@ class Export:
             # every numeric source cell, the fields the metrics use first (valuation, period revenue): no cut-off (N8)
             used = self._metric_fields()
             ordered = [f for f in numeric if f in used] + [f for f in numeric if f not in used]
-            refs = [f"{f}: {(fields.get(f) or {}).get('ref')}" for f in ordered if (fields.get(f) or {}).get("ref")]
+            refs = [f"{self.field_label(f)}: {(fields.get(f) or {}).get('ref')}" for f in ordered if (fields.get(f) or {}).get("ref")]
             row += [src.get("ref_name") or (f"{src.get('sheet')}!{src.get('row')}" if src.get("sheet") else None),
                     "\n".join(refs), "، ".join(rec.get("issue_ids") or [])]
             rows.append(row)
-        sh.table("tblAssets", headers, rows, freeze="C5")
+        hr, first, _ = sh.table("tblAssets", headers, rows, tech=tech)
+        sh.ws.freeze_panes = f"C{first}"
         sh.finish(fixed={2: 32})
 
     def calculations(self, wb):
@@ -796,27 +923,30 @@ class Export:
             unit = res.get("unit")
             spec = self.spec_by_id.get(mid) or {}
             rf = res.get("resolved_fields") or {}
-            excl = res.get("excluded") or []
+            excl = self.excluded_of(res)
             val_cell, unit_lab = metric_value_cell(res, empty_text(res) if res.get("status") == "empty" else "غير متاح")
             share = res.get("coverage_num_share")
             rows.append([
-                mid, res.get("label"), KIND_AR.get(res.get("kind"), res.get("kind")), val_cell, unit_lab,
+                C(mid, code=True), res.get("label"), KIND_AR.get(res.get("kind"), res.get("kind")), val_cell, unit_lab,
                 growth_status_cell(res) if growth_riyal_only(res) and is_num(res.get("value"))
                 else status_cell(res.get("status"), self.vocab, res), res.get("n_scope"), res.get("n_included"), len(excl),
-                "؛ ".join(f"{self.field_label(v) if isinstance(v, str) else v} ({v})" for k, v in rf.items()) if rf else "—",
+                "؛ ".join("، ".join(self.field_label(x) for x in (v if isinstance(v, list) else [v]) if isinstance(x, str))
+                          for k, v in rf.items()) if rf else "—",
                 C(res.get("num"), fmt=FMT_INT) if is_num(res.get("num")) else None,
                 C(res.get("den"), fmt=FMT_INT) if is_num(res.get("den")) else None,
                 C(share, fmt=FMT_SHARE) if is_num(share) else None,
                 res.get("definition"), res.get("scope_text"), res.get("basis"), res.get("valuation_date"),
-                res.get("period_text"), res.get("source_text"), result_notes(res) or None,
+                res.get("period_text"), res.get("source_text"), self.hz(result_notes(res, self.field_label)) or None,
                 "، ".join(res.get("included_ids") or []),
-                "، ".join(f"{e.get('id')} ({EXCL_REASON_AR.get(e.get('reason'), e.get('reason'))})" for e in excl[:60]),
+                "، ".join(f"{e.get('id')} ({e.get('reason_text') or EXCL_REASON_AR.get(e.get('reason'), e.get('reason'))})" for e in excl[:60]),
                 ("نعم" if spec.get("card") else "لا"),
+                C("؛ ".join(f"{k}: {'، '.join(v) if isinstance(v, list) else v}" for k, v in rf.items()) if rf else None, code=True),
             ])
-        sh.table("tblMetrics", ["المعرّف", "المؤشر", "النوع", "القيمة", "الوحدة", "الحالة", "سجلات النطاق", "المشمول",
+        sh.table("tblMetrics", [TECH, "المؤشر", "النوع", "القيمة", "الوحدة", "الحالة", "سجلات النطاق", "المشمول",
                                 "المستبعد", "الحقول المستخدمة", "البسط", "المقام", "حصة الإيراد المعروف المغطاة",
                                 "التعريف", "النطاق", "الأساس", "تاريخ التقييم", "الفترة", "المصدر", "السبب",
-                                "السجلات المشمولة", "السجلات المستبعدة وسببها", "بطاقة"], rows, freeze="C5")
+                                "السجلات المشمولة", "السجلات المستبعدة وسببها", "بطاقة", TECH + " (الحقول)"], rows,
+                 freeze="C5")
         self._calc_detail(sh)
         self._breakdowns(sh)
         sh.finish(fixed={2: 36, 14: 50, 21: 30, 22: 40}, print_titles=False)
@@ -835,9 +965,10 @@ class Export:
             if not all(isinstance(f, str) for f in fields):
                 continue
             ids = res.get("included_ids") or []
-            sh.note(f"{res.get('label') or mid} ({mid}) — {len(ids)} سجل مشمول", ncols=6)
+            sh.note(f"{res.get('label') or mid} — {len(ids)} سجل مشمول", ncols=6)
+            sh.tech_row([mid, None] + list(fields) + [None], label_col=2)
             hr = sh.row
-            heads = ["المعرّف", "الاسم"] + [f"{(self.meta.get(f) or {}).get('label') or f} ({f})" for f in fields] + ["المرجع"]
+            heads = ["المعرّف", "الاسم"] + [self.header_label(f) for f in fields] + ["المرجع"]
             for j, h in enumerate(_unique_headers(heads), 1):
                 sh._put(hr, j, h, header=True)
             r = hr
@@ -882,8 +1013,9 @@ class Export:
                 rows.append([b.get("label") or bid, key_ar,
                              C(row.get("value"), fmt=FMT_INT) if is_num(row.get("value")) else C("غير متاح", fill=GRAY_FILL, color=GRAY_TXT),
                              C(row.get("share"), fmt=FMT_SHARE) if is_num(row.get("share")) else None,
-                             row.get("n_known"), row.get("n_unknown"), b.get("note") or ("قد تتداخل الفئات" if b.get("overlap") else ""), bid])
-        sh.table("tblBreakdowns", ["التوزيع", "الفئة", "القيمة", "الحصة", "سجلات معروفة", "سجلات غير معروفة", "ملاحظة", "المعرّف"], rows)
+                             row.get("n_known"), row.get("n_unknown"), b.get("note") or ("قد تتداخل الفئات" if b.get("overlap") else ""),
+                             C(bid, code=True)])
+        sh.table("tblBreakdowns", ["التوزيع", "الفئة", "القيمة", "الحصة", "سجلات معروفة", "سجلات غير معروفة", "ملاحظة", TECH], rows)
 
     def exclusions(self, wb):
         sh = Sheet(wb, "المستبعدات", "المستبعدات والمعزولات وأسبابها",
@@ -895,15 +1027,15 @@ class Export:
                              (rec.get("source") or {}).get("ref_name"), rec.get("scope_reason") or "—", "جميع المؤشرات"])
         for ex in self.rec_doc.get("excluded_rows") or []:
             rows.append(["صف مستبعد من المصدر", f"الصف {ex.get('row')}", f"{ex.get('sheet')}!{ex.get('row')}",
-                         ex.get("reason"), "جميع المؤشرات"])
+                         self.hz(ex.get("reason")), "جميع المؤشرات"])
         for ex in self.narrative.get("exclusions") or []:
             if isinstance(ex, dict):
                 rows.append(["استبعاد تحليلي", self.r(ex.get("what")), ex.get("where"), self.r(ex.get("reason")), "—"])
         for mid, res in self.metrics.items():
             res = res or {}
-            for e in res.get("excluded") or []:
+            for e in self.excluded_of(res):
                 st = e.get("reason")
-                reason = EXCL_REASON_AR.get(st) or (((self.vocab.get("status") or {}).get(st) or {}).get("ar")) or st
+                reason = e.get("reason_text") or EXCL_REASON_AR.get(st) or (((self.vocab.get("status") or {}).get(st) or {}).get("ar")) or st
                 rows.append(["مستبعد من مؤشر", e.get("id"), None, reason, res.get("label") or mid])
         sh.table("tblExclusions", ["النوع", "البند", "الموضع", "السبب", "المؤشر المتأثر"], rows, freeze=True)
         sh.finish(fixed={2: 40, 4: 50, 5: 40})
@@ -985,8 +1117,11 @@ class Export:
                 # the difference come from every record of the source — never «recorded − 0» beside «matches» (N4)
                 use_all = not full[1] or status in ("match_all_records", "match_section_all_records")
                 base, base_sec = (all_rec, all_sec) if use_all else (full, sec)
+                # «السجلات المجموعة»: the records of the sum the total was compared with — a section (sub)total lists the
+                # lines of its own section, not the whole source
+                summed = {"match_section": sec, "match_section_all_records": all_sec}.get(status, base)
                 item.update(recorded=recorded, sum_in_scope=full[0], n_known=full[1], n_unknown=full[2],
-                            ids=base[4], difference=round(recorded - (matched if matched is not None else base[0]), 2),
+                            ids=summed[4], difference=round(recorded - (matched if matched is not None else base[0]), 2),
                             difference_basis="all_records" if use_all else "in_scope", sum_all_records=all_rec[0],
                             section_sum=base_sec[0] if base_sec[1] and (lo is not None or base_sec[1] != base[1]) else None,
                             matched_sum=matched, status=status)
@@ -998,8 +1133,9 @@ class Export:
         if not items:
             return
         sh = Sheet(wb, "المطابقة مع الإجماليات", "مطابقة الإجماليات المدونة في الملف مع مجموع السجلات المؤهلة",
-                   "القيمة المدونة من صف الإجمالي المستبعد (03 excluded_rows)؛ المجموع من سجلات المصدر نفسه ضمن النطاق بقيم "
-                   "معروفة فقط (المجهول لا يُجمع صفرًا). الفرق = المدون − المجموع؛ الفرق غير المفسَّر يُذكر في مشكلات البيانات.")
+                   "القيمة المدونة من صف الإجمالي المستبعد من السجلات؛ المجموع من سجلات المصدر نفسه ضمن النطاق بقيم "
+                   "معروفة فقط (المجهول لا يُجمع صفرًا). الفرق = المدون − المجموع؛ الفرق غير المفسَّر يُذكر في مشكلات البيانات. "
+                   "«السجلات المجموعة» سجلات المجموع الذي قورن به الإجمالي (سجلات قسمه لإجمالي القسم).")
         rows = []
         for it in items:
             st = it["status"]
@@ -1010,7 +1146,7 @@ class Export:
             ids = it.get("ids") or []
             known = it.get("recorded") is not None
             rows.append([
-                it["source_id"], it["ref"], f"{lab} ({it['field']})",
+                str(it.get("sheet") or "").strip() or it["source_id"], it["ref"], lab,
                 C(it["recorded"], fmt=FMT_INT if float(it["recorded"]).is_integer() else FMT_DEC) if known
                 else C(unknown_text(it["tv"], self.vocab), fill=GRAY_FILL, color=GRAY_TXT),
                 C(it["sum_in_scope"], fmt=FMT_INT) if known else None,
@@ -1019,15 +1155,18 @@ class Export:
                 if known else None,
                 C(it["section_sum"], fmt=FMT_INT) if known and it.get("section_sum") is not None else None,
                 C(it["sum_all_records"], fmt=FMT_INT) if known else None,
-                ({"all_records": "كل سجلات المصدر (لا سجلات ضمن النطاق أو المطابقة بها)", "in_scope": "السجلات ضمن النطاق"}
+                (({"all_records": "سجلات قسمه في المصدر (لا سجلات ضمن النطاق أو المطابقة بها)",
+                   "in_scope": "سجلات قسمه ضمن النطاق"} if st in ("match_section", "match_section_all_records") else
+                  {"all_records": "كل سجلات المصدر (لا سجلات ضمن النطاق أو المطابقة بها)", "in_scope": "السجلات ضمن النطاق"})
                  .get(it.get("difference_basis"), "—") if known else None),
                 C(RECON_STATUS_AR[st], fill=fill, color=color),
-                "، ".join(ids[:40]) + ("…" if len(ids) > 40 else ""), it.get("reason"),
+                "، ".join(ids[:40]) + (f"… و{len(ids) - 40} سجلًا آخر (القائمة كاملة في 05_metrics.json)" if len(ids) > 40 else ""), self.hz(it.get("reason")),
+                C(f"{it['source_id']} · {it['field']}", code=True),
             ])
-        sh.table("tblReconciliation", ["المصدر", "صف الإجمالي", "الحقل", "القيمة المدونة", "مجموع السجلات ضمن النطاق",
+        sh.table("tblReconciliation", ["الورقة", "صف الإجمالي", "الحقل", "القيمة المدونة", "مجموع السجلات ضمن النطاق",
                                        "قيم معروفة", "قيم غير معروفة", "الفرق (المدون − المجموع)", "مجموع سجلات القسم",
                                        "مجموع كل سجلات المصدر", "أساس الفرق والقسم", "النتيجة", "السجلات المجموعة",
-                                       "سبب استبعاد الصف"],
+                                       "سبب استبعاد الصف", TECH],
                  rows, freeze=True)
         n_bad = sum(1 for it in items if it["status"] == "mismatch")
         sh.note(f"بنود المطابقة: {len(items)}؛ فروق غير مفسَّرة: {n_bad}. «قيم غير معروفة» سجلات ضمن النطاق قيمتها في الحقل "
@@ -1037,27 +1176,34 @@ class Export:
     def issues(self, wb):
         sh = Sheet(wb, "مشكلات البيانات", "سجل مشكلات البيانات (منفصل عن أداء المحفظة)",
                    "المصدر: فحص المصنف (01)، التطبيع (03)، أو ملاحظات المحلل (06). الخطورة تخص أثر المشكلة على الحساب، وليست حكمًا على الأصل.")
-        sev_ar = self.vocab.get("severity") or {}
+        sev_ar = dict(SEVERITY_AR_EXTRA, **(self.vocab.get("severity") or {}))
         rows = []
 
         def sev(s):
             fill, color = SEVERITY_STYLE.get(s, (None, None))
             return C(sev_ar.get(s, s or "—"), fill=fill, color=color)
+
+        def tech(x):
+            keys = [k for k in (x.get("type"), x.get("field")) if isinstance(k, str) and k and not re.search(r"[\u0600-\u06FF]", k)]
+            return C(" · ".join(keys) or None, code=True)
+        # the type is shown by its Arabic label; the type and field keys only in «المرجع التقني» (BP-10)
         for a in self.wbmap.get("anomalies") or []:
             if isinstance(a, dict):
-                rows.append([a.get("id"), "فحص المصنف", a.get("type"), sev(a.get("severity")), a.get("where"), None,
-                             a.get("detail"), None, None])
+                rows.append([a.get("id"), "فحص المصنف", issue_type_ar(a.get("type")), sev(a.get("severity")), a.get("where"),
+                             None, self.hz(a.get("detail")), None, None, tech(a)])
         for i in self.rec_doc.get("issues") or []:
             if isinstance(i, dict):
-                rows.append([i.get("id"), "التطبيع", i.get("type"), sev(i.get("severity")), i.get("where"),
-                             "، ".join(i.get("record_ids") or []), i.get("detail"), i.get("impact"), i.get("treatment")])
+                rows.append([i.get("id"), "التطبيع", issue_type_ar(i.get("type")), sev(i.get("severity")), i.get("where"),
+                             "، ".join(i.get("record_ids") or []), self.hz(i.get("detail")), self.hz(i.get("impact")),
+                             self.hz(i.get("treatment")), tech(i)])
         for i in self.narrative.get("data_issues_extra") or []:
             if isinstance(i, dict):
-                rows.append([i.get("id"), "ملاحظة المحلل", i.get("type") or "—", sev(i.get("severity")), i.get("where"),
+                rows.append([i.get("id"), "ملاحظة المحلل", issue_type_ar(i.get("type")) if i.get("type") else "—",
+                             sev(i.get("severity")), i.get("where"),
                              "، ".join(i.get("record_ids") or []), self.r(i.get("detail")), self.r(i.get("impact")),
-                             self.r(i.get("treatment"))])
-        sh.table("tblIssues", ["المعرّف", "المصدر", "النوع", "الخطورة", "الموضع", "السجلات", "المشكلة", "الأثر", "المعالجة"],
-                 rows, freeze=True)
+                             self.r(i.get("treatment")), tech(i)])
+        sh.table("tblIssues", ["المعرّف", "المصدر", "النوع", "الخطورة", "الموضع", "السجلات", "المشكلة", "الأثر", "المعالجة",
+                               TECH], rows, freeze=True)
         sh.finish(fixed={7: 60, 8: 45, 9: 45})
 
     def gaps_recs(self, wb):
@@ -1084,11 +1230,11 @@ class Export:
                     mval = (fmt_value_text(res.get("abs_change"), "SAR") + f" (تغير بالريال؛ قابلية المقارنة {growth_comp_ar(res)}، لا نسبة)")
                 else:
                     mval = fmt_value_text(res.get("value"), res.get("unit"))
-            ev = [(e.get("ref") if isinstance(e, dict) else e) for e in g.get("evidence") or []]
-            rows.append([g.get("id"), "نعم" if g.get("id") in top_g else "", self.r(g.get("title")), g.get("scope"),
+            ev = [self.ev_text(e) for e in g.get("evidence") or []]
+            rows.append([g.get("id"), "نعم" if g.get("id") in top_g else "", self.r(g.get("title")), self.scope_ar(g.get("scope")),
                          (self.vocab.get("severity") or {}).get(g.get("severity"), g.get("severity")),
                          C("مشكلة مثبتة", fill=RED_FILL, color=RED_TXT, bold=True) if proven else C("محتملة — تحتاج تحققًا"),
-                         ev, self.r(imp.get("text")), f"{mref}: {mval}" if mref else None, self.r(g.get("proven_cause")) or "—",
+                         ev, self.r(imp.get("text")), f"{self.ev_text(mref)}: {mval}" if mref else None, self.r(g.get("proven_cause")) or "—",
                          [self.r(x) for x in g.get("possible_causes") or []], [self.r(x) for x in g.get("verification_needed") or []],
                          self.r(g.get("proposed_action"))])
         sh.heading("الفجوات")
@@ -1100,7 +1246,8 @@ class Export:
                         key=lambda x: (x.get("priority") if isinstance(x.get("priority"), int) else 999, str(x.get("id")))):
             rk = x.get("ranking") or {}
             rows.append([x.get("id"), x.get("priority"), "نعم" if x.get("id") in top_a else "", "، ".join(x.get("gap_ids") or []),
-                         self.r(x.get("target")), self.r(x.get("problem")), x.get("evidence"), self.r(x.get("first_action")),
+                         self.r(x.get("target")), self.r(x.get("problem")), [self.ev_text(e) for e in list_of(x.get("evidence"))],
+                         self.r(x.get("first_action")),
                          [self.r(a) for a in x.get("alternatives") or []], self.r(x.get("recommended_option")),
                          self.r(x.get("rationale")), x.get("owner_role"), x.get("duration"), self.r(x.get("cost")),
                          self.r(x.get("expected_impact")), self.r(x.get("success_kpi")), x.get("approval_required") or "لا يلزم",
@@ -1336,13 +1483,13 @@ class Export:
                   for a in n.get("assumptions") or [] if isinstance(a, dict)])
         sh.heading("المصادر")
         sh.table("tblSources", ["النوع", "المرجع", "التاريخ", "حدود الاستخدام"],
-                 [[SOURCE_TYPE_AR.get(s.get("type"), s.get("type")), s.get("ref"), s.get("date"), s.get("limits")]
+                 [[SOURCE_TYPE_AR.get(s.get("type"), s.get("type")), self.hz(s.get("ref")), s.get("date"), self.r(s.get("limits"))]
                   for s in n.get("sources") or [] if isinstance(s, dict)])
         sh.heading("الأسئلة المؤثرة (ثلاثة كحد أقصى)")
         sh.table("tblQuestions", ["#", "السؤال"], [[i, self.r(q)] for i, q in enumerate(n.get("questions") or [], 1)])
         sh.heading("البيانات الإضافية المطلوبة وما ستتيحه")
         sh.table("tblDataRequests", ["الأولوية", "البند", "ما سيتيحه"],
-                 [[d.get("priority"), self.r(d.get("item")), d.get("enables")] for d in
+                 [[d.get("priority"), self.r(d.get("item")), self.r(d.get("enables"))] for d in
                   sorted([d for d in n.get("data_requests") or [] if isinstance(d, dict)],
                          key=lambda d: d.get("priority") if isinstance(d.get("priority"), int) else 999)])
         sc = n.get("scenarios") or {}
@@ -1511,8 +1658,10 @@ def _st_run(d):
         "comparability": {"status": "unverified", "reason": "أساس الضريبة غير موضح"}}}})
     _st_write(d, "07_validation.json", {"blocking_count": 0, "warning_count": 0, "acknowledged_count": 2,
                                         "generated_at": "2026-01-02T10:20:30", "checks": [
-                                            {"id": "totals_reconciliation", "level": "acknowledged", "passed": False},
-                                            {"id": "growth_comparability", "level": "acknowledged", "passed": False}]})
+                                            {"id": "totals_reconciliation", "level": "acknowledged", "passed": False,
+                                             "title": "مطابقة الإجماليات المدونة"},
+                                            {"id": "growth_comparability", "level": "acknowledged", "passed": False,
+                                             "title": "قابلية مقارنة الفترات"}]})
     vc = {"prev": {"source_file": "old.xlsx"}, "curr": {"source_file": "t.xlsx"}, "period_relation": "same_period",
           "counts": {"scope_change": 1, "data_correction": 1},
           "category_labels": dict(VC_CATEGORIES),
@@ -1564,11 +1713,17 @@ def self_test() -> int:
                 check(f"sheet «{name}» present", name in wb.sheetnames, wb.sheetnames)
             if "المطابقة مع الإجماليات" in wb.sheetnames:
                 ws = wb["المطابقة مع الإجماليات"]
-                got = {(r[0], r[11]): r[7] for r in ws.iter_rows(min_row=5, values_only=True) if r[0] in ("T", "U")}
+                src = lambda r: str(r[14] or "").split(" · ")[0]  # noqa: E731 — the technical column «V · field»
+                got = {(src(r), r[11]): r[7] for r in ws.iter_rows(min_row=5, values_only=True) if src(r) in ("T", "U")}
                 check("A14 reconciliation: T matches 150,000 in scope; U differs by 2",
                       got == {("T", RECON_STATUS_AR["match"]): 0, ("U", RECON_STATUS_AR["mismatch"]): 2}, got)
-                vrows = {r[1]: r for r in ws.iter_rows(min_row=5, values_only=True) if r[0] == "V"}
+                vrows = {r[1]: r for r in ws.iter_rows(min_row=5, values_only=True) if src(r) == "V"}
                 sec, sec2, grand = vrows.get("S!C4"), vrows.get("S!C6"), vrows.get("S!C7")
+                check("item 6: a section total lists its own section's lines (S!C4: V-1، V-2; S!C6: V-3), the grand total all",
+                      bool(sec) and sec[12] == "V-1، V-2" and bool(sec2) and sec2[12] == "V-3"
+                      and bool(grand) and grand[12] == "V-1، V-2، V-3", (sec and sec[12], sec2 and sec2[12], grand and grand[12]))
+                check("BP-10: the sheet name, the Arabic field label and the key only in «المرجع التقني»",
+                      bool(sec) and sec[0] == "S" and sec[2] == "الإيراد 2025" and sec[14] == "V · rev.2025.excl_vat", sec)
                 check("N4 isolated section totals: section sums 100 and 30 (all records), difference 0, never «recorded − 0»",
                       bool(sec) and sec[8] == 100 and sec[7] == 0 and bool(sec2) and sec2[8] == 30 and sec2[7] == 0,
                       (sec, sec2))
@@ -1581,16 +1736,21 @@ def self_test() -> int:
             nums = [c.value for sh in ("ملخص", "الحسابات") for r in wb[sh].iter_rows() for c in r if isinstance(c.value, (int, float))]
             check("N6 the growth % (37.5) is no value cell in ملخص/الحسابات", 37.5 not in nums, "")
             vline = next((r[1] for r in ws.iter_rows(values_only=True) if r and r[0] == "التحقق الآلي"), "")
-            check("BP-11 validation row lists the acknowledged warnings and the validation time",
-                  "مُقرّ بها 2" in str(vline) and "growth_comparability" in str(vline) and "2026-01-02 10:20" in str(vline), vline)
+            check("BP-11 validation row lists the acknowledged warnings by their Arabic titles and the validation time",
+                  "مُقرّ بها 2" in str(vline) and "«قابلية مقارنة الفترات»" in str(vline)
+                  and "growth_comparability" not in str(vline) and "2026-01-02 10:20" in str(vline), vline)
             ws = wb["الأصول"]
-            hdr = [c.value for c in next(ws.iter_rows(min_row=4, max_row=4))]
+            tech = [c.value for c in next(ws.iter_rows(min_row=4, max_row=4))]
+            hdr = [c.value for c in next(ws.iter_rows(min_row=5, max_row=5))]
             check("N7 «__original» column labelled as the stored value before the derivation",
                   any("كما ورد قبل الاشتقاق" in str(h) for h in hdr), hdr)
+            check("BP-10 headers are Arabic labels only; the keys sit in the «المرجع التقني» row above them",
+                  tech[0] == TECH + ":" and "val.2024.total__original" in tech
+                  and not any(re.search(r"[a-z]+\.[a-z0-9_]+", str(h or "")) for h in hdr), (tech, hdr))
             j = hdr.index("مراجع القيم الرقمية") if "مراجع القيم الرقمية" in hdr else None
-            refs = next((r[j] for r in ws.iter_rows(min_row=5, values_only=True) if r[0] == "T-1"), "") if j is not None else ""
-            check("N8 every numeric source cell listed (no 12-line cut), metric fields first",
-                  str(refs).count("\n") >= 15 and str(refs).startswith("rev.2025.excl_vat"), refs)
+            refs = next((r[j] for r in ws.iter_rows(min_row=6, values_only=True) if r[0] == "T-1"), "") if j is not None else ""
+            check("N8 every numeric source cell listed (no 12-line cut), metric fields first, by their labels",
+                  str(refs).count("\n") >= 15 and str(refs).startswith("الإيراد 2025: "), refs)
             if "متابعة التوصيات" in wb.sheetnames:
                 ws = wb["متابعة التوصيات"]
                 dvs = [dv.formula1 for dv in ws.data_validations.dataValidation]

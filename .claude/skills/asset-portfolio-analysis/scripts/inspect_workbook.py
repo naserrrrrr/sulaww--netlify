@@ -35,7 +35,7 @@ import zipfile  # noqa: E402
 from collections import Counter, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    AMBIGUOUS_DATE_NOTE, CONTRACT_VERSION, EXCEL_ERRORS, NA_TOKENS, NOT_APPLICABLE_TOKENS, REDACTED,
+    AMBIGUOUS_DATE_NOTE, ANOMALY_TYPE_AR, CONTRACT_VERSION, EXCEL_ERRORS, NA_TOKENS, NOT_APPLICABLE_TOKENS, REDACTED,
     clean_text, extract_years, is_filler, is_pii_header, is_total_label, looks_like_phone, mask_pii, name_key,
     normalize_arabic, parse_date, parse_number, pii_value_hits, ref, save_json, sha256_file,
 )
@@ -54,39 +54,7 @@ STATE_AR = {"visible": "ظاهرة", "hidden": "مخفية", "veryHidden": "مخ
 DIRECT_EXT = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 CONVERT_EXT = {".xls", ".ods", ".xlsb", ".fods"}
 
-TYPE_AR = {
-    "formula_year_mismatch": "صيغة تجمع أعمدة سنة تختلف عن سنة عنوان عمودها",
-    "cached_value_mismatch": "القيمة المخزنة لا تطابق إعادة حساب الصيغة",
-    "cached_missing": "صيغ بلا قيم محسوبة مخزنة",
-    "excel_error": "خطأ Excel",
-    "total_mismatch": "إجمالي لا يطابق مجموع تفاصيله",
-    "hardcoded_total": "إجمالي مدوّن يدويًا بلا صيغة",
-    "count_mismatch": "عدد البنود في صف الإجمالي لا يطابق العدد الفعلي",
-    "row_total_mismatch": "إجمالي الصف لا يساوي الأرض + المبنى للسنة نفسها",
-    "derived_from_total": "مكوّن مشتق بالطرح من الإجمالي",
-    "mixed_types": "أنواع بيانات مختلطة في عمود",
-    "text_in_numeric": "نص في عمود عنوانه مالي/رقمي",
-    "numeric_text": "أرقام مخزنة كنص",
-    "vat_identical": "الإيراد بدون الضريبة يساوي الإيراد مع الضريبة",
-    "vat_inconsistent": "إيراد مع الضريبة أقل من بدونها",
-    "duplicate_name": "اسم مكرر داخل الورقة",
-    "cross_sheet_name_match": "أسماء متطابقة بين أوراق مختلفة (للربط)",
-    "shared_deed": "رقم صك مشترك بين أكثر من صف",
-    "serial_gap": "فجوة أو تكرار في عمود التسلسل",
-    "pii_column": "عمود بيانات شخصية",
-    "partial_period_header": "عنوان عمود يدل على فترة جزئية",
-    "garbled_header": "عنوان عمود مشوّه أو مكرر النص",
-    "filler_block": "صفوف حشو (مسافات غير مرئية)",
-    "hidden_sheet": "ورقة مخفية",
-    "hijri_date_text": "تاريخ هجري مخزن كنص",
-    "zero_valuation": "تقييمات مسجلة بصفر",
-    "unlabeled_column": "قيم في عمود بلا عنوان",
-    "outside_table_rows": "بيانات خارج نطاق جدول Excel",
-    "hidden_rows": "صفوف بيانات مخفية",
-    "hidden_columns": "أعمدة مخفية تحتوي بيانات",
-    "mixed_calendar": "عمود تواريخ يخلط التقويمين الهجري والميلادي",
-    "formula_blank_inputs": "صيغة قيمتها المخزنة صفر ومدخلاتها فارغة",
-}
+TYPE_AR = ANOMALY_TYPE_AR   # Arabic labels of the anomaly types (shared with export_workbook.py)
 
 ROLE_AR = {
     "asset_register": "سجل أصول",
@@ -239,14 +207,13 @@ def sheet_key(name: str) -> str:
     return clean_text(name).lower()
 
 
-def looks_like_person_name(value: str) -> bool:
-    s = clean_text(value)
-    if not s or not re.search(r"[^\W\d_]", s):
-        return False
-    n = normalize_arabic(s)
-    generic = ("جمعيه", "مؤسسه", "شركه", "مكتب", "microsoft", "openpyxl", "apache", "libreoffice", "admin",
-               "user", "owner", "windows", "office", "unknown", "pc", "laptop", "computer", "مستخدم")
-    return not any(g in n for g in generic)
+_SOFTWARE_RE = re.compile(r"^(?:microsoft(?: office| excel)?(?: user)?|openpyxl|apache poi|libreoffice|openoffice(?:\.org)?|"
+                          r"wps(?: office)?|google sheets|numbers|asset-portfolio-analysis)$", re.IGNORECASE)
+
+
+def is_software_name(value: str) -> bool:
+    """A file-property author that is a program (openpyxl, «Microsoft Office User»), not a person or an account."""
+    return bool(_SOFTWARE_RE.match(clean_text(value) or ""))
 
 
 # =========================================================================================
@@ -663,10 +630,12 @@ def load_book(path: str, notes: list):
 
     props = {}
     p = wb_f.properties
+    # author metadata names a person or an account (initials, a username): both are masked alike; only the name of
+    # the software that wrote the file is kept
     for key, attr in (("creator", "creator"), ("last_modified_by", "lastModifiedBy")):
         val = getattr(p, attr, None)
         if val:
-            props[key] = REDACTED if looks_like_person_name(val) else clean_text(val)
+            props[key] = clean_text(val) if is_software_name(val) else REDACTED
     for key, attr in (("created", "created"), ("modified", "modified"), ("last_printed", "lastPrinted")):
         val = getattr(p, attr, None)
         if val:
@@ -2332,7 +2301,7 @@ def check_pii(sa: SheetAnalysis, an: Anomalies, pii_out: list):
                    f"العمود {col_letter(c)}" + (f" «{short(p['header'], 40)}»" if p["header"] else "")
                    + " يحتوي بيانات شخصية (" + ("عنوان العمود" if p["_pii_reason"] == "header"
                                                else "نمط القيم: أرقام اتصال أو بريد أو آيبان أو هوية")
-                   + "). لا تُنقل قيمه إلى أي مخرج، ويُربط في التعيين بنوع pii ليُسقط.",
+                   + "). لا تُنقل قيمه إلى أي مخرج، ويُوسم في التصنيف عمودَ بيانات شخصية فيُسقط من السجلات.",
                    {"col": col_letter(c), "header": p["header"], "reason": p["_pii_reason"]}, order=(0, c))
 
 

@@ -280,6 +280,10 @@ if [[ -f "$TESTS_DIR/test_review_round3.py" ]]; then
   run_step "tests/test_review_round3.py (isolated totals, export growth, issue wording, facts)" 0 "${PY[@]}" \
     "$TESTS_DIR/test_review_round3.py" || true
 else skip "tests/test_review_round3.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_final_polish.py" ]]; then
+  run_step "tests/test_final_polish.py (scope_ids, workbook board wording, top lists, section totals, author masking, summary hygiene)" 0 \
+    "${PY[@]}" "$TESTS_DIR/test_final_polish.py" || true
+else skip "tests/test_final_polish.py (غير موجود)"; fi
 if [[ -f "$TESTS_DIR/robustness/test_inspect_robustness.py" ]]; then
   # honours APA_BUILD_DIR (writes to $APA_BUILD_DIR/robustness), else a temp dir removed afterwards
   run_step "tests/robustness/test_inspect_robustness.py" 0 env APA_BUILD_DIR="$BUILD" "${PY[@]}" \

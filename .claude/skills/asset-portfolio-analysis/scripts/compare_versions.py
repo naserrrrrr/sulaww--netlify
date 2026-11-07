@@ -455,7 +455,7 @@ def definition_changes(prev: Run, curr: Run):
                 if pp[pid].get(k) != pc[pid].get(k):
                     fa, fb = pp[pid].get(k), pc[pid].get(k)
                     add("period_field", f"periods[{pid}].{k}", fa, fb,
-                        "تغير الحقل المعتمد للفترة نفسها" + _switch_text(prev, curr, fa, fb), period=pid, attr=k)
+                        "تغير حقل الفترة المستخدم في المؤشرات للفترة نفسها" + _switch_text(prev, curr, fa, fb), period=pid, attr=k)
             sa = (pp[pid].get("comparable_with_prev") or {}).get("status")
             sb = (pc[pid].get("comparable_with_prev") or {}).get("status")
             if sa != sb:
@@ -536,9 +536,9 @@ def _definition_causes(prev: Run, curr: Run, mid: str, a: dict, b: dict, fields:
             if isinstance(fa, list) or isinstance(fb, list):
                 la = "، ".join(_flabel(prev.meta, x) for x in (fa if isinstance(fa, list) else [fa]) if x)
                 lb = "، ".join(_flabel(curr.meta, x) for x in (fb if isinstance(fb, list) else [fb]) if x)
-                causes.append(f"الحقول المعتمدة{ROLE_AR.get(role, f' ({role})')} تغيرت: {la or '—'} ← {lb or '—'}")
+                causes.append(f"الحقول المستخدمة في المؤشرات{ROLE_AR.get(role, f' ({role})')} تغيرت: {la or '—'} ← {lb or '—'}")
             else:
-                causes.append(f"الحقل المعتمد{ROLE_AR.get(role, f' ({role})')} تغير" + _switch_text(prev, curr, fa, fb))
+                causes.append(f"الحقل المستخدم في المؤشرات{ROLE_AR.get(role, f' ({role})')} تغير" + _switch_text(prev, curr, fa, fb))
     for d in def_changes:
         sub = d.get("subtype")
         if sub == "metric_definition" and d.get("metric_id") == mid:

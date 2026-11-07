@@ -48,7 +48,7 @@
 | وضوح النواقص والافتراضات [§13.8] | `token_null_value` و`data_coverage_low` و`unknown_classification`. ومراجعتك لـ`exclusions` و`assumptions` و`data_issues_extra` | كل مؤشر ناقص له سبب ظاهر. وكل افتراض له `basis` |
 | ربط التوصيات بالأدلة [§13.9] | `gap_evidence` و`recommendation_links` و`recommendation_fields` و`plan_links` و`plan_completeness` و`top_lists` و`evidence_refs_other` و`drastic_without_study` و`drastic_recommendations` و`narrative_scores` و`fact_tokens` و`metric_tokens` | لا خطأ مانع |
 | الرسالة والمرفق [§13.1، §13.3] | `validate_analysis.py` بعد `export_workbook.py` وكتابة `09_message.md`: `pii_export_patterns` (كل خلايا المرفق؛ والمرفق الأقدم من 03 أو 06 يُوسم بأنه قد يكون قديمًا)، و`pii_text_patterns` (الرسالة)، و`message_numbers` | لا خطأ مانع، وكل رقم في الرسالة يطابق `05` أو الحقائق أو الملف |
-| عمل التفاعل والطباعة [§13.10] | `check_dashboard.mjs`: `buttons` و`table_search` و`table_sort` و`table_detail` و`table_cells` و`print` و`mobile_overflow` و`draft`، ثم مراجعتك البصرية للقطات | خروج 0. واللقطات سليمة (`dashboard-spec.md` §9) |
+| عمل التفاعل والطباعة [§13.10] | `check_dashboard.mjs`: `buttons` و`table_search` و`table_sort` و`table_detail` و`table_cells` و`print` و`mobile_overflow` و`first_screen` و`draft`، ثم مراجعتك البصرية للقطات | خروج 0. واللقطات سليمة (`dashboard-spec.md` §9) |
 
 ## 4. تسلسل فحص الجودة (نفّذه بالترتيب)
 
@@ -68,7 +68,7 @@ python3 $SKILL_DIR/scripts/validate_analysis.py --run-dir "$RUN" --xlsx "$SRC" -
   - مثال مقبول: تحذير `growth_comparability` حين تبقى قابلية المقارنة «غير متحققة» لغياب وصف الضريبة في المصدر، مع ذكر ذلك في السرد دون حكم بالنمو.
   - ولا تتجاهل التحذيرات بصمت. وراجع جدول «المطابقة مع الإجماليات» في `07_validation.md`.
 - [ ] **(4):** `08_dashboard_check.json` فيه `"passed": true` (والمسودة تفشل الفحص `draft` ما لم يُمرَّر `--allow-draft`؛ لا تسلّم مسودة). وراجع مصفوفة `warnings` فيه (أرقام تشبه الهوية الوطنية). وقرأتَ بأداة Read `screens/desktop.png` و`screens/desktop_01.png`… ومقاطع `screens/details_open_01.png`… و`screens/mobile.png` و`screens/mobile_full.png` و`screens/mobile_360.png` و`screens/mobile_detail.png` وصفحات `screens/print.pdf`، وراجعتها بقائمة `dashboard-spec.md` §9.
-- [ ] **الخلاصة:** بين 120 و180 كلمة، وعناصرها الخمسة حاضرة، وتسميات العائد حرفية، ولا «صافي» ولا «كلي» بلا مدخلات.
+- [ ] **الخلاصة:** بين 120 و180 كلمة، وعناصرها الخمسة حاضرة، وتسميات العائد حرفية، ولا «صافي» ولا «كلي» بلا مدخلات. وهي للمجلس: لا مراجع خلايا («الورقة!B7») ولا صيغ فيها (الدليل في رقاقات الأدلة والتفاصيل)، ولا عدد مكرر رقمًا وكلمة («1 أصلًا واحدًا»؛ الواحد والاثنان بالكلمات أو رمز يتبعه المعدود). يرفع التحذير `exec_summary_hygiene` ما يخالف ذلك.
 - [ ] **الأسئلة والبيانات:** الأسئلة ثلاثة على الأكثر. و`data_requests` تذكر ما ستتيحه.
 - [ ] **الخصوصية:** لا بيانات شخصية في أي مخرج، ويثبت ذلك `pii_*` و`pii_export_patterns` و`privacy` (الأنماط المشتركة في `assets/pii_patterns.json`).
 - [ ] **الرسالة:** `09_message.md` مكتوبة، وأرقامها مطابقة لـ`05` أو الحقائق (تحذير `message_numbers` يذكر كل رقم لا يطابق، والسنوات وترقيم القوائم و«30/60/90 يومًا» والتواريخ والمسارات لا تُعد)، ولا بيانات اتصال فيها، وحالة كل فحص مذكورة كما هي (ومعها عدد التحذيرات المُقرّ بها).

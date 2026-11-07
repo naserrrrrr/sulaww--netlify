@@ -51,7 +51,9 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .num { unicode-bidi: isolate; white-space: nowrap; }
 .num[dir="ltr"], .tok { direction: ltr; unicode-bidi: isolate; }
 .tok { white-space: nowrap; }
-.ref { direction: ltr; unicode-bidi: isolate; }
+/* a cell reference takes its direction from its dir attribute only (refc): RTL when the sheet name is Arabic, so every
+   «Sheet!Cell» reads sheet → «!» → cell in the Arabic text, never the reverse; Latin-only refs are LTR */
+.ref { unicode-bidi: isolate; }
 
 /* ===== Buttons, pills, tags ======================================================= */
 .btn {
@@ -97,12 +99,17 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .identity h1 { font-size: 30px; font-weight: 700; margin-top: 4px; }
 .identity h1.na { color: var(--na-ink); font-weight: 600; }
 .identity-sub { color: var(--ink-2); margin-top: 4px; }
-.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0; margin: 16px 0 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
-.meta-grid > div { padding: 12px 16px; border-inline-start: 1px solid var(--line); min-width: 0; }
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; margin: 14px 0 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.meta-grid > div { padding: 9px 14px; border-inline-start: 1px solid var(--line); min-width: 0; }
 .meta-grid > div:first-child { border-inline-start: 0; }
 .meta-grid dt { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .meta-grid dd { margin: 2px 0 0; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; font-size: 14px; }
-.meta-grid dd .sub { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.meta-grid dd .sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 400; color: var(--muted); font-size: 12px; line-height: 1.55; }
+/* identification evidence (cell references, sources, file) behind one disclosure: the header keeps value + one line */
+.meta-ev { margin: 0 0 14px; font-size: 13px; }
+.meta-ev > summary { cursor: pointer; color: var(--navy-2); font-weight: 600; display: list-item; width: max-content; max-width: 100%; min-height: 32px; padding: 4px 4px 2px; }
+.meta-ev[open] > summary { margin-bottom: 6px; }
+.meta-ev .kv { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; }
 .meta-grid dd .fname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: right; }
 
 /* ===== Filter bar ================================================================= */
@@ -362,7 +369,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .meta-grid > div { border-inline-start: 0; border-top: 1px solid var(--line); padding: 7px 10px; }
   .meta-grid dt { font-size: 11.5px; }
   .meta-grid dd { font-size: 13px; }
-  .meta-grid dd .sub { font-size: 11.5px; line-height: 1.5; }
+  .meta-grid dd .sub { font-size: 11.5px; line-height: 1.5; -webkit-line-clamp: 2; }
+  .meta-ev { margin-bottom: 10px; }
   .meta-grid > div:nth-child(-n+2) { border-top: 0; }
   .meta-grid > div:nth-child(even) { border-inline-start: 1px solid var(--line); }
   .summary-text { padding: 16px; }
@@ -432,9 +440,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .summary-text { padding: 12px 16px; }
   .summary-text p { font-size: 13px; line-height: 1.75; max-width: none; }
   .kpi, .chart-card { break-inside: avoid; page-break-inside: avoid; }
-  /* long gap/action items, assessment cards and plan columns may continue on the next page (whole-block moves left
-     pages a third empty); their heading stays with the first lines */
-  .item, .assess, .plan-col { break-inside: auto; page-break-inside: auto; }
+  /* long gap/action items and plan columns may continue on the next page (whole-block moves left pages a third
+     empty); their heading stays with the first lines. An assessment card moves whole (a card split at its top left an
+     empty card frame at the foot of page 1) */
+  .item, .plan-col { break-inside: auto; page-break-inside: auto; }
+  .assess { break-inside: avoid; page-break-inside: avoid; }
   .item-head, .assess h4, .plan-col > h3, .plan-col > .plan-head { break-after: avoid; page-break-after: avoid; }
   .summary-text p, .plan-item, .item .chips, .assess .chips { break-inside: avoid; }
   details:not([open]) { display: none; }
@@ -482,7 +492,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       <button type="button" class="btn btn-primary" data-action="print" aria-label="طباعة العرض التنفيذي">طباعة العرض التنفيذي</button>
     </div>
   </div>
-  <div class="wrap"><dl class="meta-grid" id="meta-grid"></dl></div>
+  <div class="wrap"><dl class="meta-grid" id="meta-grid"></dl>
+    <details class="meta-ev" id="meta-ev" data-role="meta-evidence"><summary>المصدر والدليل</summary><dl class="kv" id="meta-ev-list"></dl></details></div>
 </header>
 
 <div class="filterbar" id="filterbar">
@@ -629,16 +640,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // Such tokens are isolated left-to-right for display only: negative numbers, percentages, ISO dates (with time),
   // hyphen-joined digit groups, cell ranges (C2:D2), and ids/keys holding a digit, hyphen or dot (REG-7, DQ-002, R1,
   // rev.2025.excl_vat).
-  // «!A1» / «!C95:D95» after a sheet name: only the cell or range is isolated; the «!» stays a neutral between the
+  // «!A1» / «!B50:C50» after a sheet name: only the cell or range is isolated; the «!» stays a neutral between the
   // sheet name and the isolate, so in Arabic text it sits between them («Sheet!A1», never «SheetA1!»).
   // A minus may be U+2212 («−238,000»)
-  var TOK_RE = /!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|[-−]?\d[\d,]*(?:\.\d+)?%|[-−]\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
+  // An Excel formula («=B20+B35+B48», «=SUM(B5:B19)») is one left-to-right token, never a run of separate cells that
+  // the Arabic text around it would lay out right-to-left («B48+B35+B20=»).
+  var TOK_RE = /=(?:[A-Z]{2,10}\()?\$?[A-Z]{1,3}\$?\d+(?:\s?[-+*\/:,]\s?(?:\$?[A-Z]{1,3}\$?\d+|\d+(?:\.\d+)?))*\)?|!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?|\d+(?:-\d+)+|[-−]?\d[\d,]*(?:\.\d+)?%|[-−]\d[\d,]*(?:\.\d+)?|[A-Za-z][A-Za-z0-9_]*(?:[.\-][A-Za-z0-9_]+)+|[A-Za-z]+\d[A-Za-z0-9_]*/g;
   function tokSpans(s) {
     var out = [], m;
     TOK_RE.lastIndex = 0;
     while ((m = TOK_RE.exec(s)) !== null) {
       var tok = m[0], start = m.index;
       if (tok.charAt(0) === '!') { start += 1; tok = tok.slice(1); }
+      if (tok.charAt(0) === '=' && tok.slice(-1) === ')' && (tok.match(/\(/g) || []).length < (tok.match(/\)/g) || []).length) tok = tok.slice(0, -1);
       if (/^[-\u2212]/.test(tok) && start > 0 && /[A-Za-z0-9_\u0600-\u06FF]/.test(s.charAt(start - 1))) {
         if (tok.slice(-1) !== '%') continue;          // "2025-12" or "x-5": not a negative number
         start += 1; tok = tok.slice(1);
@@ -658,6 +672,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   var NO_SPAN = { OPTION: 1, TITLE: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1, CODE: 1 };
   function addText(e, s) {
     if (e.namespaceURI === 'http://www.w3.org/2000/svg') { e.appendChild(document.createTextNode(isoNums(s))); return; }
+    if (!NO_SPAN[e.tagName] && s.indexOf('!') >= 0) s = refText(s);
     var sp = (NO_SPAN[e.tagName] || !/[\dA-Za-z]/.test(s)) ? [] : tokSpans(s);
     if (!sp.length) { e.appendChild(document.createTextNode(s)); return; }
     var last = 0;
@@ -717,22 +732,25 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return '';
   }
   function list(x) { return Array.isArray(x) ? x : (x === null || x === undefined || x === '' ? [] : [x]); }
-  function bdi(x) { return h('bdi', null, str(x)); }
+  // a text holding Arabic letters is isolated right-to-left (dir=auto would turn «REG-1 …» or «WB-003 …» into a
+  // left-to-right paragraph and reverse the «Sheet!Cell» references inside it)
+  function bdi(x) { var s = str(x); return h('bdi', AR_LETTER.test(s) ? { dir: 'rtl' } : null, s); }
   function idc(x) { return h('bdi', { class: 'id', dir: 'ltr' }, str(x)); }
-  // A cell reference «Sheet!A1» (or a list «Sheet!A1, Sheet!B2:B9») reads left-to-right like Excel's formula bar;
-  // free text that merely mentions a cell keeps its own direction.
+  // A cell reference «Sheet!A1» (or a list «Sheet!A1, Sheet!B2:B9») has one visual order everywhere (dashboard-spec
+  // §7): with an Arabic sheet name it reads right-to-left like the text around it (sheet, «!», then the isolated cell),
+  // with a Latin one left-to-right; free text that mentions a cell is isolated right-to-left when it holds Arabic.
   var REF1 = '\\$?[A-Z]{1,3}\\$?\\d+(?::\\$?[A-Z]{1,3}\\$?\\d+)?';
   var SHEET1 = "(?:'[^']+'|[^!'\u060C,;]{1,80})!";
   var REF_ONLY_RE = new RegExp('^\\s*' + SHEET1 + REF1 + '(?:\\s*[\u060C,;]\\s*(?:' + SHEET1 + ')?' + REF1 + ')*\\s*$');
   // A sheet name with Arabic letters keeps the reading direction of the text around it: inside a left-to-right
-  // isolate «إدارة أملاك!Y5، إدارة أملاك!W5» would be reordered as one right-to-left run. Only the cell is isolated
+  // isolate «سجل تجريبي!Y5، سجل تجريبي!W5» would be reordered as one right-to-left run. Only the cell is isolated
   // (addText), and a space before «!» (a sheet name stored with a trailing space) is not shown.
   var AR_LETTER = /[\u0600-\u06FF]/;
   function refText(s) { return String(s).replace(/\s+!(?=\$?[A-Z]{1,3}\$?\d)/g, '!'); }
   function refc(x) {
     var s = refText(str(x));
-    if (!REF_ONLY_RE.test(s)) return h('bdi', null, s);
-    return h('bdi', { class: 'ref', dir: AR_LETTER.test(s) ? 'rtl' : 'ltr' }, s);
+    if (AR_LETTER.test(s)) return h('bdi', REF_ONLY_RE.test(s) ? { class: 'ref', dir: 'rtl' } : { dir: 'rtl' }, s);
+    return REF_ONLY_RE.test(s) ? h('bdi', { class: 'ref', dir: 'ltr' }, s) : h('bdi', null, s);
   }
   function dimFilterActive(f) {
     f = f || {};
@@ -1199,19 +1217,44 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (META.draft) $('#draft-banner').hidden = false;
 
     var dl = clear($('#meta-grid'));
-    function item(label, value, subText) {
-      add(dl, h('div', null, h('dt', null, label), h('dd', null, value, subText ? h('span', { class: 'sub' }, subText) : null)));
+    var evl = clear($('#meta-ev-list'));
+    // each identification item (brief §11.5) shows its value and one short line; the full evidence (cell references,
+    // sources) is in the «المصدر والدليل» disclosure, so the executive summary starts within the first screen
+    function item(label, value, subText, evidence) {
+      var full = str(subText);
+      var line = shortLine(full, 38);
+      add(dl, h('div', null, h('dt', null, label), h('dd', null, value, line ? h('span', { class: 'sub', title: line !== full ? full : null }, line) : null)));
+      if (evidence !== undefined ? evidence : (line !== full ? full : null)) add(evl, [h('dt', null, label), h('dd', null, evidence !== undefined ? evidence : full)]);
     }
     var counts = META.counts || {};
-    if (!ent) item('الجهة', h('span', { class: 'muted' }, 'غير مذكورة في الملف'), META.entity_evidence ? str(META.entity_evidence) : null);
+    if (!ent) item('الجهة', h('span', { class: 'muted' }, 'غير مذكورة في الملف'), META.entity_evidence ? str(META.entity_evidence) : 'لا يذكر الملف اسم الجهة');
     item('فترة البيانات', META.data_period ? str(META.data_period) : 'غير محددة في الملف', META.data_period_evidence ? 'المصدر: ' + str(META.data_period_evidence) : null);
     item('تاريخ إعداد الدراسة', META.study_date ? h('span', { class: 'num' }, str(META.study_date)) : 'غير محدد', META.study_date_basis ? str(META.study_date_basis) : null);
     item('تاريخ التحليل', h('span', { class: 'num' }, str(META.analysis_date || '')), 'لا يُفترض أنه سنة البيانات');
     var vl = META.valuation || CFG.valuation || {};
-    item('التقييم المستخدم في المؤشرات', vl.field ? str(vl.label || vl.year) : 'لا يوجد تقييم إجمالي', vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || ''));
+    var vlFull = vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || '');
+    item('التقييم المستخدم في المؤشرات', vl.field ? str(vl.label || vl.year) : 'لا يوجد تقييم إجمالي', vl.field && vl.date_text ? str(vl.date_text) : vlFull,
+      vlFull && vlFull !== str(vl.date_text) ? vlFull : null);
     item('نطاق العرض', (counts.in_scope !== undefined ? nRec(counts.in_scope) : '—') + ' ضمن نطاق الدراسة',
       'خارج المؤشرات: معزول ' + (counts.isolated || 0) + ' · مستبعد ' + (counts.excluded || 0));
-    item('الملف المصدر', META.file_name ? h('span', { class: 'fname', title: str(META.file_name) }, str(META.file_name)) : 'غير معروف', META.sha256_short ? h('span', null, 'البصمة: ', h('code', null, str(META.sha256_short))) : null);
+    add(evl, [h('dt', null, 'الملف المصدر'), h('dd', null, META.file_name ? bdi(META.file_name) : 'غير معروف',
+      META.sha256_short ? [' · البصمة: ', h('code', null, str(META.sha256_short))] : null)]);
+  }
+  /** First clause of a text (up to «؛» or a full stop), cut at a word boundary to about max characters. */
+  function shortLine(s, max) {
+    s = str(s).replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    var cut = s.split(/[؛;]\s*|\.\s+/)[0].trim() || s;
+    if (cut.length > max) {
+      var sp = cut.lastIndexOf(' ', max);
+      cut = cut.slice(0, sp > max / 2 ? sp : max).replace(/[\s،,:(«]+$/, '');
+    }
+    if (cut.length < s.length) {
+      var opens = (cut.match(/«/g) || []).length - (cut.match(/»/g) || []).length;
+      var paren = (cut.match(/\(/g) || []).length - (cut.match(/\)/g) || []).length;
+      cut += '…' + (opens > 0 ? '»' : '') + (paren > 0 ? ')' : '');
+    }
+    return cut;
   }
 
   function renderSummary() {
@@ -1449,7 +1492,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       if (r.scope_text) lines.push(h('span', null, h('b', null, 'النطاق: '), str(r.scope_text)));
       var basis = [r.basis ? str(r.basis) : null, r.valuation_date ? 'تاريخ التقييم: ' + str(r.valuation_date) : null].filter(Boolean).join(' · ');
       if (basis) lines.push(h('span', null, h('b', null, 'الأساس: '), basis));
-      var exc = list(r.excluded).length;
+      var exc = excludedList(r).length;
       var cnt = 'مشمول ' + (r.n_included || 0) + ' · مستبعد ' + exc + ' من ' + (r.n_scope || 0);
       if (typeof r.coverage_num_share === 'number') cnt += ' · تغطي ' + fmtShare(r.coverage_num_share) + ' من الإيراد المعروف';
       lines.push(h('span', null, cnt));
@@ -2466,17 +2509,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       default: return str(spec.kind);
     }
   }
-  /** In-scope records of a metric that included and excluded none (a missing input such as expenses): listed under
-   *  «المستبعدة وسببها» with that reason, so a record in scope never vanishes from the log. */
-  function scopeIdsOf(spec, r) {
-    if (!r || r.status !== 'not_computable' || list(r.included_ids).length || list(r.excluded).length || !(r.n_scope > 0)) return [];
-    try {
-      var recs = ENG.filterRecords(getFilters()) || [];
-      var w = spec.where || null;
-      var ev = window.APAEngine && window.APAEngine.evalWhere;
-      var out = recs.filter(function (x) { return !w || !ev || ev(w, x); }).map(function (x) { return x.id; });
-      return out.length === r.n_scope ? out : [];
-    } catch (e) { return []; }
+  /** The records a calculation excluded with their reason. A not_computable metric that included and excluded none (a
+   *  missing input such as expenses) lists its scope (engine scope_ids) with that reason, so a record in scope never
+   *  vanishes from the log; the counts line and the lists read this one list. */
+  function excludedList(r) {
+    if (list(r.excluded).length) return list(r.excluded);
+    var why = str(r.reason || r.unavailable_reason || 'مدخل غير متوفر');
+    return list(r.scope_ids).map(function (id) { return { id: id, reason_text: why }; });
   }
   function namesList(ids) {
     var ul = h('ul', { class: 'small' });
@@ -2502,6 +2541,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         list(rf[k]).forEach(function (f) { fieldsTxt.push([fieldsTxt.length ? ' · ' : null, fieldLabel(f), ' ', h('code', null, str(f))]); });
       });
       if (!fieldsTxt.length) fieldsTxt = unresolvedFieldsText(spec);
+      var exList = excludedList(r);
       var pairs = [
         ['القيمة', typeof r.value === 'number' ? [growthRiyalOnly(r) ? growthRiyalNodes(r, { 'data-role': 'calc-value' })
           : h('span', { class: 'num', 'data-role': 'calc-value' }, fmtUnit(r.value, r.unit)), r.note ? ' — ' + str(r.note) : null]
@@ -2514,7 +2554,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         ['الفترة', str(r.period_text)],
         ['تاريخ التقييم', str(r.valuation_date)],
         ['المصدر', str(r.source_text)],
-        ['السجلات', 'في النطاق ' + (r.n_scope || 0) + ' · مشمولة ' + (r.n_included || 0) + ' · مستبعدة ' + list(r.excluded).length]
+        ['السجلات', 'في النطاق ' + (r.n_scope || 0) + ' · مشمولة ' + (r.n_included || 0) + ' · مستبعدة ' + exList.length]
       ];
       if (r.kind === 'ratio' && typeof r.value === 'number') {
         pairs.push(['البسط ÷ المقام', h('span', { class: 'num' }, fmtMoney(r.num || 0) + ' ÷ ' + fmtMoney(r.den || 0))]);
@@ -2533,9 +2573,6 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         return fieldLabel(p.field) + ': ' + p.n_known + ' من ' + p.n + (p.n_not_applicable ? ' (لا ينطبق على ' + nRec(p.n_not_applicable) + '، خارج المقام)' : '');
       }).join(' · ')]);
       if (r.kind === 'diff' && typeof r.a_sum === 'number') pairs.push(['المجموعان', fmtMoney(r.a_sum) + ' − ' + fmtMoney(r.b_sum)]);
-      var scopeIds = list(r.excluded).length ? [] : scopeIdsOf(spec, r);
-      var exList = scopeIds.length ? scopeIds.map(function (id) { return { id: id, reason_text: str(r.reason || r.unavailable_reason || 'مدخل غير متوفر') }; })
-        : list(r.excluded);
       var art = h('article', { class: 'calc', 'data-metric-id': str(spec.id) },
         h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), resultPill(r)),
         kvList(pairs),

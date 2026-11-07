@@ -470,3 +470,100 @@ def is_total_label(v: Any) -> bool:
         return False
     t = normalize_arabic(clean_text(v)).strip()
     return bool(t) and bool(TOTAL_LABEL_RE.search(t))
+
+
+# ---------------------------------------------------------------------------
+# Arabic labels of data-issue types: 01 anomalies (inspect_workbook.py) and 03 issues (normalize.py). Board-facing
+# outputs show the label; the type key appears only as a technical reference («المرجع التقني»).
+# ---------------------------------------------------------------------------
+ANOMALY_TYPE_AR = {
+    "formula_year_mismatch": "صيغة تجمع أعمدة سنة تختلف عن سنة عنوان عمودها",
+    "cached_value_mismatch": "القيمة المخزنة لا تطابق إعادة حساب الصيغة",
+    "cached_missing": "صيغ بلا قيم محسوبة مخزنة",
+    "excel_error": "خطأ Excel",
+    "total_mismatch": "إجمالي لا يطابق مجموع تفاصيله",
+    "hardcoded_total": "إجمالي مدوّن يدويًا بلا صيغة",
+    "count_mismatch": "عدد البنود في صف الإجمالي لا يطابق العدد الفعلي",
+    "row_total_mismatch": "إجمالي الصف لا يساوي الأرض + المبنى للسنة نفسها",
+    "derived_from_total": "مكوّن مشتق بالطرح من الإجمالي",
+    "mixed_types": "أنواع بيانات مختلطة في عمود",
+    "text_in_numeric": "نص في عمود عنوانه مالي/رقمي",
+    "numeric_text": "أرقام مخزنة كنص",
+    "vat_identical": "الإيراد بدون الضريبة يساوي الإيراد مع الضريبة",
+    "vat_inconsistent": "إيراد مع الضريبة أقل من بدونها",
+    "duplicate_name": "اسم مكرر داخل الورقة",
+    "cross_sheet_name_match": "أسماء متطابقة بين أوراق مختلفة (للربط)",
+    "shared_deed": "رقم صك مشترك بين أكثر من صف",
+    "serial_gap": "فجوة أو تكرار في عمود التسلسل",
+    "pii_column": "عمود بيانات شخصية",
+    "partial_period_header": "عنوان عمود يدل على فترة جزئية",
+    "garbled_header": "عنوان عمود مشوّه أو مكرر النص",
+    "filler_block": "صفوف حشو (مسافات غير مرئية)",
+    "hidden_sheet": "ورقة مخفية",
+    "hijri_date_text": "تاريخ هجري مخزن كنص",
+    "zero_valuation": "تقييمات مسجلة بصفر",
+    "unlabeled_column": "قيم في عمود بلا عنوان",
+    "outside_table_rows": "بيانات خارج نطاق جدول Excel",
+    "hidden_rows": "صفوف بيانات مخفية",
+    "hidden_columns": "أعمدة مخفية تحتوي بيانات",
+    "mixed_calendar": "عمود تواريخ يخلط التقويمين الهجري والميلادي",
+    "formula_blank_inputs": "صيغة قيمتها المخزنة صفر ومدخلاتها فارغة",
+}
+
+ISSUE_TYPE_AR = {
+    "text_in_numeric": "نص في حقل رقمي",
+    "percent_in_amount": "نسبة مئوية في حقل مبلغ أو مساحة أو عدد",
+    "foreign_currency": "مبالغ بعملة غير عملة الدراسة",
+    "ambiguous_thousands_separator": "فاصل آلاف ملتبس",
+    "zero_from_blank_inputs": "صفر ناتج عن خانات فارغة",
+    "excel_error": "خطأ صيغة Excel",
+    "zero_as_missing": "صفر لا يُعد قيمة (عومل غير متاح)",
+    "numeric_text_converted": "أرقام مدونة كنص حُوّلت",
+    "count_mixed_text": "عدد يخلط أرقامًا وأوصافًا",
+    "hijri_conversion": "تاريخ هجري حُوّل إلى الميلادي",
+    "date_note": "ملاحظة تحويل تاريخ",
+    "date_unparsed": "تاريخ تعذر تحويله",
+    "formula_no_cache": "صيغ بلا قيم مخزنة",
+    "pii_redacted": "بيانات شخصية حُجبت",
+    "blank_rows_skipped": "صفوف فارغة تُخطّيت",
+    "derived_field": "حقل مشتق صراحةً",
+    "dim_out_of_vocabulary": "تصنيف خارج القائمة المرجعية",
+    "duplicate_id": "معرّف مكرر",
+    "field_override": "قيمة صُحّحت بدليل",
+    "join_ambiguous": "ربط ملتبس بين الأوراق",
+    "join_conflict": "تعارض في الربط بين الأوراق",
+    "join_unmatched": "بند لم يُطابق في الربط",
+    "managed_unflagged": "عقار مدار للغير غير موسوم",
+    "mapping_sheet_name": "اسم ورقة في التصنيف لا يطابق الملف",
+    "mapping_unknown_record": "سجل في التصنيف غير موجود في الملف",
+    "missing_classification": "تصنيف ناقص",
+    "overlapping_source_rows": "صفوف مقروءة في أكثر من مصدر",
+    "percent_scale_mixed": "نسب بمقياسين مختلفين",
+    "pii_header_not_marked": "عمود بيانات شخصية غير موسوم",
+    "possible_duplicate_name": "اسم مكرر محتمل",
+    "possible_total_row": "صف قد يكون إجماليًا",
+    "rollup_applied": "إيراد الوحدات جُمع في أصلها",
+    "rollup_conflict": "تعارض في تجميع الوحدات",
+    "rollup_incomplete": "تجميع وحدات غير مكتمل",
+    "rollup_unknown_record": "تجميع لسجل غير موجود",
+    "row_skipped_with_content": "صف تُخطّي وفيه بيانات",
+    "section_label_skipped": "صف عنوان قسم تُخطّي",
+    "shared_deed": "رقم صك مشترك بين أكثر من سجل",
+    "sheet_scope_mismatch": "نطاق الورقة لا يطابق قرارها",
+    "total_like_row": "صف يشبه الإجمالي",
+    "valuation_component_formula": "مكوّن تقييم محسوب بصيغة",
+    "valuation_total_mismatch": "إجمالي التقييم لا يساوي مكوّناته",
+    "vat_equal": "الإيراد مع الضريبة يساوي الإيراد بدونها",
+    "vat_incl_lt_excl": "الإيراد مع الضريبة أقل منه بدونها",
+}
+
+
+def issue_type_ar(typ: Any) -> str:
+    """Arabic label of an anomaly or issue type; an unknown key reads «ملاحظة على البيانات» (the key stays technical)."""
+    if not isinstance(typ, str) or not typ:
+        return "ملاحظة على البيانات"
+    if typ in ISSUE_TYPE_AR:
+        return ISSUE_TYPE_AR[typ]
+    if typ in ANOMALY_TYPE_AR:
+        return ANOMALY_TYPE_AR[typ]
+    return typ if re.search(r"[\u0600-\u06FF]", typ) else "ملاحظة على البيانات"

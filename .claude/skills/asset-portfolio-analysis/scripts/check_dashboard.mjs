@@ -18,7 +18,8 @@
  *   (value/revenue/yield cells against the records), filters, period_filter (cards, charts and table cells per
  *   state), table_search, table_sort (every sortable column; numeric columns must be ordered), table_detail,
  *   buttons, no_raw_tokens, privacy (the shared patterns of assets/pii_patterns.json: block level fails, review
- *   level is reported in `warnings`), desktop_screenshot, mobile_overflow (360 and 390 px, default view and with the
+ *   level is reported in `warnings`), desktop_screenshot, first_screen (the executive summary heading and its first two
+ *   lines within the first 1440×900 screen), mobile_overflow (360 and 390 px, default view and with the
  *   details and an asset detail open), growth_no_pct (an unconfirmed growth never shows a %), no_raw_keys (no engine
  *   keys in visible text outside <code>), bidi_refs («!» between an Arabic sheet name and its cell), print (executive
  *   sections visible on paper, yield cards keep scope/basis/valuation date, at most 8 A4 pages), offline, console_errors.
@@ -620,7 +621,7 @@ async function main() {
     });
 
     // ---- desktop screenshots of the untouched default view: full page + viewport-sized crops ------------
-    await section(['desktop_screenshot'], async () => {
+    await section(['desktop_screenshot', 'first_screen'], async () => {
       await page.screenshot({ path: path.join(screensDir, 'desktop.png'), fullPage: true });
       report.screenshots.push('screens/desktop.png');
       for (const f of fs.readdirSync(screensDir)) if (/^desktop_\d+\.png$/.test(f)) fs.unlinkSync(path.join(screensDir, f));
@@ -641,6 +642,17 @@ async function main() {
       report.screenshots.push(...crops);
       add('desktop_screenshot', true, `لقطة سطح المكتب 1440×900 (الصفحة كاملة): screens/desktop.png، و${nAr(crops.length, 'لقطة واحدة', 'لقطتان', 'لقطات', 'لقطة')} بحجم الشاشة ` +
         `(${crops[0] || '—'} …)` + (nFull > n ? ` — أول ${n} شاشات من ${nFull}` : ''));
+      // the board sees the executive summary heading and its first lines on the first 1440×900 screen (the identification
+      // header keeps value + one line; its evidence is behind «المصدر والدليل»)
+      const fsr = await page.evaluate(() => {
+        const top = (el) => (el ? el.getBoundingClientRect().top + window.scrollY : null);
+        const p = document.querySelector('#exec-summary p');
+        return { h: top(document.querySelector('#h-summary')), p: top(p), lh: p ? (parseFloat(getComputedStyle(p).lineHeight) || 28) : 28 };
+      });
+      const fsOk = fsr.h !== null && fsr.p !== null && fsr.p + 2 * fsr.lh <= vp.height;
+      add('first_screen', fsOk, fsr.h === null ? 'عنوان الخلاصة التنفيذية غير موجود'
+        : `عنوان الخلاصة التنفيذية عند ${Math.round(fsr.h)} بكسل وأول سطرين منها ينتهيان عند ${Math.round((fsr.p || 0) + 2 * fsr.lh)} بكسل من ارتفاع الشاشة الأولى ${vp.height}` +
+          (fsOk ? '' : ' (المطلوب ظهورهما في الشاشة الأولى: اختصر بيانات التعريف، والدليل الطويل في «المصدر والدليل»)'));
     });
 
     // ---- html lang / dir, API, structure -----------------------------------------------------------
@@ -1089,7 +1101,7 @@ async function main() {
       await page.evaluate(() => { const row = document.querySelector('tr[data-role="asset-row"]'); if (row) row.click(); });
       await waitStable(page);
       const r = await page.evaluate(() => {
-        const out = { growth: [], keys: [], bidi: { checked: 0, bad: [] } };
+        const out = { growth: [], keys: [], bidi: { checked: 0, bad: [], flipped: [], formulas: 0, badFormulas: [] } };
         const visibleEl = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
         // (1) metrics.md §5: a growth result without confirmed comparability never shows a percentage
         let all = null;
@@ -1106,6 +1118,8 @@ async function main() {
         // (2) engine keys (rev.2025.excl_vat, zero_as_missing) in visible text outside <code> / .tech
         const skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, CODE: 1 };
         const KEY = /[a-z][a-z0-9]*(?:[._][a-z0-9]+)+/g;
+        // bare engine enum words (a mapping kind, a gap scope, a severity, an issue type) — never board wording
+        const ENUM = /(?<![A-Za-z0-9_.@\/-])(?:pii|portfolio|mapping|isolated|in_scope|excluded|unverified|not_comparable|not_computable|zero_policy|raw|hijri|info)(?![A-Za-z0-9_@]|\.[A-Za-z])/g;
         const FILE = /\.(xlsx|xlsm|xls|ods|csv|json|html?|md|pdf|png)$/i;
         const WEB = /^www\.|\.(com|sa|org|net|gov|edu)(\.|$)/i;
         const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
@@ -1120,6 +1134,7 @@ async function main() {
         for (let n = w.nextNode(); n; n = w.nextNode()) if (n.nodeValue && n.nodeValue.trim() && visibleEl(n.parentElement)) nodes.push(n);
         nodes.forEach((n) => {
           (n.nodeValue.match(KEY) || []).forEach((k) => { if (!FILE.test(k) && !WEB.test(k) && out.keys.length < 40) out.keys.push(k); });
+          (n.nodeValue.match(ENUM) || []).forEach((k) => { if (out.keys.length < 40) out.keys.push(k); });
         });
         // (3) «<Arabic>!<Cell>»: the «!» glyph must sit between the sheet name's last letter and the cell (dashboard-spec §7)
         const blockOf = (el) => { for (let p = el; p; p = p.parentElement) { const d = getComputedStyle(p).display; if (d !== 'inline' && d !== 'contents') return p; } return document.body; };
@@ -1141,11 +1156,32 @@ async function main() {
             if (Math.abs(line(a) - line(b)) > b.height / 2 || Math.abs(line(c) - line(b)) > b.height / 2) continue;   // wrapped
             out.bidi.checked++;
             const ax = a.left + a.width / 2, bx = b.left + b.width / 2, cx = c.left + c.width / 2;
-            if (!(bx > Math.min(ax, cx) && bx < Math.max(ax, cx))) {
+            const sample = () => {
               let k = i + 1, cell = '';
               while (k < chars.length && /[$A-Z0-9:]/.test(chars[k][2]) && cell.length < 12) { cell += chars[k][2]; k++; }
-              if (out.bidi.bad.length < 20) out.bidi.bad.push('…' + chars.slice(Math.max(0, j - 6), j + 1).map((x) => x[2]).join('') + '!' + cell);
+              return '…' + chars.slice(Math.max(0, j - 6), j + 1).map((x) => x[2]).join('') + '!' + cell;
+            };
+            if (!(bx > Math.min(ax, cx) && bx < Math.max(ax, cx))) {
+              if (out.bidi.bad.length < 20) out.bidi.bad.push(sample());
+            } else if (!(ax > bx && bx > cx) && out.bidi.flipped.length < 20) {
+              // one visual order everywhere: sheet (right) → «!» → cell (left), as the Arabic text reads (spec §7)
+              out.bidi.flipped.push(sample());
             }
+          }
+          // an Excel formula («=B20+B35+B48») is laid out left-to-right as one unit: «=» first, then each cell in order
+          for (let i = 0; i < chars.length - 2; i++) {
+            if (chars[i][2] !== '=' || !/[A-Z]/.test(chars[i + 1][2])) continue;
+            let k = i + 1, f = '=';
+            while (k < chars.length && /[$A-Z0-9:+\-*\/(),.]/.test(chars[k][2]) && f.length < 60) { f += chars[k][2]; k++; }
+            // the formula ends before trailing punctuation and an unbalanced «)» of the sentence around it (the template's token)
+            while (/[.,]$/.test(f) || (/\)$/.test(f) && (f.match(/\(/g) || []).length < (f.match(/\)/g) || []).length)) { f = f.slice(0, -1); k--; }
+            if (!/[A-Z]{1,3}\$?\d+.*[-+*\/:,]/.test(f)) continue;            // a single cell: nothing to order
+            const rs = [];
+            for (let q = i; q < k; q++) { const rr = rectOf(chars[q][0], chars[q][1]); if (rr.width) rs.push(rr); }
+            if (rs.length < 3 || rs.some((rr) => Math.abs(rr.top - rs[0].top) > rs[0].height / 2)) continue;   // wrapped
+            out.bidi.formulas++;
+            const xs = rs.map((rr) => rr.left + rr.width / 2);
+            if (!xs.every((x, q) => q === 0 || x > xs[q - 1]) && out.bidi.badFormulas.length < 10) out.bidi.badFormulas.push(f);
           }
         });
         return out;
@@ -1156,9 +1192,13 @@ async function main() {
       add('no_raw_keys', r.keys.length === 0, r.keys.length
         ? 'مفاتيح تقنية إنجليزية في النص الظاهر (تُعرض بالتسمية العربية، والمفتاح في <code> أو «المرجع التقني» فقط): ' + short([...new Set(r.keys)].slice(0, 12), 400)
         : 'لا مفاتيح حقول أو مؤشرات أو حالات إنجليزية في النص الظاهر خارج المراجع التقنية');
-      add('bidi_refs', r.bidi.bad.length === 0, r.bidi.bad.length
-        ? `${r.bidi.bad.length} مرجع خلية بعد اسم ورقة عربي تظهر فيه «!» خارج موضعها (الخلية ملتصقة بالاسم): ` + short(r.bidi.bad.slice(0, 6), 400)
-        : `«!» بين اسم الورقة والخلية في ${r.bidi.checked} مرجعًا ظاهرًا بعد اسم ورقة عربي`);
+      const bidiProbs = [];
+      if (r.bidi.bad.length) bidiProbs.push(`${r.bidi.bad.length} مرجع خلية بعد اسم ورقة عربي تظهر فيه «!» خارج موضعها (الخلية ملتصقة بالاسم): ` + short(r.bidi.bad.slice(0, 6), 300));
+      if (r.bidi.flipped.length) bidiProbs.push(`${r.bidi.flipped.length} مرجع خلية معكوس الترتيب (الخلية يمين الاسم؛ المطلوب الاسم ثم «!» ثم الخلية كالنص العربي): ` + short(r.bidi.flipped.slice(0, 6), 300));
+      if (r.bidi.badFormulas.length) bidiProbs.push(`${r.bidi.badFormulas.length} صيغة Excel لا تُعرض وحدة من اليسار إلى اليمين: ` + short(r.bidi.badFormulas.slice(0, 4), 200));
+      add('bidi_refs', bidiProbs.length === 0, bidiProbs.length ? bidiProbs.join('؛ ')
+        : `«!» بين اسم الورقة والخلية وبترتيب واحد (الاسم ثم الخلية) في ${r.bidi.checked} مرجعًا ظاهرًا بعد اسم ورقة عربي` +
+          (r.bidi.formulas ? `، و${nAr(r.bidi.formulas, 'صيغة Excel واحدة معروضة', 'صيغتا Excel معروضتان', 'صيغ Excel معروضة', 'صيغة Excel معروضة')} وحدةً من اليسار إلى اليمين` : ''));
     });
 
     // ---- every visible button / [data-action] -----------------------------------------------------------

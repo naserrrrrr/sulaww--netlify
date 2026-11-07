@@ -23,6 +23,7 @@ IMPLEMENTATION_NOTES = [
     "R (records in scope of a metric) is ordered by id ascending (plain string order); every sum is accumulated in that order.",
     "Check order for every metric: (0) spec.valid_periods given and the period not in it -> not_comparable (reason invalid_period_reason); (1) a placeholder resolving to null -> not_computable; (2) growth with comparable_with_prev.status == not_comparable -> not_comparable; (3) |R| == 0 -> empty (count: value 0, others: value null); (4) kind rules.",
     "Early-return statuses (not_comparable by period or comparability, not_computable by placeholder) have n_included 0, included_ids [], excluded [].",
+    "scope_ids: a not_computable result that included and excluded no record but has n_scope > 0 (an unresolved placeholder, a diff with no expense field) lists the ids of its scope records (id order; for a placeholder early return the records of base_where AND filters) so the calculation log counts and lists the same records; absent otherwise.",
     "empty: empty_cause = 'filters' when a dashboard dim filter is active and base_where AND where (same period) selects records, else 'scope'; reason = EMPTY_FILTERS_REASON, or empty_text / EMPTY_SCOPE_REASON. sum/count with cause 'scope' and empty_as_zero (default true for count, false otherwise) -> value 0, status complete, reason null, note = empty_text or EMPTY_SCOPE_REASON. Breakdowns and the trend set empty_cause the same way (never zero).",
     "n_included: count |R|; sum |K|; ratio/diff/growth |I|; concentration |K| (known and v > 0); coverage |R|.",
     "eq/in use strict equality (no bool/number coercion; lists and objects never equal). has: list attr -> membership (strict), scalar attr -> strict equality.",
@@ -290,6 +291,8 @@ class Engine:
             res.update(status="not_computable", n_scope=len(r_scope),
                        reason=res.get("unavailable_reason") or DEFAULT_UNAVAILABLE,
                        unresolved=unresolved)
+            if r_scope:
+                res["scope_ids"] = [r["id"] for r in r_scope]
             return res
         R = self._select(and_where(base, where, fw))
         res["n_scope"] = len(R)
@@ -304,6 +307,8 @@ class Engine:
             res.update(status="not_computable", value=None, n_included=0, included_ids=[], excluded=[],
                        reason=res.get("unavailable_reason") or DEFAULT_UNAVAILABLE,
                        unresolved=exc.placeholder)
+        if res["status"] == "not_computable" and R and not res.get("included_ids") and not res.get("excluded"):
+            res["scope_ids"] = [r["id"] for r in R]
         if res["status"] == "empty":
             cause = self._empty_cause(base, where, fw)
             res["empty_cause"] = cause

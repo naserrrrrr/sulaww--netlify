@@ -1331,7 +1331,7 @@ RECON_STATUS_AR = {
     "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
     "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
-    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق (derived_fields)؛ الفرق سببه الاشتقاق لا نقص في السجلات",
+    "match_original": "يطابق القيم الأصلية قبل الاشتقاق الموثق في التصنيف؛ الفرق سببه الاشتقاق لا نقص في السجلات",
     "mismatch": "فرق غير مفسَّر",
     "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
 }
@@ -4285,9 +4285,81 @@ def c_nq_card_metric_empty(ctx: Ctx):
     return out
 
 
+# ---- executive summary hygiene: evidence stays in chips and details, numerals read naturally ------------------------
+NQ_ES_CELLREF_RE = re.compile(
+    r"[^\s«»()\[\]،,؛;:]*\s?!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?"      # Sheet!B7, Sheet!B50:C50
+    r"|(?<![A-Za-z0-9])\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+(?![A-Za-z0-9])"  # B50:C50
+    r"|=\$?[A-Z]{1,3}\$?\d+(?:[-+*/:]\$?[A-Z]{1,3}\$?\d+)*")                     # =B20+B35+B48
+_NQ_NUMBER_WORDS = {"واحد": 1, "واحده": 1, "واحدا": 1, "اثنان": 2, "اثنين": 2, "اثنتان": 2, "اثنتين": 2,
+                    "ثلاث": 3, "ثلاثه": 3, "اربع": 4, "اربعه": 4, "خمس": 5, "خمسه": 5, "ست": 6, "سته": 6,
+                    "سبع": 7, "سبعه": 7, "ثماني": 8, "ثمانيه": 8, "تسع": 9, "تسعه": 9, "عشر": 10, "عشره": 10}
+# a numeral then, right after it or after its counted noun, a number word stating the same count («1 أصلًا واحدًا»),
+# or «2» before a dual noun («2 أصلان»). A different count is natural phrasing, not a duplicate
+# («90 يومًا على ثلاث مراحل»، «من 2021 إلى 2025 خمس سنوات»).
+NQ_ES_DUP_RE = re.compile(r"(?<![\d.,])(\d[\d,]*(?:\.\d+)?)\s+((?:\S+\s+)?)(" + "|".join(_NQ_NUMBER_WORDS) +
+                          r")(?![\u0621-\u064A])|(?<![\d.,])(2)\s+()([\u0621-\u064A]{2,}(?:ان|ين))(?![\u0621-\u064A])")
+
+
+def nq_doubled_numeral(m) -> bool:
+    """True when the match states one count twice: the dual-noun branch, or a numeral equal to its number word."""
+    if m.group(3) is None:
+        return True
+    try:
+        return float(m.group(1).replace(",", "")) == _NQ_NUMBER_WORDS[m.group(3)]
+    except ValueError:
+        return False
+
+
+def nq_render_digits(ctx, text: str) -> str:
+    """The text with each {{m:..}}/{{f:..}} token replaced by the number it renders (or a word when it renders none)."""
+    def num(v):
+        if not is_num(v):
+            return " غير-رقمي "
+        return f"{int(v)}" if float(v).is_integer() else f"{v}"
+
+    def rep_m(m):
+        res = as_dict(ctx.metrics.get(m.group(1))) if "metrics" in ctx.data else {}
+        path = (m.group(2) or "").lstrip(".")
+        if not path or path == "value":
+            if res.get("kind") == "growth" and as_dict(res.get("comparability")).get("status") != "confirmed" \
+                    and is_num(res.get("value")):
+                return num(res.get("abs_change"))
+            return num(res.get("value"))
+        ok, v = resolve_path(res, path.split("."))
+        return num(v) if ok else " غير-رقمي "
+
+    def rep_f(m):
+        return num(as_dict(nq_facts(ctx).get(m.group(1))).get("value"))
+    return NQ_FACT_RE.sub(rep_f, TOKEN_RE.sub(rep_m, text))
+
+
+def c_nq_exec_summary_hygiene(ctx: Ctx):
+    """Item 10: the executive summary is for the board — no raw cell references or formulas (they belong in the
+    evidence chips and the details) and no numeral doubled by a number word once tokens are rendered («1 أصلًا واحدًا»).
+    Write the count in words («أصل واحد»، «أصلان») or as a token followed by its noun, never both."""
+    ctx.need("narrative")
+    s = ctx.narrative.get("executive_summary")
+    if not isinstance(s, str):
+        raise Skip("الخلاصة التنفيذية ليست نصًا")
+    out = []
+    refs = [m.group(0).strip() for m in NQ_ES_CELLREF_RE.finditer(TOKEN_RE.sub(" ", NQ_FACT_RE.sub(" ", s)))]
+    if refs:
+        out.append((f"الخلاصة التنفيذية تحوي مراجع خلايا أو صيغًا ({short_list(refs, 4)})؛ الخلاصة للمجلس: "
+                    "اذكر المصدر بالكلمات («بيان التخصيص المخفي») واترك المرجع في أدلة الفجوات والتفاصيل",
+                    "06_narrative.json:executive_summary"))
+    rendered = normalize_arabic(nq_render_digits(ctx, s))
+    dups = [re.sub(r"\s+", " ", " ".join(x for x in m.groups() if x)).strip() for m in NQ_ES_DUP_RE.finditer(rendered)
+            if nq_doubled_numeral(m)]
+    if dups:
+        out.append((f"الخلاصة التنفيذية تكرر العدد رقمًا وكلمة بعد عرض الرموز ({short_list(dups, 4)})؛ اكتبه مرة واحدة: "
+                    "بالكلمات للواحد والاثنين («أصل واحد»، «أصلان») أو برمز يتبعه المعدود", "06_narrative.json:executive_summary"))
+    return out
+
+
 CHECK_TITLES.update([
     ("annualised_text", "لا تحويل لإيراد فترة غير مكتملة إلى رقم سنوي"),
     ("card_metric_empty", "بطاقات المؤشرات غير فارغة بلا سبب"),
+    ("exec_summary_hygiene", "الخلاصة التنفيذية خالية من مراجع الخلايا ومن تكرار العدد رقمًا وكلمة"),
     ("period_fields", "حقول كل فترة في 04 تخص الفترة نفسها"),
     ("growth_comparability_basis", "قابلية مقارنة الفترات مطابقة لوصف الحقول (الضريبة والأساس والاكتمال)"),
     ("yield_zero_revenue_scope", "عدم استبعاد أصل استثماري ذي إيراد صفري من العائد"),
@@ -4383,6 +4455,7 @@ CHECKS = [
     ("gap_unsupported_claims", "warning", c_nq_gap_unsupported_claims),
     ("annualised_text", "warning", c_nq_annualised_text),
     ("card_metric_empty", "warning", c_nq_card_metric_empty),
+    ("exec_summary_hygiene", "warning", c_nq_exec_summary_hygiene),
     ("numbers_as_tokens", "info", lambda ctx: number_findings(ctx)[1]),
     ("gaps_without_recommendation", "info", c_gaps_without_recommendation),
 ]

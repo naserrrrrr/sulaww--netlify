@@ -17,6 +17,7 @@
  *    empty_cause, and empty_as_zero for sum/count); then the kind rules;
  *  - eq/in/has use strict equality (no bool/number coercion; lists/objects never equal);
  *  - a field missing from a record has status null (known() false, reason "absent");
+ *  - a not_computable result with no included or excluded record lists its scope in scope_ids;
  *  - Python truthiness is reproduced where the Python code relies on `or` / `if x`.
  *
  * Dependency-free ES2017; no eval, no network, no DOM access.
@@ -672,10 +673,12 @@
       return res;
     }
     if (unresolved !== null) {
+      var rScope = this._select(andWhere(base, fw));
       res.status = 'not_computable';
-      res.n_scope = this._select(andWhere(base, fw)).length;
+      res.n_scope = rScope.length;
       res.reason = or(res.unavailable_reason, DEFAULT_UNAVAILABLE);
       res.unresolved = unresolved;
+      if (rScope.length) res.scope_ids = rScope.map(function (r) { return r.id; });
       return res;
     }
     var R = this._select(andWhere(base, where, fw));
@@ -695,6 +698,10 @@
       res.excluded = [];
       res.reason = or(res.unavailable_reason, DEFAULT_UNAVAILABLE);
       res.unresolved = e.placeholder;
+    }
+    // records of the scope of a not_computable result that included and excluded none (IMPLEMENTATION_NOTES scope_ids)
+    if (res.status === 'not_computable' && R.length && !res.included_ids.length && !res.excluded.length) {
+      res.scope_ids = R.map(function (r) { return r.id; });
     }
     if (res.status === 'empty') {
       var cause = this._emptyCause(base, where, fw);

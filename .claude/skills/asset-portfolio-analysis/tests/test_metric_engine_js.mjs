@@ -280,11 +280,15 @@ function test_diff_and_missing_expense() {
   assert.equal(res.n_included, 0);
   assert.equal(res.value, null);
   assert.equal(res.unresolved, '{EXP}');
+  // the scope is listed (scope_ids) so the log counts and lists the same records
+  assert.ok(res.n_scope > 0 && res.scope_ids.length === res.n_scope);
   // field defined but no record of R has the key -> «لا توجد بيانات مصروفات»
   res = eng.compute(Object.assign({}, spec, { b: 'exp.none' }), { period: '2025' });
   assert.equal(res.status, 'not_computable');
   assert.equal(res.reason, lib.NO_EXPENSE_REASON);
   assert.equal(res.value, null);
+  assert.ok(res.n_scope > 0 && res.scope_ids.length === res.n_scope);
+  assert.ok(!('scope_ids' in eng.compute(spec, { period: '2025' })));
 }
 
 function test_growth() {
@@ -496,6 +500,7 @@ function test_unresolved_placeholder() {
   assert.equal(res.n_scope, 7);                 // |R| (base_where AND where)
   assert.equal(res.n_included, 0);
   assert.deepEqual(res.excluded, []);
+  assert.equal(res.scope_ids.length, 7);
   // placeholder inside where: n_scope falls back to base_where AND filters (8 in-scope records)
   res = eng.compute(Object.assign({}, spec, { field: 'rev.2025', where: { known: '{VAL}' } }));
   assert.equal(res.status, 'not_computable');
@@ -746,6 +751,8 @@ function cross_config() {
       { id: 'yield_vp', kind: 'ratio', num: '{REV}', den: '{VAL}', scale: 100, where: ASSET, valid_periods: ['2025'],
         invalid_period_reason: 'تقييم 2024 لا يقابل إيراد هذه الفترة' },
       { id: 'noi_vp', kind: 'diff', a: '{REV}', b: '{EXP}', valid_periods: ['2025'] },
+      // scope_ids: a not_computable diff with no expense key lists its scope in both engines
+      { id: 'noi_none', kind: 'diff', a: '{REV}', b: 'exp.none', where: { all: [W_RENT, NOT_MFO] } },
       // C3 empty cause / empty_as_zero / empty_text
       { id: 'units_val', kind: 'sum', field: '{VAL}', where: { eq: ['record_type', 'contract'] }, empty_as_zero: true, empty_text: 'لا عقود' },
       { id: 'units_val_nz', kind: 'sum', field: '{VAL}', where: { eq: ['record_type', 'contract'] }, empty_text: 'لا عقود' },

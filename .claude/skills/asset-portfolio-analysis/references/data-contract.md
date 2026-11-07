@@ -20,7 +20,7 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
 | `dashboard.html` | `build_dashboard.py` | Self-contained, offline, RTL dashboard |
 | `08_dashboard_check.json` + `screens/` | `check_dashboard.mjs` | Browser test results (parity, filters, mobile, print, PII) and `warnings`; `screens/desktop.png` (full page), `desktop_01.png…` (1440×900 viewport crops), `details_open.png` (every details section open), `mobile.png`, `mobile_full.png`, `mobile_360.png`, `mobile_detail.png`, `print.pdf` |
 | `version_comparison.json` | `compare_versions.py` | Only when a previous run really exists (§6 `version_comparison`) |
-| `supporting_workbook.xlsx` | `export_workbook.py` | Reviewable Excel (RTL, filters, gray = not available with the original text of a non-numeric cell, red = proven problem only). Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «المطابقة مع الإجماليات» (when 03 keeps total-row values)، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «متابعة التوصيات» (when 06 has `recommendation_followup`; status dropdown «لم يبدأ/قيد التنفيذ/منجز/متعثر», «منجز» without evidence flagged)، «مقارنة الإصدارات» (when 06 has `version_comparison`; detail from `version_comparison.json` if 06 holds a summary)، «الافتراضات والمصادر». Personal-data fields are dropped and block-level values masked; exit 2 and the file is deleted if the post-save scan still finds contact/IBAN data. `--out` sets another path; `--self-test` runs built-in cases |
+| `supporting_workbook.xlsx` | `export_workbook.py` | Reviewable Excel (RTL, filters, gray = not available with the original text of a non-numeric cell, red = proven problem only). Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «المطابقة مع الإجماليات» (when 03 keeps total-row values)، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «متابعة التوصيات» (when 06 has `recommendation_followup`; status dropdown «لم يبدأ/قيد التنفيذ/منجز/متعثر», «منجز» without evidence flagged)، «مقارنة الإصدارات» (when 06 has `version_comparison`; detail from `version_comparison.json` if 06 holds a summary)، «الافتراضات والمصادر». Board wording: field and metric keys, issue types, gap scopes («portfolio»), evidence tokens («m:…») and check ids are shown by their Arabic labels; the keys appear only in code-styled «المرجع التقني» columns or rows (above the «الأصول» headers). «ملخص» lists the top gaps and the top actions as two separate tables (an action names the gaps it addresses), and «المطابقة مع الإجماليات» lists for each total the records of the sum it was compared with (a section total: its own section). Personal-data fields are dropped and block-level values masked; exit 2 and the file is deleted if the post-save scan still finds contact/IBAN data. `--out` sets another path; `--self-test` runs built-in cases |
 | `09_message.md` | **Claude** | The short delivery message |
 
 ## 1. `01_workbook_map.json` (inspect_workbook.py)
@@ -29,7 +29,7 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
 {
   "contract_version": "1.0",
   "file": {"path": "...", "name": "...", "sha256": "...", "size": 40988,
-           "properties": {"creator": "...", "last_modified_by": "<redacted:name>", "created": "...", "modified": "..."}},
+           "properties": {"creator": "<محجوب>", "last_modified_by": "<محجوب>", "created": "...", "modified": "..."}},
   "sheets": [{
     "name": "عقارات الجمعية ",            // exact, may contain trailing spaces
     "index": 0, "state": "visible|hidden|veryHidden",
@@ -74,8 +74,10 @@ Notes on `01`:
   IBAN and whole-cell national-ID-like values (not for columns whose header gives the numbers another meaning).
   Header detection uses `apa_common.is_pii_header` (shared pattern, tatweel/hamza folded, plural person nouns).
 
-PII **values are never written** to any output; only the column location. Redacted samples and person-like file
-properties (creator / last_modified_by) appear as «<محجوب>». The personal-data patterns (header words, field keys,
+PII **values are never written** to any output; only the column location. Redacted samples and the file's author
+properties (creator / last_modified_by) appear as «<محجوب>»: author metadata names a person or an account (even
+initials), so both are masked unless the value is the name of the software that wrote the file (openpyxl, LibreOffice …).
+The personal-data patterns (header words, field keys,
 value patterns with a `block` or `review` level) live in one file, `assets/pii_patterns.json`, shared by every Python
 script (`apa_common.is_pii_header`, `PII_KEY_RE`, `pii_value_hits`, `mask_pii`) and by `check_dashboard.mjs`;
 values are matched after Arabic-Indic digits are translated. Block level = mobile, landline, e-mail, IBAN (never in an
@@ -463,6 +465,8 @@ status `complete`, `note`; (4) the kind rules below.
  "comparability": {"status": "...", "reason": "..."}, "prev_period": "2024",   // growth only
  "n_unknown": 0,                                             // sum only
  "unresolved": "{EXP}",                                      // only when a placeholder resolved to null
+ "scope_ids": ["REG-1"],                                     // only for not_computable with nothing included or excluded:
+                                                             // the scope's records, counted and listed with the reason
  "resolved_fields": {"num": "rev.2025.excl_vat", "den": "val.2024.total"},
  "reason": null, "definition": "...", "scope_text": "...", "basis": "...", "valuation_date": "...", "period_text": "..."}
 ```
@@ -590,7 +594,10 @@ Narrative-quality checks (blocking): `period_fields`,
 المستهدف» on investment assets without a `sources[]` target or a comparison metric in the evidence), `annualised_text`
 («الإيراد السنوي الكامل»، «على أساس سنوي»، «يعادل سنويًا» in 06 or 09 while the linked revenue field is not documented
 `full_year`, unless the sentence says «تقدير» and 06 has `assumptions`), `card_metric_empty` (a card metric empty without a
-filter: a mistyped where or an empty scope). `narrative_scores` also blocks scores that need no context word («75/100»،
+filter: a mistyped where or an empty scope), `exec_summary_hygiene` (the executive summary is for the board: a
+`Sheet!Cell` reference, a cell range or an Excel formula in it, or a numeral doubled by a number word once tokens are
+rendered — «1 أصلًا واحدًا»، «2 أصلان» — is flagged; the evidence stays in the evidence chips and the details, and a count
+of one or two is written in words or as a token followed by its noun, never both). `narrative_scores` also blocks scores that need no context word («75/100»،
 «82 من 100»، «8/10»، «4/5»; a following count noun — عقود، مستأجرين، أصول … — makes it a count); `assessment_scores` warns on
 «N من 5/10/100» in an assessment judgment; `exec_summary_elements` warns when «أبرز الفجوات»/«الأولويات» are announced but
 fewer than 3 items are listed or named (asset id, evidence token or title words of `top_gaps`/`top_actions`);
