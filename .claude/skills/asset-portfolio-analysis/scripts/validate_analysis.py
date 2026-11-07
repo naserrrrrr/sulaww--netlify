@@ -3,10 +3,15 @@
 
 Usage:
   python3 scripts/validate_analysis.py --run-dir RUN [--xlsx SOURCE.xlsx] [--html RUN/dashboard.html]
+                                       [--xlsx-out RUN/supporting_workbook.xlsx]
 
-Reads RUN/01..06 (data-contract.md §0-§6), plus RUN/analysis.json when it exists.
-Writes RUN/07_validation.json ({blocking_count, warning_count, checks:[...]}) and RUN/07_validation.md (Arabic).
+Reads RUN/01..06 (data-contract.md §0-§6), plus RUN/analysis.json when it exists, RUN/09_message.md and
+RUN/supporting_workbook.xlsx (or --xlsx-out) when they exist.
+Writes RUN/07_validation.json ({blocking_count, warning_count, acknowledged_count, checks:[...], reconciliation})
+and RUN/07_validation.md (Arabic).
 Exit codes: 0 = no blocking error, 2 = at least one blocking error, 1 = the run folder itself is unusable.
+Warnings acknowledged in 06 `acknowledged_warnings` ({check_id, reason ≥ 8 words}) get level "acknowledged" and are
+not counted in warning_count; blocking checks can never be acknowledged.
 
 Privacy: values of personal-data columns are read from --xlsx into memory only, to look for them in the
 outputs. They are never printed, logged or written; findings name the source cell and the output file only.
@@ -16,6 +21,7 @@ from __future__ import annotations
 import os
 import sys
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import argparse  # noqa: E402
@@ -563,7 +569,7 @@ def c_metric_tokens(ctx: Ctx):
             elif fpath and not resolve_path(ctx.metrics[mid], fpath.split("."))[0]:
                 out.append((f"الرمز {m.group(0)} يشير إلى حقل «{fpath}» غير موجود في نتيجة المؤشر",
                             f"06_narrative.json:{path}"))
-        rest = TOKEN_RE.sub("", s)
+        rest = FACT_TOKEN_RE.sub("", TOKEN_RE.sub("", s))  # {{f:…}} keys are resolved by fact_tokens
         if LOOSE_TOKEN_RE.search(rest):
             frag = rest[max(0, rest.find("{{") - 10): rest.find("{{") + 30] if "{{" in rest else rest[:40]
             out.append((f"رمز مشوّه سيظهر نصًا خامًا في الداشبورد: «{frag.strip()}» (الصيغة: {{{{m:metric_id}}}} أو {{{{m:metric_id.field}}}})",
@@ -1051,13 +1057,9 @@ def c_scenarios(ctx: Ctx):
     return scenario_findings(ctx)[0]
 
 
-def _phone_hits(s: str) -> bool:
-    t = s.translate(_AR_INDIC)
-    return bool(PHONE_LOOSE_RE.search(t))
-
-
-def _scan_pattern_strings(obj, label):
-    """Phone / e-mail patterns in JSON strings. Raw text of numeric TVs and hashes are skipped."""
+def _scan_pattern_strings(obj, label, levels=("block",)):
+    """Personal-data patterns (assets/pii_patterns.json, the given levels) in the strings of a JSON-like object.
+    Raw text of numeric TVs, hashes and file paths are skipped. Returns [(detail, where)]; values are never printed."""
     out = []
 
     def walk(o, path):
@@ -1075,10 +1077,9 @@ def _scan_pattern_strings(obj, label):
         elif isinstance(o, str):
             if HEX_RE.match(o.strip()):
                 return
-            if _phone_hits(o):
-                out.append(("نص يشبه رقم جوال سعودي (القيمة لا تُطبع)", f"{label}:{path}"))
-            elif EMAIL_RE.search(o):
-                out.append(("نص يشبه بريدًا إلكترونيًا (القيمة لا تُطبع)", f"{label}:{path}"))
+            kinds = pii_value_hits(o, levels)
+            if kinds:
+                out.append((f"نص يشبه {pii_kinds_ar(kinds)} (القيمة لا تُطبع)", f"{label}:{path}"))
     walk(obj, "")
     return out
 
@@ -1088,6 +1089,11 @@ def c_pii_text_patterns(ctx: Ctx):
     out = _scan_pattern_strings(ctx.narrative, "06_narrative.json")
     if "records" in ctx.data:
         out += _scan_pattern_strings({"records": ctx.records}, "03_records.json")
+    if "mapping" in ctx.data:  # mapping prose (notes, reasons, evidence) is shown in the dashboard's workbook section
+        out += _scan_pattern_strings(ctx.mapping, "02_mapping.json")
+    msg = g4b_message_text(ctx)
+    if msg is not None:
+        out += g4b_scan_lines(msg, MESSAGE_NAME, ("block",))
     return out
 
 
@@ -1128,7 +1134,8 @@ def c_pii_keys(ctx: Ctx):
     names = pii_field_names(ctx)
     out = []
     for label, obj in targets:
-        hits = [p for p, k in walk_keys(obj) if isinstance(k, str) and (k in names or PII_KEY_RE.search(k))]
+        hits = [p for p, k in walk_keys(obj) if isinstance(k, str)
+                and (k in names or PII_KEY_RE.search(k) or SHARED_PII_KEY_RE.search(k))]
         for p in hits[:20]:
             out.append(("مفتاح يدل على حقل بيانات شخصية؛ يجب حذفه من الحزمة المضمنة", f"{label}:{p}"))
         if len(hits) > 20:
@@ -1148,18 +1155,15 @@ def c_pii_html_patterns(ctx: Ctx):
         raise Skip("لم يُمرَّر --html")
     if ctx.html_raw is None:
         raise Skip("ملف الداشبورد غير موجود")
-    out = []
-    vis = visible_text(ctx.html_raw)
-    for line_no, line in enumerate(vis.splitlines(), 1):
-        if _phone_hits(line):
-            out.append(("نص ظاهر يشبه رقم جوال سعودي (القيمة لا تُطبع)", f"{os.path.basename(ctx.html_path)}: نص ظاهر، السطر {line_no}"))
-        elif EMAIL_RE.search(line):
-            out.append(("نص ظاهر يشبه بريدًا إلكترونيًا (القيمة لا تُطبع)", f"{os.path.basename(ctx.html_path)}: نص ظاهر، السطر {line_no}"))
+    name = os.path.basename(ctx.html_path)
+    out = g4b_scan_lines(visible_text(ctx.html_raw), f"{name}: نص ظاهر", ("block",))
     data = embedded_data(ctx.html_raw)
     if data is not None:
-        out += _scan_pattern_strings(data, f"{os.path.basename(ctx.html_path)} (DATA)")
+        out += _scan_pattern_strings(data, f"{name} (DATA)")
     elif "const DATA" not in ctx.html_raw:
-        out.append(("لم يُعثر على البيانات المضمنة (const DATA = …) لفحصها", os.path.basename(ctx.html_path)))
+        out.append(("لم يُعثر على البيانات المضمنة (const DATA = …) لفحصها", name))
+    if ctx.analysis is not None:  # post-build only (--html), like pii_keys: a stale bundle must not block the rebuild
+        out += _scan_pattern_strings(ctx.analysis, "analysis.json")
     return out
 
 
@@ -1214,13 +1218,29 @@ def _value_patterns(v, header):
     if ns in GENERIC_NON_PII or (header and ns == normalize_arabic(header)) or PII_HEADER_RE.fullmatch(s.strip()):
         return []
     pats = []
-    for m in re.finditer(r"\+?\d[\d\s\-]*\d", s):
-        d = re.sub(r"\D", "", m.group(0))
-        core = re.sub(r"^(00966|966|0)", "", d) if len(d) >= 9 else d
-        if len(core) >= 4:
+    # Digit runs may be written with the separators of assets/pii_patterns.json («(050) 123-4567», «050.123.4567»).
+    sep = PII_PATTERNS.get("digit_separators") or r"[\s\-]"
+
+    def digit_cores(rx):
+        out = []
+        for m in re.finditer(rx, s):
+            d = re.sub(r"\D", "", m.group(0))
+            out.append(re.sub(r"^(00966|966|0)", "", d) if len(d) >= 9 else d)
+        return out
+    # a run with any separators is one phone/ID unless it is longer than one (two numbers joined by « / »)
+    wide = [c for c in digit_cores(r"\+?\d(?:" + sep + r"{0,3}\d)*") if len(c) <= 12]
+    # parts of such a run («123» of «(050) 123-4567») would match unrelated numbers in the outputs
+    cores = list(dict.fromkeys(wide + [c for c in digit_cores(r"\+?\d[\d\s\-]*\d")
+                                       if not any(c in w for w in wide if w != c)]))
+    for core in cores:
+        if len(core) >= 7:  # phone / ID-like: any separators between digits, optional +966 / 0 prefix
+            body = (sep + "{0,3}").join(core)
+            pats.append(("digits", re.compile(r"(?<!\d)(?:(?:\+|00)\s?966" + sep + r"{0,3}|0)?" + sep + "{0,3}"
+                                              + body + r"(?!\d)")))
+        elif len(core) >= 4:
             body = r"[\s\-]?".join(core)
             pats.append(("digits", re.compile(r"(?<!\d)(?:\+?966|00966|0)?[\s\-]?" + body + r"(?!\d)")))
-    letters = re.sub(r"\+?\d[\d\s\-]*", " ", s)
+    letters = re.sub(r"\+?\d(?:" + sep + r"{0,3}\d)*", " ", s)
     for part in re.split(r"[/,،;|\n]+|\s-\s", letters):
         n = normalize_arabic(part)
         n = " ".join(re.sub(r"[^\w\s]", " ", n).split())
@@ -1247,11 +1267,14 @@ def c_pii_values(ctx: Ctx):
         targets.append((os.path.basename(ctx.html_path), ctx.html_raw))
     names = ("analysis.json", "06_narrative.json", "03_records.json") if ctx.html_path else \
         ("06_narrative.json", "03_records.json")  # analysis.json only after a build (see c_pii_keys)
-    for name in names:
+    for name in names + ("02_mapping.json", MESSAGE_NAME):
         p = os.path.join(ctx.run_dir, name)
         if os.path.isfile(p):
             with open(p, "r", encoding="utf-8", errors="replace") as fh:
                 targets.append((name, fh.read()))
+    exp = g4b_export_cells(ctx)
+    if exp and exp.get("cells"):
+        targets.append((exp["label"], "\n".join(c[2] for c in exp["cells"])))
     if not targets:
         raise Skip("لا توجد مخرجات لفحصها")
     prepared = []
@@ -1297,6 +1320,985 @@ def c_pii_values(ctx: Ctx):
     if not n_values:
         raise Skip("أعمدة البيانات الشخصية لا تحوي قيمًا قابلة للفحص")
     return out
+
+
+# ---------------------------------------------------------------------------
+# --- data integrity & privacy checks (G4b) ---
+# Scope and double counting (units, totals, duplicate ids, overlapping rows, sheet decisions), controlled
+# vocabularies, study context in 02, reconciliation of recorded totals, {{f:…}} fact tokens, personal-data
+# patterns over every delivered output (09 message, supporting workbook), and acknowledged warnings.
+# Registered through G4B_CHECKS (one line in CHECKS) and G4B_TITLES.
+# ---------------------------------------------------------------------------
+from apa_common import (  # noqa: E402
+    PII_KEY_RE as SHARED_PII_KEY_RE, PII_PATTERNS, RECORD_TYPES, SCOPES, is_total_label, load_vocab, mask_pii,
+    name_key, pii_value_hits,
+)
+from facts import FACT_TOKEN_RE, compute_facts  # noqa: E402
+
+MESSAGE_NAME = "09_message.md"
+EXPORT_NAME = "supporting_workbook.xlsx"
+ASSET_LIKE = ("asset", "land_parcel")
+CHILD_TYPES = ("unit", "contract")
+VOCAB_DIMS = ("use", "income_nature", "waqf")          # single code each
+ACK_MIN_WORDS = 8
+PII_KIND_AR = {"mobile": "رقم جوال", "landline": "رقم هاتف ثابت", "email": "بريد إلكتروني",
+               "iban": "رقم حساب بنكي (IBAN)", "national_id": "رقم من 10 خانات يبدأ بـ1 أو 2 (قد يكون هوية وطنية)"}
+RECON_STATUS_AR = {
+    "match": "مطابق لمجموع السجلات ضمن النطاق",
+    "match_section": "مطابق لمجموع سجلات قسمه ضمن النطاق (إجمالي فرعي)",
+    "match_all_records": "يطابق مجموع كل سجلات المصدر؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
+    "match_section_all_records": "يطابق مجموع سجلات قسمه كلها؛ الفرق يعود إلى سجلات معزولة أو مستبعدة",
+    "match_without_text_numbers": "يطابق المجموع دون أرقام مخزنة كنص في الملف (لا تجمعها صيغ Excel)؛ الإجمالي المدون ناقص",
+    "mismatch": "فرق غير مفسَّر",
+    "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
+}
+LEVEL_AR["acknowledged"] = "مُقرّ به"
+
+
+def pii_kinds_ar(kinds) -> str:
+    return " أو ".join(PII_KIND_AR.get(k, k) for k in kinds)
+
+
+def _words_ar(n: int) -> str:
+    return {0: "دون كلمات", 1: "كلمة واحدة", 2: "كلمتان"}.get(n, f"{n} كلمات" if 3 <= n <= 10 else f"{n} كلمة")
+
+
+RECORDS_AR = ("سجل واحد", "سجلان", "سجلات", "سجلًا")
+CELLS_AR = ("خلية واحدة", "خليتان", "خلايا", "خلية")
+PLACES_AR = ("موضع واحد", "موضعان", "مواضع", "موضعًا")
+
+
+def _n_ar(n: int, forms) -> str:
+    """Arabic count phrase: «سجل واحد» / «سجلان» / «3 سجلات» / «12 سجلًا»."""
+    one, two, few, many = forms
+    return one if n == 1 else two if n == 2 else f"{n} {few if 3 <= n <= 10 else many}"
+
+
+def _n_values_ar(n: int, known: bool) -> str:
+    """«قيمة واحدة معروفة» / «قيمتان غير معروفتين» / «3 قيم معروفة» / «12 قيمة غير معروفة»."""
+    adj1, adj2 = ("معروفة", "معروفتان") if known else ("غير معروفة", "غير معروفتين")
+    if n == 1:
+        return f"قيمة واحدة {adj1}"
+    if n == 2:
+        return f"قيمتان {adj2}"
+    return f"{n} {'قيم' if 3 <= n <= 10 else 'قيمة'} {adj1}"
+
+
+def _in_scope(r) -> bool:
+    return isinstance(r, dict) and r.get("scope") == "in_scope"
+
+
+def _src(r) -> dict:
+    return as_dict(r.get("source"))
+
+
+def _lookup_sheet(d: dict, sheet):
+    """Value for a sheet name: exact, else equal after trimming spaces (names may carry trailing spaces)."""
+    if sheet in d:
+        return d[sheet]
+    c = clean_text(sheet)
+    for k, v in d.items():
+        if clean_text(k) == c:
+            return v
+    return None
+
+
+def _issues_by_type(ctx: Ctx, *types) -> list:
+    """[(issue, record_ids)] for 03 issues of the given types; record ids from the issue and from records' issue_ids."""
+    linked = defaultdict(list)
+    for r in ctx.records:
+        for iid in as_list(r.get("issue_ids")):
+            linked[iid].append(r.get("id"))
+    out = []
+    for i in as_list(ctx.rec_doc.get("issues")):
+        if isinstance(i, dict) and i.get("type") in types:
+            rids = [x for x in as_list(i.get("record_ids")) if isinstance(x, str)]
+            rids += [x for x in linked.get(i.get("id"), []) if isinstance(x, str) and x not in rids]
+            out.append((i, rids))
+    return out
+
+
+def _issue_where(i: dict) -> str:
+    return f"03_records.json:issues[{i.get('id')}] ({i.get('where') or '-'})"
+
+
+def _evidenced_override(ctx: Ctx, rid) -> str:
+    """The reason when 02 records/<rid> deliberately sets record_type or scope AND explains it (scope_reason or notes)."""
+    o = as_dict(as_dict(ctx.mapping.get("records")).get(rid))
+    if not ("record_type" in o or "scope" in o):
+        return ""
+    for k in ("scope_reason", "notes"):
+        if nonempty(o.get(k)):
+            return clean_text(o[k])
+    return ""
+
+
+def _amounts(r: dict, meta: dict) -> dict:
+    """Known, non-zero revenue / valuation amounts of a record: {field: v}."""
+    out = {}
+    for f, tv in as_dict(r.get("fields")).items():
+        if field_group(f, meta) in ("revenue", "valuation") and _known(r, f) and as_dict(tv).get("v") != 0:
+            out[f] = as_dict(tv).get("v")
+    return out
+
+
+def _deed_keys(r: dict) -> set:
+    keys = set()
+    for f, tv in as_dict(r.get("fields")).items():
+        if not (f == "deed_no" or f.startswith("deed_no.")):
+            continue
+        tv = as_dict(tv)
+        v = tv.get("v")
+        if tv.get("s") not in KNOWN_STATUSES or v in (None, ""):
+            continue
+        s = str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)
+        k = re.sub(r"[\s()\[\]{}]", "", normalize_arabic(s))
+        if k and re.search(r"\d", k) and not re.fullmatch(r"0+", k):
+            keys.add(k)
+    return keys
+
+
+# --- A3: total rows kept in scope --------------------------------------------------------------------------------
+def _row_id(r: dict) -> bool:
+    """True when the record id was generated from its row number (no serial in the file), e.g. REG-r15."""
+    row = _src(r).get("row")
+    return isinstance(row, int) and bool(re.search(rf"(?:^|[-_.])r{row}(?:-\d+)?$", str(r.get("id") or "")))
+
+
+def _sum_of_others(ctx: Ctx) -> dict:
+    """{record id: {"match": [fields], "level": "strong"|"weak"}} — in-scope records whose known amount equals the sum of
+    ≥ 2 other non-zero in-scope amounts of the same source and field (the arithmetic signature of a total row that no
+    label or formula revealed). Round valuations make one such equality a plausible coincidence for a named asset, so:
+    strong = equal in ≥ 2 fields, or in one field for a row without a name or without the serial its siblings carry;
+    weak = equal in every testable field of the last row of its source. Other single-field equalities are not reported."""
+    meta = ctx.field_meta
+    groups = defaultdict(list)
+    last_row, n_src, n_row_ids = {}, defaultdict(int), defaultdict(int)
+    for r in ctx.records:
+        if not _in_scope(r):
+            continue
+        sid, row = _src(r).get("source_id"), _src(r).get("row")
+        n_src[sid] += 1
+        n_row_ids[sid] += _row_id(r)
+        if isinstance(row, int):
+            last_row[sid] = max(last_row.get(sid, row), row)
+        for f, tv in as_dict(r.get("fields")).items():
+            if field_group(f, meta) in ("revenue", "valuation", "expense") and _known(r, f) \
+                    and not as_dict(tv).get("joined_from"):
+                groups[(sid, f)].append((r.get("id"), float(as_dict(tv)["v"])))
+    tested, matched = defaultdict(list), defaultdict(list)
+    for (_sid, f), items in groups.items():
+        nonzero = [x for x in items if x[1] != 0]
+        if len(nonzero) < 3:  # the record itself + at least two non-zero others
+            continue
+        tot = sum(v for _, v in nonzero)
+        for rid, v in nonzero:
+            if v > 0:
+                tested[rid].append(f)
+                if abs(v - (tot - v)) <= max(0.5, 1e-9 * v):
+                    matched[rid].append(f)
+    out = {}
+    for rid, fs in matched.items():
+        r = as_dict(ctx.rec_by_id.get(rid))
+        sid = _src(r).get("source_id")
+        no_serial = _row_id(r) and n_row_ids[sid] * 2 < n_src[sid]  # its siblings mostly carry a serial
+        if len(fs) >= 2 or not nonempty(r.get("name")) or no_serial:
+            out[rid] = {"match": fs, "level": "strong"}
+        elif len(fs) == len(tested[rid]) and _src(r).get("row") == last_row.get(sid):
+            out[rid] = {"match": fs, "level": "weak"}
+    return out
+
+
+def g4b_total_like(ctx: Ctx):
+    """(blocking, warnings): in-scope records flagged total_like_row, or equal to the sum of their siblings."""
+    ctx.need("records")
+    recs = ctx.rec_by_id
+    sums = _sum_of_others(ctx)
+    blocking, warnings, seen = [], [], set()
+    for iss, rids in _issues_by_type(ctx, "total_like_row"):
+        for rid in rids:
+            r = recs.get(rid)
+            if not _in_scope(r) or r.get("record_type") == "total" or rid in seen:
+                continue  # record_type total in scope is reported by total_rows_in_scope
+            seen.add(rid)
+            where = f"03_records.json:{rid} ← {iss.get('id')} ({iss.get('where') or '-'})"
+            reason = _evidenced_override(ctx, rid)
+            if reason and rid not in sums:
+                warnings.append((f"السجل {rid} يشبه صف إجمالي ({iss.get('id')}) وأُبقي ضمن النطاق بتجاوز موثق في 02 "
+                                 f"(«{reason[:160]}»)؛ تأكد أنه ليس مجموعًا لسجلات أخرى", where))
+            elif reason:
+                blocking.append((f"السجل {rid} يشبه صف إجمالي ({iss.get('id')}) وقيمته في "
+                                 f"{short_list(sums[rid]['match'], 3)} تساوي مجموع بقية سجلات مصدره ضمن النطاق، فالتجاوز "
+                                 "الموثق في 02 لا يكفي؛ استبعده (exclude_rows) أو اجعل نوعه total", where))
+            else:
+                blocking.append((f"السجل {rid} ضمن النطاق رغم أن {iss.get('id')} يصفه صف إجمالي؛ سيُجمع مع تفاصيله. "
+                                 "أضف الصف إلى exclude_rows أو اجعل نوعه total، أو أثبت أنه ليس إجماليًا بـ records/<id> "
+                                 "في 02 (record_type مع scope_reason أو notes)", where))
+    for r in ctx.records:  # a total label («الإجمالي»، «جملة»، «Total») in any text cell, whatever 03's issues say
+        rid = r.get("id")
+        if not _in_scope(r) or r.get("record_type") == "total" or rid in seen:
+            continue
+        cells = [("name", _src(r).get("ref_name"))] if is_total_label(r.get("name")) else []
+        cells += [(f, as_dict(tv).get("ref")) for f, tv in as_dict(r.get("fields")).items()
+                  if is_total_label(as_dict(tv).get("v"))]
+        cells += [(f"dims.{k}", None) for k, v in as_dict(r.get("dims")).items() if is_total_label(v)]
+        if not cells:
+            continue
+        seen.add(rid)
+        at = short_list([f"{f} ({ref})" if ref else f for f, ref in cells], 3)
+        reason = _evidenced_override(ctx, rid)
+        if reason:
+            warnings.append((f"السجل {rid} يحمل عبارة إجمالي في {at} وأُبقي ضمن النطاق بتجاوز موثق في 02 "
+                             f"(«{reason[:160]}»)؛ تأكد أنه ليس مجموعًا لسجلات أخرى", f"03_records.json:{rid}"))
+        else:
+            blocking.append((f"السجل {rid} ضمن النطاق ويحمل عبارة إجمالي (مثل «الإجمالي» أو «جملة» أو Total) في {at}؛ "
+                             "سيُجمع مع تفاصيله. أضف الصف إلى exclude_rows، أو أثبت أنه ليس إجماليًا بـ records/<id> في 02 "
+                             "(record_type مع scope_reason أو notes)", f"03_records.json:{rid}"))
+    for rid, hit in sums.items():
+        if rid in seen:
+            continue
+        reason = _evidenced_override(ctx, rid)
+        msg = (f"قيمة السجل {rid} في {short_list(hit['match'], 3)} تساوي مجموع بقية سجلات مصدره ضمن النطاق، وهذه سمة صف "
+               "إجمالي لم يرصده اسم أو صيغة")
+        if reason:
+            warnings.append((f"{msg}؛ أُبقي ضمن النطاق بتجاوز موثق في 02 («{reason[:160]}»)", f"03_records.json:{rid}"))
+        elif hit["level"] == "strong":
+            blocking.append((f"{msg}؛ سيُجمع مع تفاصيله. استبعده (exclude_rows) إن كان إجماليًا، أو أثبت أنه أصل مستقل بـ "
+                             "records/<id> في 02 (record_type مع scope_reason أو notes)", f"03_records.json:{rid}"))
+        else:
+            warnings.append((f"{msg}، وهو آخر صف في مصدره؛ قد يكون التساوي مصادفة لأن للسجل اسمًا، فتحقق منه واستبعده "
+                             "(exclude_rows) إن كان إجماليًا", f"03_records.json:{rid}"))
+    return blocking, warnings
+
+
+# --- A2: an asset and its units / contracts counted together -----------------------------------------------------
+def _parent_of(child: dict, parents: list):
+    """(parent record, basis) for a unit/contract record: id branch (REG-1 → REG-1.2), same deed, or a name that starts
+    with the parent's name (≥ 2 words). (None, None) when nothing links it."""
+    cid = str(child.get("id") or "")
+    best = None
+    for p in parents:
+        pid = str(p.get("id") or "")
+        if pid and len(cid) > len(pid) + 1 and cid.startswith(pid) and cid[len(pid)] in "./_-":
+            if best is None or len(pid) > len(str(best.get("id"))):
+                best = p
+    if best is not None:
+        return best, f"معرّفه متفرع من {best.get('id')}"
+    dk = _deed_keys(child)
+    if dk:
+        for p in parents:
+            if dk & _deed_keys(p):
+                return p, f"رقم الصك نفسه في {p.get('id')}"
+    ck = name_key(child.get("name") or "")
+    cands = []
+    for p in parents:
+        pk = name_key(p.get("name") or "")
+        if ck and len(pk.split()) >= 2 and (ck == pk or ck.startswith(pk + " ")):
+            cands.append((len(pk), p))
+    if cands:
+        p = max(cands, key=lambda x: x[0])[1]
+        return p, f"اسمه يبدأ باسم {p.get('id')}"
+    return None, None
+
+
+def g4b_unit_levels(ctx: Ctx):
+    """(blocking, warnings) for in-scope unit/contract records that carry revenue or valuation amounts."""
+    ctx.need("records")
+    meta = ctx.field_meta
+    ins = [r for r in ctx.records if _in_scope(r)]
+    parents = [r for r in ins if r.get("record_type") in ASSET_LIKE]
+    by_parent, unlinked = OrderedDict(), []
+    for c in ins:
+        if c.get("record_type") not in CHILD_TYPES:
+            continue
+        amounts = _amounts(c, meta)
+        if not amounts:
+            continue
+        p, basis = _parent_of(c, parents)
+        if p is None:
+            unlinked.append(c.get("id"))
+        else:
+            by_parent.setdefault(p.get("id"), (p, []))[1].append((c, basis, amounts))
+    blocking, warnings = [], []
+    fix = ("اختر مستوى واحدًا للجمع: الأصل بمبلغه الكامل والوحدات excluded بسبب «تفصيل لأصل مسجل»، أو الوحدات وحدها "
+           "بعد استبعاد مبلغ الأصل")
+    for pid, (p, kids) in by_parent.items():
+        p_amounts = _amounts(p, meta)
+        hard, soft = [], []
+        for c, basis, amounts in kids:
+            desc = f"{c.get('id')} ({c.get('record_type')}؛ {basis})"
+            (soft if _evidenced_override(ctx, c.get("id")) else hard).append((desc, set(amounts)))
+        pname = f" «{p.get('name')}»" if p.get("name") else ""
+        if hard:
+            child_fields = set().union(*(fs for _, fs in hard))
+            shared = sorted(child_fields & set(p_amounts))
+            effect = (f"الحقول نفسها ({short_list(shared, 4)}) في المستويين، فيتضاعف المبلغ في أي مجموع يجمعهما" if shared
+                      else f"مبالغ ({short_list(sorted(child_fields), 4)}) لا يحملها الأصل، ومؤشرات الإيراد والقيمة تُحتسب من "
+                           "مستوى الأصل، فيسقط مبلغ الوحدات منها")
+            blocking.append((f"الأصل {pid}{pname} ووحدات أو عقود تابعة له ضمن النطاق تحمل مبالغ إيراد أو تقييم: "
+                             f"{short_list([d for d, _ in hard], 6)}؛ {effect}. {fix}، أو أثبت في 02 أنها ليست جزءًا "
+                             "منه (records/<id> مع scope_reason أو notes)", f"03_records.json:{pid}"))
+        if soft:
+            warnings.append((f"الأصل {pid}{pname} ومعه ضمن النطاق وحدات أو عقود بمبالغ إيراد أو تقييم أُبقيت بتجاوز موثق "
+                             f"في 02: {short_list([d for d, _ in soft], 6)}؛ تأكد أنها ليست جزءًا منه فلا يُحتسب المبلغ "
+                             "مرتين", f"03_records.json:{pid}"))
+    if unlinked:
+        warnings.append((f"وحدات أو عقود ضمن النطاق ({len(unlinked)}) بمبالغ إيراد أو تقييم دون أصل أم محدد (لا معرّف "
+                         f"متفرع ولا صك ولا اسم مشترك): {short_list(unlinked, 8)}؛ مؤشرات الإيراد والقيمة لا تقرأ مستوى "
+                         "الوحدة أو العقد. إن كانت تتبع أصلًا مسجلًا فاجعلها excluded بسبب «تفصيل لأصل مسجل»، وإن كانت "
+                         "أصلًا مستقلًا فاجعل نوعها asset",
+                         "03_records.json:records[record_type∈unit|contract]"))
+    return blocking, warnings
+
+
+# --- A11: duplicate ids kept in scope ------------------------------------------------------------------------------
+def g4b_duplicate_ids(ctx: Ctx):
+    """(blocking, warnings) for duplicate_id issues whose records are both still in scope."""
+    ctx.need("records")
+    recs = ctx.rec_by_id
+    blocking, warnings = [], []
+    for iss, rids in _issues_by_type(ctx, "duplicate_id"):
+        ins = [x for x in rids if _in_scope(recs.get(x))]
+        if len(ins) < 2:
+            continue
+        reasons = [_evidenced_override(ctx, x) for x in ins[1:]]
+        if all(reasons):
+            warnings.append((f"{iss.get('id')}: المعرّف مكرر في {short_list(ins)} وأُبقيت السجلات ضمن النطاق بتجاوز موثق "
+                             f"في 02 («{reasons[0][:160]}»)؛ تأكد من اختلاف الصك والموقع", _issue_where(iss)))
+        else:
+            blocking.append((f"{iss.get('id')}: المعرّف مكرر والسجلات {short_list(ins)} كلها ضمن النطاق؛ قد يُحتسب الأصل "
+                             "مرتين في العدد والقيمة والإيراد. استبعد المكرر في 02 (records/<id>: scope = excluded مع "
+                             "السبب)، أو أثبت أنهما أصلان مختلفان (records/<id>: scope = in_scope مع scope_reason يذكر الصك "
+                             "أو الموقع)", _issue_where(iss)))
+    return blocking, warnings
+
+
+# --- A10: the same sheet row read into several records ----------------------------------------------------------
+def g4b_overlaps(ctx: Ctx):
+    """(blocking, warnings). Blocking when ≥ 2 in-scope records read the same cell, or are two assets from one row."""
+    ctx.need("records")
+    issue_of = {}
+    for iss, rids in _issues_by_type(ctx, "overlapping_source_rows"):
+        for x in rids:
+            issue_of.setdefault(x, iss.get("id"))
+    groups = defaultdict(list)
+    for r in ctx.records:
+        s = _src(r)
+        if isinstance(s.get("sheet"), str) and isinstance(s.get("row"), int):
+            groups[(clean_text(s["sheet"]), s["row"])].append(r)
+    hard, soft = defaultdict(list), defaultdict(list)
+    for (sheet, row), rs in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        if len(rs) < 2:
+            continue
+        ins = [r for r in rs if _in_scope(r)]
+        cell_owners = defaultdict(set)
+        for r in ins:
+            for f, tv in as_dict(r.get("fields")).items():
+                ref = as_dict(tv).get("ref")
+                if isinstance(ref, str) and _known(r, f) and not as_dict(tv).get("joined_from"):
+                    cell_owners[ref].add(r.get("id"))
+        same_cells = sorted(ref for ref, ids in cell_owners.items() if len(ids) > 1)
+        n_assets = sum(1 for r in ins if r.get("record_type") in ASSET_LIKE)
+        item = (row, [r.get("id") for r in rs], same_cells)
+        exact = _src(rs[0]).get("sheet")  # the exact name (may carry trailing spaces) for the reference
+        (hard if len(ins) >= 2 and (same_cells or n_assets >= 2) else soft)[exact].append(item)
+    blocking, warnings = [], []
+    for sheet, items in hard.items():
+        rows = short_list([r for r, _, _ in items], 8)
+        ids = [i for _, rids, _ in items for i in rids]
+        cells = [c for _, _, cs in items for c in cs]
+        iss = sorted({issue_of[i] for i in ids if i in issue_of})
+        blocking.append((f"الصفوف {rows} من الورقة «{sheet}» مقروءة في أكثر من سجل ضمن النطاق ({short_list(ids, 8)})"
+                         + (f"، والخلايا نفسها مكررة ({short_list(cells, 4)})" if cells else "")
+                         + "؛ يتضاعف العدد أو القيمة أو الإيراد. اجعل نطاقات data_rows للمصادر غير متداخلة أو استبعد "
+                         "المكرر" + (f" ({short_list(iss, 4)})" if iss else ""), f"{sheet}!{rows}"))
+    for sheet, items in soft.items():
+        rows = short_list([r for r, _, _ in items], 8)
+        ids = [i for _, rids, _ in items for i in rids]
+        warnings.append((f"الصفوف {rows} من الورقة «{sheet}» مقروءة في أكثر من سجل ({short_list(ids, 8)}) دون خلية "
+                         "معروفة مكررة ضمن النطاق؛ تحقق أن ذلك مقصود (مثل فصل نشاط عن أصل في الصف نفسه)",
+                         f"{sheet}!{rows}"))
+    return blocking, warnings
+
+
+# --- A6: controlled vocabularies ---------------------------------------------------------------------------------
+def c_dims_vocabulary(ctx: Ctx):
+    ctx.need("records")
+    voc = load_vocab()
+    allowed = {d: list(as_dict(voc.get(d)).keys()) for d in VOCAB_DIMS + ("ownership",)}
+    recs = ctx.rec_by_id
+    out = []
+    for iss, rids in _issues_by_type(ctx, "dim_out_of_vocabulary"):
+        ins = [x for x in rids if _in_scope(recs.get(x))]
+        if ins:
+            out.append((f"{iss.get('id')}: {clean_text(iss.get('detail'))[:240]} — منها {_n_ar(len(ins), RECORDS_AR)} "
+                        f"ضمن النطاق: {short_list(ins, 8)}؛ صنّفها بالرموز المعتمدة عبر dim_rules أو records بدليل",
+                        _issue_where(iss)))
+    bad = OrderedDict()
+
+    def add(key, rid):
+        bad.setdefault(key, []).append(rid)
+    for r in ctx.records:
+        rid = r.get("id")
+        if r.get("record_type") not in RECORD_TYPES:
+            add(("record_type", repr(r.get("record_type"))), rid)
+        if r.get("scope") not in SCOPES:
+            add(("scope", repr(r.get("scope"))), rid)
+        if not _in_scope(r):
+            continue
+        d = as_dict(r.get("dims"))
+        for dim in VOCAB_DIMS:
+            v = d.get(dim)
+            if v not in (None, "") and v not in allowed[dim]:
+                add((dim, f"«{v}»" if isinstance(v, str) else repr(v)), rid)
+        own = d.get("ownership")
+        if own not in (None, ""):
+            for v in (own if isinstance(own, list) else [own]):
+                if v not in allowed["ownership"]:
+                    add(("ownership", f"«{v}»" if isinstance(v, str) else repr(v)), rid)
+            if not isinstance(own, list):
+                add(("ownership", None), rid)
+        m = d.get("managed_for_others")
+        if m is not None and not isinstance(m, bool):
+            add(("managed_for_others", repr(m)), rid)
+    allowed_txt = {"record_type": RECORD_TYPES, "scope": SCOPES, "managed_for_others": ("true", "false", "null")}
+    effect = {"record_type": "لا يُعرف هل يُعد أصلًا أو وحدة أو إجماليًا",
+              "scope": "لا يدخل المؤشرات ولا قسم المعزول والمستبعد"}
+    for (dim, shown), ids in bad.items():
+        where = f"03_records.json:records[].{'' if dim in effect else 'dims.'}{dim}"
+        if shown is None:
+            out.append((f"ownership ليست قائمة في {_n_ar(len(ids), RECORDS_AR)} ضمن النطاق: {short_list(ids, 8)}؛ "
+                        "الملكية قائمة غير حصرية (مثل [\"owned\"])", where))
+            continue
+        ok = allowed_txt.get(dim) or allowed.get(dim) or ()
+        out.append((f"القيمة {shown} في {dim} خارج المفردات المعتمدة (assets/vocab.json) في {_n_ar(len(ids), RECORDS_AR)}"
+                    f"{'' if dim in effect else ' ضمن النطاق'}: {short_list(ids, 8)}؛ المسموح: {'، '.join(map(str, ok))}. "
+                    f"{effect.get(dim, 'المؤشرات المقيدة بهذا البعد لا تراها')}", where))
+    return out
+
+
+# --- A9: sheet decisions, managed-for-others sheets, hidden sheets ---------------------------------------------------
+def g4b_sheet_scope(ctx: Ctx):
+    """(blocking, warnings)."""
+    ctx.need("records")
+    blocking, warnings, covered = [], [], set()
+    for iss, rids in _issues_by_type(ctx, "sheet_scope_mismatch", "managed_unflagged"):
+        blocking.append((f"{iss.get('id')} ({iss.get('type')}): {clean_text(iss.get('detail'))[:320]}", _issue_where(iss)))
+        covered.update(rids)
+    decisions = {s.get("sheet"): s for s in as_list(ctx.mapping.get("sheets"))
+                 if isinstance(s, dict) and isinstance(s.get("sheet"), str)}
+    overrides = as_dict(ctx.mapping.get("records"))
+    wrong, unflagged = OrderedDict(), OrderedDict()
+    for r in ctx.records:
+        rid = r.get("id")
+        if not _in_scope(r) or rid in covered:
+            continue
+        sheet = _src(r).get("sheet")
+        s = as_dict(_lookup_sheet(decisions, sheet)) if decisions and isinstance(sheet, str) else {}
+        if s.get("decision") in ("isolated", "excluded"):
+            o = as_dict(overrides.get(rid))
+            if not (o.get("scope") == "in_scope" and nonempty(o.get("scope_reason"))):
+                wrong.setdefault((sheet, s.get("decision")), []).append(rid)
+        if s.get("role") == "managed_properties" and as_dict(r.get("dims")).get("managed_for_others") is not True:
+            unflagged.setdefault(sheet, []).append(rid)
+    for (sheet, dec), ids in wrong.items():
+        blocking.append((f"{_n_ar(len(ids), RECORDS_AR)} ضمن النطاق من الورقة «{sheet}» وقرارها في 02 «{dec}»: "
+                         f"{short_list(ids, 8)}؛ بيانات لم يتحقق انتماؤها للمحفظة تدخل المؤشرات. اجعل default_scope للمصدر "
+                         "موافقًا لقرار الورقة، أو أدرج سجلًا بعينه بـ records/<id>: scope = in_scope مع scope_reason يذكر "
+                         "الرابط المؤكد", f"02_mapping.json:sheets[{sheet}]"))
+    for sheet, ids in unflagged.items():
+        blocking.append((f"{_n_ar(len(ids), RECORDS_AR)} ضمن النطاق من ورقة الأملاك المدارة للغير «{sheet}» دون "
+                         f"managed_for_others = true: {short_list(ids, 8)}؛ تدخل قيمة عقارات الغير وكامل إيراداتها في "
+                         "أرقام الجمعية. صنّفها managed_for_others: true أو اعزل المصدر",
+                         f"02_mapping.json:sheets[{sheet}]"))
+    states = {s.get("name"): s.get("state") for s in as_list(ctx.wb.get("sheets")) if isinstance(s, dict)}
+    hidden = OrderedDict()
+    for r in ctx.records:
+        sheet = _src(r).get("sheet")
+        if _in_scope(r) and isinstance(sheet, str) and _lookup_sheet(states, sheet) in ("hidden", "veryHidden"):
+            hidden.setdefault((sheet, _lookup_sheet(states, sheet)), []).append(r.get("id"))
+    for (sheet, st), ids in hidden.items():
+        reason = clean_text(as_dict(_lookup_sheet(decisions, sheet)).get("reason")) if decisions else ""
+        kind = "المخفية بشدة (veryHidden)" if st == "veryHidden" else "المخفية"
+        warnings.append((f"{_n_ar(len(ids), RECORDS_AR)} ضمن النطاق من الورقة {kind} «{sheet}»: {short_list(ids, 8)}؛ "
+                         "تحقق من انتماء بياناتها للمحفظة ومطابقتها للسجل الرئيسي"
+                         + (f" (سبب القرار في 02: «{reason[:160]}»)" if reason else "، واذكر السبب في sheets[].reason"),
+                         f"01_workbook_map.json:sheets[{sheet}]"))
+    return blocking, warnings
+
+
+# --- A13: study context and the sheet map in 02 --------------------------------------------------------------------
+def c_mapping_context(ctx: Ctx):
+    ctx.need("mapping")
+    m = ctx.mapping
+    out = []
+    w = "02_mapping.json"
+    labels = {"entity": "الجهة", "data_period": "فترة البيانات", "study_date": "تاريخ إعداد الدراسة"}
+    for key, vkey in (("entity", "name"), ("data_period", "label"), ("study_date", "value")):
+        o = m.get(key)
+        if key not in m:
+            out.append((f"«{key}» ({labels[key]}) مفقود؛ اذكر القيمة أو null مع الدليل أو سبب الغياب في evidence", f"{w}:{key}"))
+        elif not isinstance(o, dict):
+            out.append((f"«{key}» يجب أن يكون كائنًا {{{vkey}, evidence}} (القيمة قد تكون null)", f"{w}:{key}"))
+        elif not nonempty(o.get("evidence")):
+            out.append((f"«{key}» ({labels[key]}) بلا دليل (evidence): مرجع خلية أو خاصية ملف، أو سبب عدم توافر القيمة",
+                        f"{w}:{key}.evidence"))
+    if "currency" not in m:
+        out.append(("«currency» (العملة) مفقود؛ اذكر العملة الواردة في الملف أو null", f"{w}:currency"))
+    vd = m.get("valuation_dates")
+    if "valuation_dates" not in m:
+        out.append(("«valuation_dates» (تواريخ التقييم) مفقود؛ اذكر سنة كل تقييم وأساسه ودليله، أو قائمة فارغة إن لم يرد تقييم",
+                    f"{w}:valuation_dates"))
+    elif not isinstance(vd, list):
+        out.append(("«valuation_dates» يجب أن يكون قائمة", f"{w}:valuation_dates"))
+    else:
+        for i, it in enumerate(vd):
+            if not isinstance(it, dict) or not nonempty(it.get("evidence")):
+                out.append(("تاريخ تقييم بلا دليل (evidence)", f"{w}:valuation_dates[{i}]"))
+    sheets = m.get("sheets")
+    if not isinstance(sheets, list) or not sheets:
+        out.append(("«sheets» (خريطة الأوراق) مفقودة أو فارغة؛ لكل ورقة role وdecision وreason، بما فيها المخفية",
+                    f"{w}:sheets"))
+        return out
+    listed = []
+    for i, s in enumerate(sheets):
+        if not isinstance(s, dict) or not isinstance(s.get("sheet"), str):
+            out.append(("عنصر في sheets بلا اسم ورقة (sheet)", f"{w}:sheets[{i}]"))
+            continue
+        listed.append(s["sheet"])
+        miss = [k for k in ("role", "decision") if not nonempty(s.get(k))]
+        if miss:
+            out.append((f"الورقة «{s['sheet']}» بلا {' و'.join(miss)}", f"{w}:sheets[{i}]"))
+    wb_sheets = [s for s in as_list(ctx.wb.get("sheets")) if isinstance(s, dict) and isinstance(s.get("name"), str)]
+    if wb_sheets:
+        listed_c = {clean_text(n) for n in listed}
+        state_ar = {"hidden": "مخفية", "veryHidden": "مخفية بشدة"}
+        missing = [f"«{s['name']}»" + (f" ({state_ar[s.get('state')]})" if s.get("state") in state_ar else "")
+                   for s in wb_sheets if clean_text(s["name"]) not in listed_c]
+        if missing:
+            out.append((f"أوراق في المصنف (01) غير مذكورة في sheets[]: {short_list(missing, 10)}؛ أضف لكل منها role وdecision "
+                        "وreason، فالفحص يشمل كل الأوراق بما فيها المخفية", f"{w}:sheets"))
+        wb_c = {clean_text(s["name"]) for s in wb_sheets}
+        extra = [f"«{n}»" for n in listed if clean_text(n) not in wb_c]
+        if extra:
+            out.append((f"أوراق في sheets[] غير موجودة في المصنف (01): {short_list(extra, 10)}؛ صحّح الاسم كما هو في الملف",
+                        f"{w}:sheets"))
+    return out
+
+
+# --- A14: recorded totals vs the sum of qualifying records -----------------------------------------------------------
+def g4b_reconciliation(ctx: Ctx):
+    """(rows for 07.reconciliation, warnings for unexplained differences). Cached on ctx."""
+    if getattr(ctx, "_g4b_recon", None) is not None:
+        return ctx._g4b_recon
+    ctx.need("records")
+    entries = [e for e in as_list(ctx.rec_doc.get("excluded_rows"))
+               if isinstance(e, dict) and isinstance(e.get("values"), dict) and e["values"]]
+    if not entries:
+        raise Skip("لا توجد صفوف إجمالي مستبعدة بقيم محفوظة (excluded_rows[].values) للمطابقة")
+    by_src = defaultdict(list)
+    for r in ctx.records:
+        by_src[_src(r).get("source_id")].append(r)
+    total_rows = defaultdict(list)
+    for e in entries:
+        if isinstance(e.get("row"), int):
+            total_rows[e.get("source_id")].append(e["row"])
+    rows, warns = [], []
+    for e in entries:
+        sid, sheet, row = e.get("source_id"), e.get("sheet"), e.get("row")
+        prev = [x for x in total_rows.get(sid, []) if isinstance(row, int) and x < row]
+        lo = max(prev) if prev else None
+
+        def agg(field, in_scope_only, section):
+            """(sum of known values, n known, n unknown, sum of numbers that were stored as text in the file)."""
+            s, n_known, n_unknown, s_text = 0.0, 0, 0, 0.0
+            for r in by_src.get(sid, []):
+                if in_scope_only and not _in_scope(r):
+                    continue
+                rr = _src(r).get("row")
+                if section and not (isinstance(rr, int) and isinstance(row, int) and (lo is None or rr > lo) and rr < row):
+                    continue
+                tv = as_dict(as_dict(r.get("fields")).get(field))
+                if tv.get("joined_from"):
+                    continue
+                if tv.get("s") in KNOWN_STATUSES and is_num(tv.get("v")):
+                    s += tv["v"]
+                    n_known += 1
+                    if isinstance(tv.get("raw"), str) and str(tv.get("note") or "").startswith("نص رقمي"):
+                        s_text += tv["v"]  # SUM/SUBTOTAL in Excel skip numbers stored as text
+                else:
+                    n_unknown += 1
+            return round(s, 2), n_known, n_unknown, round(s_text, 2)
+        for field, tv in e["values"].items():
+            tv = tv if isinstance(tv, dict) else {"v": tv, "s": "value" if is_num(tv) else "text"}
+            ref = tv.get("ref") or (f"{sheet}!{row}" if sheet else f"{sid}:{row}")
+            item = OrderedDict([("source_id", sid), ("sheet", sheet), ("row", row), ("ref", ref), ("field", field)])
+            if tv.get("s") not in KNOWN_STATUSES or not is_num(tv.get("v")):
+                item.update(recorded=None, status="recorded_unknown", status_ar=RECON_STATUS_AR["recorded_unknown"])
+                rows.append(item)
+                continue
+            recorded = float(tv["v"])
+            tol = max(0.5, 1e-9 * abs(recorded))
+            full, sec = agg(field, True, False), agg(field, True, True)
+            all_rec, all_sec = agg(field, False, False), agg(field, False, True)
+            status, matched = "mismatch", None
+            for st, (s, n_known, _u, _t) in (("match", full), ("match_section", sec), ("match_all_records", all_rec),
+                                             ("match_section_all_records", all_sec)):
+                if n_known and abs(recorded - s) <= tol:
+                    status, matched = st, s
+                    break
+            if status == "mismatch" and full[3] and abs(recorded - (full[0] - full[3])) <= tol:
+                status, matched = "match_without_text_numbers", round(full[0] - full[3], 2)
+            item.update(recorded=recorded, sum_in_scope=full[0], n_in_scope_known=full[1], n_in_scope_unknown=full[2],
+                        difference=round(recorded - full[0], 2), sum_all_records=all_rec[0], matched_sum=matched,
+                        status=status, status_ar=RECON_STATUS_AR[status])
+            rows.append(item)
+            if status == "mismatch":
+                extra = f"، و{_n_values_ar(full[2], False)} قد تفسر جزءًا منه" if full[2] else ""
+                other = (f"؛ مجموع كل سجلات المصدر بما فيها المعزولة والمستبعدة {fmt_num(all_rec[0])}"
+                         if abs(all_rec[0] - full[0]) > tol else "")
+                warns.append((f"الإجمالي المدون {fmt_num(recorded)} للحقل {field} لا يطابق مجموع السجلات ضمن النطاق من المصدر "
+                              f"{sid} ({fmt_num(full[0])} من {_n_values_ar(full[1], True)}{extra})؛ الفرق "
+                              f"{fmt_num(round(recorded - full[0], 2))}{other}. تحقق من صيغة الإجمالي والصفوف المستبعدة، "
+                              "واذكر الفرق وسببه في مشكلات البيانات", f"{ref} ← 03_records.json:excluded_rows[{sid}:{row}]"))
+    ctx._g4b_recon = (rows, warns)
+    return ctx._g4b_recon
+
+
+def g4b_md_reconciliation(report: dict) -> list:
+    rows = report.get("reconciliation") or []
+    if not rows:
+        return []
+    lines = [f"## مطابقة الإجماليات المدونة مع مجموع السجلات ({len(rows)})", "",
+             "| الموضع | الحقل | المدون | مجموع السجلات ضمن النطاق | الفرق | مجموع كل سجلات المصدر | المجموع المطابق للمدون "
+             "| النتيجة |",
+             "|---|---|---|---|---|---|---|---|"]
+
+    def num(x):
+        return _md_cell(fmt_num(x) if x is not None else None)
+    for r in rows:
+        lines.append(f"| {_md_cell(r.get('ref'))} | {_md_cell(r.get('field'))} | {num(r.get('recorded'))} | "
+                     f"{num(r.get('sum_in_scope'))} | {num(r.get('difference'))} | {num(r.get('sum_all_records'))} | "
+                     f"{num(r.get('matched_sum'))} | {_md_cell(r.get('status_ar'))} |")
+    lines.append("")
+    return lines
+
+
+# --- C14: {{f:key}} fact tokens -------------------------------------------------------------------------------------
+def c_fact_tokens(ctx: Ctx):
+    ctx.need("narrative")
+    found = [(p, m) for p, s in walk_strings(ctx.narrative) for m in FACT_TOKEN_RE.finditer(s)]
+    if not found:
+        return []
+    facts = compute_facts(ctx.run_dir)
+    out = []
+    for p, m in found:
+        key = m.group(1)
+        if key in facts:
+            continue
+        near = [k for k in facts if k.split(".")[0] == key.split(".")[0]]
+        hint = (f"المفاتيح المتاحة بالبادئة نفسها: {short_list(near, 6)}" if near
+                else "اعرض المفاتيح المتاحة بـ scripts/facts.py --run-dir")
+        out.append((f"الرمز {m.group(0)} يشير إلى حقيقة غير موجودة في مجلد التشغيل؛ {hint}", f"06_narrative.json:{p}"))
+    return out
+
+
+# --- C24 / D1: delivered outputs (supporting workbook, 09 message) --------------------------------------------------
+def g4b_message_text(ctx: Ctx):
+    if not hasattr(ctx, "_g4b_msg"):
+        p = os.path.join(ctx.run_dir, MESSAGE_NAME)
+        ctx._g4b_msg = None
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                ctx._g4b_msg = fh.read()
+    return ctx._g4b_msg
+
+
+def g4b_scan_lines(text: str, label: str, levels) -> list:
+    out = []
+    for n, line in enumerate(text.splitlines(), 1):
+        kinds = pii_value_hits(line, levels)
+        if kinds:
+            out.append((f"نص يشبه {pii_kinds_ar(kinds)} (القيمة لا تُطبع)", f"{label}، السطر {n}"))
+    return out
+
+
+def g4b_export_cells(ctx: Ctx):
+    """None when there is no supporting workbook to check; else {path, label, cells: [(sheet, coord, text, is_number,
+    header)], error, stale}; header = the nearest text cell above in the same column. Read into memory only."""
+    if hasattr(ctx, "_g4b_export"):
+        return ctx._g4b_export
+    explicit = getattr(ctx, "xlsx_out", None)
+    path = explicit or os.path.join(ctx.run_dir, EXPORT_NAME)
+    res = None
+    if explicit or os.path.isfile(path):
+        res = {"path": path, "label": os.path.basename(path), "cells": [], "error": None, "stale": False}
+        if not os.path.isfile(path):
+            res["error"] = "الملف المحدد في --xlsx-out غير موجود"
+        else:
+            try:
+                import warnings
+                import openpyxl
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    wb = openpyxl.load_workbook(path, read_only=True, data_only=False)
+                try:
+                    for ws in wb.worksheets:
+                        above = {}
+                        for row in ws.iter_rows():
+                            for c in row:
+                                v = getattr(c, "value", None)
+                                if v is None or isinstance(v, bool):
+                                    continue
+                                col = getattr(c, "column", None)
+                                if isinstance(v, (int, float)):
+                                    t = str(int(v)) if float(v).is_integer() else str(v)
+                                    res["cells"].append((ws.title, c.coordinate, t, True, above.get(col, "")))
+                                elif isinstance(v, str):
+                                    res["cells"].append((ws.title, c.coordinate, v, False, above.get(col, "")))
+                                    above[col] = v
+                finally:
+                    wb.close()
+            except Exception as exc:
+                res["error"] = f"تعذر فتح المرفق الداعم لفحصه: {exc}"
+            newer = [n for n in ("03_records.json", "06_narrative.json")
+                     if os.path.isfile(os.path.join(ctx.run_dir, n))
+                     and os.path.getmtime(os.path.join(ctx.run_dir, n)) > os.path.getmtime(path) + 1]
+            res["stale"] = bool(newer)
+    ctx._g4b_export = res
+    return res
+
+
+def _export_hits(exp: dict, levels, advice: str) -> list:
+    """Text cells, and numbers under a personal-data header (a phone stored as a number). Other numbers are amounts or
+    deed numbers: a 9-digit amount would look like a mobile number."""
+    by_sheet = OrderedDict()
+    for sheet, coord, text, is_number, header in exp["cells"]:
+        if is_number and not PII_HEADER_RE.search(header or ""):
+            continue
+        kinds = pii_value_hits(text, levels)
+        if kinds:
+            d = by_sheet.setdefault(sheet, {"kinds": set(), "refs": []})
+            d["kinds"].update(kinds)
+            d["refs"].append(coord)
+    stale = "؛ الملف أقدم من 03 أو 06 وقد يكون من تشغيل سابق" if exp.get("stale") else ""
+    return [(f"{_n_ar(len(d['refs']), CELLS_AR)} في الورقة «{sheet}» تحوي ما يشبه {pii_kinds_ar(sorted(d['kinds']))} (القيم لا تُطبع)"
+             f"{stale}؛ {advice}", f"{exp['label']} ← «{sheet}»!{short_list(d['refs'], 5)}")
+            for sheet, d in by_sheet.items()]
+
+
+def c_pii_export_patterns(ctx: Ctx):
+    exp = g4b_export_cells(ctx)
+    if exp is None:
+        raise Skip(f"لا يوجد {EXPORT_NAME} في مجلد التشغيل ولم يُمرَّر --xlsx-out")
+    if exp["error"]:
+        return [(exp["error"], exp["path"])]
+    return _export_hits(exp, ("block",), "احذف الملف أو أعد تصديره (export_workbook.py) بعد إزالة مصدر هذه البيانات")
+
+
+def c_pii_review_patterns(ctx: Ctx):
+    """Review-level patterns (a 10-digit number starting with 1 or 2 may be a national id or a deed number) in every
+    delivered output; one warning per output."""
+    found = []
+    if isinstance(ctx.data.get("narrative"), dict):
+        found += _scan_pattern_strings(ctx.narrative, "06_narrative.json", ("review",))
+    msg = g4b_message_text(ctx)
+    if msg is not None:
+        found += g4b_scan_lines(msg, MESSAGE_NAME, ("review",))
+    if ctx.html_path and ctx.html_raw is not None:
+        name = os.path.basename(ctx.html_path)
+        found += g4b_scan_lines(visible_text(ctx.html_raw), f"{name}: نص ظاهر", ("review",))
+        data = embedded_data(ctx.html_raw)
+        if data is not None:
+            found += _scan_pattern_strings(data, f"{name} (DATA)", ("review",))
+        if ctx.analysis is not None:
+            found += _scan_pattern_strings(ctx.analysis, "analysis.json", ("review",))
+    by_out = OrderedDict()
+    for _detail, where in found:
+        by_out.setdefault(re.split(r"[:،]", where, 1)[0], []).append(where)
+    advice = ("راجعها: احذف أي رقم هوية شخصية، وإن كانت أرقام صكوك أو سجلات فاذكر ذلك في acknowledged_warnings "
+              "بسبب واضح")
+    out = [(f"{label}: {_n_ar(len(ws), PLACES_AR)} بها {PII_KIND_AR['national_id']} (القيم لا تُطبع)؛ {advice}",
+            short_list(ws, 4)) for label, ws in by_out.items()]
+    exp = g4b_export_cells(ctx)
+    if exp and not exp["error"]:
+        out += _export_hits(exp, ("review",), advice)
+    return out
+
+
+# --- 09 message: hand-typed numbers ------------------------------------------------------------------------------
+MSG_NUM_RE = re.compile(r"(?<![\w.,/\-−])[-−]?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![\d,.]\d)"
+                        r"(\s*(?:%|٪|مليار(?:ات)?|ملايين|مليون|آلاف|الاف|ألف|الف)(?![\w]))?")
+MSG_SCALE = {"ألف": 1e3, "الف": 1e3, "آلاف": 1e3, "الاف": 1e3, "مليون": 1e6, "ملايين": 1e6, "مليار": 1e9,
+             "مليارات": 1e9}
+
+
+def _all_numbers(obj, acc: set):
+    if is_num(obj) and math.isfinite(obj):
+        acc.add(float(obj))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _all_numbers(v, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            _all_numbers(v, acc)
+    return acc
+
+
+def _message_candidates(ctx: Ctx) -> set:
+    acc = set()
+    if isinstance(ctx.data.get("metrics"), dict):
+        _all_numbers(ctx.met_doc, acc)
+    try:
+        for f in compute_facts(ctx.run_dir).values():
+            _all_numbers(f.get("value"), acc)
+    except Exception:
+        pass
+    if isinstance(ctx.data.get("records"), dict):
+        acc |= _file_numbers(ctx)
+    n = ctx.narrative if isinstance(ctx.data.get("narrative"), dict) else {}
+    for key in ("gaps", "recommendations", "strengths", "assumptions", "questions", "data_requests", "top_gaps",
+                "top_actions", "exclusions", "data_issues_extra"):
+        acc.add(float(len(as_list(n.get(key)))))
+    plan = as_dict(n.get("plan"))
+    acc |= {float(len(as_list(plan.get(k)))) for k in ("d30", "d60", "d90")}
+    for name in ("07_validation.json", "08_dashboard_check.json"):  # «نتيجة الفحوص» quotes the last runs
+        p = os.path.join(ctx.run_dir, name)
+        if os.path.isfile(p):
+            try:
+                _all_numbers(load_json(p), acc)
+            except Exception:
+                pass
+    acc |= {c * 100 for c in list(acc) if abs(c) <= 1}  # shares written as percentages
+    return {abs(c) for c in acc}
+
+
+def c_message_numbers(ctx: Ctx):
+    text = g4b_message_text(ctx)
+    if text is None:
+        raise Skip(f"لا يوجد {MESSAGE_NAME} بعد")
+    cands = sorted(_message_candidates(ctx))
+    out = []
+    for line_no, line in enumerate(text.splitlines(), 1):
+        t = mask_pii(line, ("block", "review"))[0]          # personal data is reported by the privacy checks
+        t = t.translate(_AR_INDIC).replace("٬", ",").replace("٫", ".")
+        t = re.sub(r"`[^`]*`", " ", t)                       # code spans (paths, commands)
+        t = re.sub(r"\S*[/\\]\S*", " ", t)                   # paths, dates with slashes, «30/60/90»
+        t = DATE_RE.sub(" ", t)
+        t = re.sub(r"\d{1,2}:\d{2}(?::\d{2})?", " ", t)     # times
+        t = re.sub(r"\b[0-9a-fA-F]{12,}\b", " ", t)           # hashes
+        t = re.sub(r"^\s*(?:[-*+]\s+)?\d{1,2}[.)]\s", " ", t)  # list markers «1.» «2)»
+        for m in MSG_NUM_RE.finditer(t):
+            int_part, dec_part, unit = m.group(1), m.group(2), (m.group(3) or "").strip()
+            x = float(int_part.replace(",", "") + ("." + dec_part if dec_part else ""))
+            dec = len(dec_part) if dec_part else 0
+            after = t[m.end():m.end() + 8]
+            before = t[max(0, m.start() - 1):m.start()]
+            if not unit and not dec:
+                if re.fullmatch(r"\d{4}", int_part) and (1300 <= x <= 1500 or 1900 <= x <= 2100):
+                    continue  # a year
+                if x <= 20 and (after.startswith(")") or before in ("(", "≤", "≥", "<", ">")):
+                    continue  # «1) …» ordinal or «(≤3)»
+                if x in (30, 60, 90) and re.match(r"\s*(?:يوم|أيام|ايام)", after):
+                    continue  # the 30/60/90-day plan
+            scale = MSG_SCALE.get(unit, 1.0)
+            val = x * scale
+            tol = 0.5 * (10 ** -dec) * scale + 1e-9
+            if any(abs(val - c) <= tol or abs(val - c) <= 1e-9 * max(c, 1) for c in cands):
+                continue
+            out.append((f"الرقم «{m.group(0).strip()}» مكتوب يدويًا ولا يطابق أي قيمة في 05_metrics.json ولا حقيقة {{{{f:…}}}} "
+                        "ولا قيمة في الملف؛ انسخه من 05 بالتقريب المعروض أو صحّحه أو اذكر مصدره",
+                        f"{MESSAGE_NAME}، السطر {line_no}"))
+    return out
+
+
+# --- C13: acknowledged warnings -----------------------------------------------------------------------------------
+def g4b_finalize(ctx: Ctx, entries: list) -> "OrderedDict":
+    """Apply 06 acknowledged_warnings (C13) to the check entries in place and return extra report keys
+    (acknowledged_count, acknowledged_ids, reconciliation)."""
+    nar = ctx.data.get("narrative")
+    acks = as_list(nar.get("acknowledged_warnings")) if isinstance(nar, dict) else []
+    if acks:
+        levels = {cid: lvl for cid, lvl, _fn in CHECKS}
+        levels.setdefault("scenario_overlap_cross_type", "warning")
+        failing = {e["id"] for e in entries if e["level"] == "warning" and not e["passed"]}
+        accepted, problems = OrderedDict(), []
+        for i, a in enumerate(acks):
+            a = as_dict(a)
+            cid = a.get("check_id")
+            reason = a.get("reason") if isinstance(a.get("reason"), str) else ""
+            n = word_count_ar(reason)
+            if cid not in levels:
+                problems.append(("warning", f"معرّف الفحص «{cid}» غير معروف؛ انسخه من الحقل id في 07_validation.json", i))
+            elif levels[cid] != "warning":
+                problems.append(("warning", f"الفحص «{cid}» {'مانع' if levels[cid] == 'blocking' else 'ليس تحذيرًا'}؛ لا يُقرّ "
+                                 "إلا بالتحذيرات، أما الأخطاء المانعة فتُصلح ولا يُقرّ بها", i))
+            elif n < ACK_MIN_WORDS:
+                problems.append(("warning", f"سبب الإقرار بالتحذير «{cid}» {_words_ar(n)}؛ المطلوب {ACK_MIN_WORDS} كلمات فأكثر "
+                                 "تشرح لماذا يبقى التحذير دون إصلاح", i))
+            elif cid not in failing:
+                problems.append(("info", f"لا يوجد تحذير «{cid}» في هذا التحقق؛ احذف الإقرار إن لم يعد لازمًا", i))
+            else:
+                accepted.setdefault(cid, clean_text(reason))
+        for e in entries:
+            if e["level"] == "warning" and not e["passed"] and e["id"] in accepted:
+                e["level"] = "acknowledged"
+                e["acknowledged_reason"] = accepted[e["id"]]
+        for level, detail, i in problems:
+            entries.append({"id": "acknowledged_warnings", "level": level, "passed": False, "detail": detail,
+                            "where": f"06_narrative.json:acknowledged_warnings[{i}]",
+                            "title": CHECK_TITLES.get("acknowledged_warnings")})
+    ack = [e for e in entries if e["level"] == "acknowledged"]
+    extra = OrderedDict([("acknowledged_count", len(ack)), ("acknowledged_ids", sorted({e["id"] for e in ack}))])
+    recon = getattr(ctx, "_g4b_recon", None)
+    if recon and recon[0]:
+        extra["reconciliation"] = recon[0]
+    return extra
+
+
+G4B_TITLES = OrderedDict([
+    ("total_like_in_scope", "عدم إبقاء صفوف تشبه الإجمالي ضمن النطاق"),
+    ("unit_double_count", "عدم إبقاء الأصل ووحداته أو عقوده بمبالغها معًا ضمن النطاق (مستوى واحد للجمع)"),
+    ("duplicate_ids_in_scope", "عدم إبقاء سجلين بمعرّف مكرر ضمن النطاق"),
+    ("overlapping_rows", "عدم قراءة خلايا الصف نفسه في أكثر من سجل ضمن النطاق"),
+    ("dims_vocabulary", "تصنيفات السجلات ضمن المفردات المعتمدة (assets/vocab.json)"),
+    ("sheet_scope", "اتساق نطاق السجلات مع قرار كل ورقة ودورها في 02"),
+    ("mapping_context", "سياق الدراسة وخريطة الأوراق مكتملان في 02 بأدلتها"),
+    ("fact_tokens", "صحة رموز الحقائق {{f:…}}"),
+    ("pii_export_patterns", "خلو المرفق الداعم من بيانات اتصال أو حسابات بنكية"),
+    ("total_like_records", "سجلات ضمن النطاق تشبه صفوف الإجمالي (تجاوز موثق، أو آخر صف يساوي مجموع غيره)"),
+    ("unit_levels_mixed", "وحدات أو عقود ضمن النطاق بمبالغ إيراد أو تقييم (دون أصل محدد أو بتجاوز موثق)"),
+    ("duplicate_ids_kept", "معرّفات مكررة أُبقيت ضمن النطاق بتجاوز موثق"),
+    ("overlapping_rows_other", "صفوف مقروءة في أكثر من سجل دون تكرار خلية معروفة"),
+    ("hidden_sheet_in_scope", "سجلات ضمن النطاق من أوراق مخفية"),
+    ("totals_reconciliation", "مطابقة الإجماليات المدونة مع مجموع السجلات المؤهلة"),
+    ("pii_review_patterns", "أرقام تشبه الهوية الوطنية في المخرجات (للمراجعة)"),
+    ("message_numbers", "أرقام رسالة التسليم (09_message.md) مطابقة لـ05 أو للحقائق أو للملف"),
+    ("acknowledged_warnings", "صحة الإقرار بالتحذيرات في 06 (acknowledged_warnings)"),
+    ("pii_text_patterns", "خلو السرد والسجلات والربط ورسالة التسليم من بيانات اتصال أو حسابات بنكية"),
+    ("pii_html_patterns", "خلو الداشبورد وanalysis.json من بيانات اتصال أو حسابات بنكية"),
+])
+CHECK_TITLES.update(G4B_TITLES)
+
+G4B_CHECKS = [
+    ("total_like_in_scope", "blocking", lambda ctx: g4b_total_like(ctx)[0]),
+    ("unit_double_count", "blocking", lambda ctx: g4b_unit_levels(ctx)[0]),
+    ("duplicate_ids_in_scope", "blocking", lambda ctx: g4b_duplicate_ids(ctx)[0]),
+    ("overlapping_rows", "blocking", lambda ctx: g4b_overlaps(ctx)[0]),
+    ("dims_vocabulary", "blocking", c_dims_vocabulary),
+    ("sheet_scope", "blocking", lambda ctx: g4b_sheet_scope(ctx)[0]),
+    ("mapping_context", "blocking", c_mapping_context),
+    ("fact_tokens", "blocking", c_fact_tokens),
+    ("pii_export_patterns", "blocking", c_pii_export_patterns),
+    ("total_like_records", "warning", lambda ctx: g4b_total_like(ctx)[1]),
+    ("unit_levels_mixed", "warning", lambda ctx: g4b_unit_levels(ctx)[1]),
+    ("duplicate_ids_kept", "warning", lambda ctx: g4b_duplicate_ids(ctx)[1]),
+    ("overlapping_rows_other", "warning", lambda ctx: g4b_overlaps(ctx)[1]),
+    ("hidden_sheet_in_scope", "warning", lambda ctx: g4b_sheet_scope(ctx)[1]),
+    ("totals_reconciliation", "warning", lambda ctx: g4b_reconciliation(ctx)[1]),
+    ("pii_review_patterns", "warning", c_pii_review_patterns),
+    ("message_numbers", "warning", c_message_numbers),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -1707,6 +2709,7 @@ CHECKS = [
     ("metric_tokens", "blocking", c_metric_tokens),
     ("duplicate_record_ids", "blocking", c_duplicate_record_ids),
     ("total_rows_in_scope", "blocking", c_total_rows_in_scope),
+    *G4B_CHECKS,  # data integrity & privacy checks (G4b): blocking and warning entries
     ("tv_status_consistency", "blocking", c_tv_status_consistency),
     ("metric_status_value", "blocking", c_metric_status_value),
     ("pairwise_sets", "blocking", c_pairwise_sets),
@@ -1791,12 +2794,14 @@ def write_md(path: str, report: dict) -> None:
     lines.append(f"- ملف Excel للفحص: {'مُمرَّر' if report['inputs'].get('xlsx') else 'لم يُمرَّر'} · "
                  f"الداشبورد: {'مُمرَّر' if report['inputs'].get('html') else 'لم يُمرَّر'}")
     lines.append(f"- **الأخطاء المانعة: {report['blocking_count']}** · التحذيرات: {report['warning_count']} · "
-                 f"ملاحظات: {report['info_count']}")
+                 f"مُقرّ بها: {report.get('acknowledged_count', 0)} · ملاحظات: {report['info_count']}")
     verdict = ("توجد أخطاء مانعة — لا يُبنى الداشبورد النهائي قبل إصلاحها (يمكن البناء التجريبي بـ --draft)."
                if report["blocking_count"] else "لا توجد أخطاء مانعة.")
     lines += [f"- **النتيجة:** {verdict}", ""]
     sections = [("الأخطاء المانعة", lambda c: c["level"] == "blocking" and not c["passed"]),
-                ("التحذيرات (تُعالج أو تُبرَّر في methodology_notes)", lambda c: c["level"] == "warning" and not c["passed"]),
+                ("التحذيرات (تُعالج، أو يُقرّ بها بسبب في acknowledged_warnings)",
+                 lambda c: c["level"] == "warning" and not c["passed"]),
+                ("تحذيرات مُقرّ بها في 06 (لا تُحتسب في عدد التحذيرات)", lambda c: c["level"] == "acknowledged"),
                 ("ملاحظات وفحوص لم تُنفذ", lambda c: c["level"] == "info" and (not c["passed"] or c.get("skipped")))]
     for title, pred in sections:
         rows = [c for c in checks if pred(c)]
@@ -1807,8 +2812,10 @@ def write_md(path: str, report: dict) -> None:
             continue
         lines += ["| # | الفحص | التفاصيل | الموضع |", "|---|---|---|---|"]
         for i, c in enumerate(rows, 1):
-            lines.append(f"| {i} | {_md_cell(c['title'])} | {_md_cell(c['detail'])} | {_md_cell(c['where'])} |")
+            detail = c["detail"] + (f" — سبب الإقرار: {c['acknowledged_reason']}" if c.get("acknowledged_reason") else "")
+            lines.append(f"| {i} | {_md_cell(c['title'])} | {_md_cell(detail)} | {_md_cell(c['where'])} |")
         lines.append("")
+    lines += g4b_md_reconciliation(report)
     passed = [c for c in checks if c["passed"] and not c.get("skipped")]
     lines.append(f"## الفحوص الناجحة ({len(passed)})")
     lines.append("")
@@ -1824,6 +2831,8 @@ def main(argv=None) -> int:
     ap.add_argument("--run-dir", required=True, help="مجلد التشغيل")
     ap.add_argument("--xlsx", help="ملف Excel الأصلي (لفحص تسرب قيم الأعمدة الشخصية؛ يُقرأ في الذاكرة فقط)")
     ap.add_argument("--html", help="ملف الداشبورد المبني (لفحص الخصوصية)")
+    ap.add_argument("--xlsx-out", help=f"المرفق الداعم المصدَّر لفحص خلوه من البيانات الشخصية "
+                                       f"(الافتراضي: RUN/{EXPORT_NAME} إن وُجد)")
     args = ap.parse_args(argv)
     import warnings
     warnings.filterwarnings("ignore", category=UserWarning, module=r"openpyxl\..*")
@@ -1832,7 +2841,9 @@ def main(argv=None) -> int:
         print(f"خطأ: مجلد التشغيل غير موجود: {run_dir}", file=sys.stderr)
         return 1
     ctx = Ctx(run_dir, xlsx=args.xlsx, html_path=args.html)
+    ctx.xlsx_out = args.xlsx_out
     checks = run_checks(ctx)
+    extra = g4b_finalize(ctx, checks)  # acknowledged warnings (level "acknowledged") + reconciliation table
     blocking = sum(1 for c in checks if c["level"] == "blocking" and not c["passed"])
     warnings = sum(1 for c in checks if c["level"] == "warning" and not c["passed"])
     infos = sum(1 for c in checks if c["level"] == "info" and (not c["passed"] or c.get("skipped")))
@@ -1842,6 +2853,9 @@ def main(argv=None) -> int:
         inputs[name] = sha256_file(p)[:16] if os.path.isfile(p) else None
     inputs["xlsx"] = os.path.basename(args.xlsx) if args.xlsx else None
     inputs["html"] = os.path.basename(args.html) if args.html else None
+    exp = getattr(ctx, "_g4b_export", None)
+    inputs["xlsx_out"] = os.path.basename(exp["path"]) if exp else None
+    inputs["message"] = MESSAGE_NAME if g4b_message_text(ctx) is not None else None
     report = OrderedDict([
         ("contract_version", CONTRACT_VERSION),
         ("generator", "validate_analysis.py"),
@@ -1850,15 +2864,20 @@ def main(argv=None) -> int:
         ("inputs", inputs),
         ("blocking_count", blocking),
         ("warning_count", warnings),
+        ("acknowledged_count", extra["acknowledged_count"]),
         ("info_count", infos),
         ("passed", blocking == 0),
         ("blocking_ids", sorted({c["id"] for c in checks if c["level"] == "blocking" and not c["passed"]})),
         ("warning_ids", sorted({c["id"] for c in checks if c["level"] == "warning" and not c["passed"]})),
+        ("acknowledged_ids", extra["acknowledged_ids"]),
         ("checks", checks),
     ])
+    if extra.get("reconciliation"):
+        report["reconciliation"] = extra["reconciliation"]
     save_json(os.path.join(run_dir, "07_validation.json"), report)
     write_md(os.path.join(run_dir, "07_validation.md"), report)
-    print(f"التحقق الآلي: أخطاء مانعة {blocking} · تحذيرات {warnings} · ملاحظات {infos}")
+    print(f"التحقق الآلي: أخطاء مانعة {blocking} · تحذيرات {warnings} · ملاحظات {infos}"
+          + (f" · تحذيرات مُقرّ بها {extra['acknowledged_count']}" if extra["acknowledged_count"] else ""))
     for c in checks:
         if c["level"] == "blocking" and not c["passed"]:
             print(f"  [مانع] {c['title']}: {c['detail']} — {c['where'] or ''}")
