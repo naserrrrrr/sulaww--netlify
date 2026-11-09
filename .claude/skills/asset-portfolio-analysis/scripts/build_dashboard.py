@@ -2,8 +2,8 @@
 """build_dashboard.py — assemble RUN/analysis.json and the self-contained RUN/dashboard.html.
 
 Usage:
-    python3 scripts/build_dashboard.py --run-dir RUN [--draft]
-    python3 scripts/build_dashboard.py --self-test      (token grammar and privacy scrub on synthetic values)
+    python3 "$SKILL_DIR/scripts/build_dashboard.py" --run-dir "$RUN" [--draft]
+    python3 "$SKILL_DIR/scripts/build_dashboard.py" --self-test   (token grammar, privacy scrub, meta, fonts, hints)
 
 Reads (data-contract.md §0):
     01_workbook_map.json  (optional; summary only — sheets, anomalies, PII column locations)
@@ -14,7 +14,8 @@ Reads (data-contract.md §0):
     07_validation.json    (required unless --draft; blocking errors stop the build unless --draft)
 Writes:
     RUN/analysis.json     (contract §7, PII-free)
-    RUN/dashboard.html    (assets/dashboard_template.html + inlined assets/metric_engine.js + data)
+    RUN/dashboard.html    (assets/dashboard_template.html + inlined assets/metric_engine.js + data + the Arabic web font
+                           of assets/fonts/ embedded base64 in @font-face, so screen and print share one typeface offline)
 
 Exit codes: 0 ok · 1 missing/invalid input · 2 blocking validation errors (without --draft).
 
@@ -27,6 +28,16 @@ Narrative tokens rendered in every narrative string (TOKEN_RE / FACT_TOKEN_RE �
 Formatting matches the dashboard: Western digits, thousands separators, «ر.س» for SAR,
 percent with 2 decimals below 10 and 1 decimal otherwise, half-away-from-zero rounding.
 
+Board-facing meta (analysis.json `meta`, read by the template):
+    study_date        the preparation date the file states (a cell or title, 02 study_date); the workbook's last-modified
+                      property is never presented as one: then study_date = null, study_date_stated = false and
+                      file_modified carries that timestamp's date as context («غير مذكور في الملف» on the page)
+    confidentiality   «سري — للاستخدام الداخلي» by default, in the header and on every printed page; 04
+                      dashboard.confidentiality (or 06 x_confidentiality) replaces the text, false or "" removes it
+Facts: every {{f:key}} fact is embedded except the per-record values rec.<record_id>.<field_id> (C2), of which only
+those the narrative cites are embedded (the records are embedded anyway).
+Printed next-step hints name the scripts by absolute, quoted paths built from this script's own location.
+
 Privacy (defence in depth; normalize.py already drops PII columns): keys matching apa_common.PII_KEY_RE are dropped
 and block-level personal-data patterns of assets/pii_patterns.json are masked with apa_common.mask_pii in every string;
 review-level hits (e.g. a 10-digit number that may be a national ID or a deed) are kept and reported.
@@ -38,6 +49,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
+import base64  # noqa: E402
 import copy  # noqa: E402
 import datetime as _dt  # noqa: E402
 import json  # noqa: E402
@@ -50,10 +62,14 @@ import apa_common as ac  # noqa: E402
 import facts as facts_mod  # noqa: E402
 
 SKILL_DIR = ac.SKILL_DIR
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PATH = os.path.join(SKILL_DIR, "assets", "dashboard_template.html")
 ENGINE_PATH = os.path.join(SKILL_DIR, "assets", "metric_engine.js")
+FONTS_DIR = os.path.join(SKILL_DIR, "assets", "fonts")
 ENGINE_MARK = "/*__APA_ENGINE__*/"
 DATA_MARK = "/*__APA_DATA__*/"
+FONT_MARK = "/*__APA_FONTS__*/"   # optional (0 or 1 in the template): replaced by the embedded @font-face rules
+CONFIDENTIAL_DEFAULT = "سري — للاستخدام الداخلي"
 
 NOT_COMPUTABLE = "غير قابل للاحتساب"
 UNAVAILABLE = "غير متاح"
@@ -391,8 +407,10 @@ def workbook_summary(wb: dict, mapping: dict) -> dict:
                 "formulas": (s.get("formulas") or {}).get("count") if isinstance(s.get("formulas"), dict) else None,
             })
         out["sheets"] = sheets
+        # record_ids when 01 attaches an anomaly to records: it then counts among that record's data notes (C3)
         out["anomalies"] = [{"id": a.get("id"), "type": a.get("type"), "severity": a.get("severity"),
-                             "where": a.get("where"), "detail": a.get("detail")}
+                             "where": a.get("where"), "detail": a.get("detail"),
+                             "record_ids": a.get("record_ids") if isinstance(a.get("record_ids"), list) else None}
                             for a in (wb.get("anomalies") or []) if isinstance(a, dict)]
         out["pii_columns"] = [{"sheet": p.get("sheet"), "col": p.get("col"), "header": p.get("header"),
                                "reason": p.get("reason")} for p in (wb.get("pii_columns") or []) if isinstance(p, dict)]
@@ -486,11 +504,88 @@ def validation_summary(v) -> dict:
             "checked_at": v.get("checked_at") or v.get("generated_at")}
 
 
-def build_meta(mapping: dict, rec_doc: dict, config: dict, wb: dict, draft: bool, records: list) -> dict:
+# ---------------------------------------------------------------------------
+# Meta helpers: study date, confidentiality, printed hints, fonts, facts
+# ---------------------------------------------------------------------------
+# study_date_meta lives in apa_common (shared with export_workbook.py «ملخص»)
+study_date_meta = ac.study_date_meta
+
+
+def confidentiality_label(config: dict, narrative: dict):
+    """Confidentiality marking for the header and every printed page: on by default (CONFIDENTIAL_DEFAULT);
+    04 dashboard.confidentiality, else 06 x_confidentiality, replaces the text (a string) or removes it (false / "")."""
+    dash = (config or {}).get("dashboard")
+    for holder, key in ((dash, "confidentiality"), (narrative, "x_confidentiality")):
+        if isinstance(holder, dict) and key in holder:
+            v = holder.get(key)
+            if isinstance(v, str):
+                return v.strip() or None
+            return CONFIDENTIAL_DEFAULT if v is True else None
+    return CONFIDENTIAL_DEFAULT
+
+
+def shell_path(p: str) -> str:
+    """A path for a printed shell command: absolute and double-quoted (spaces, quotes, $ and backticks escaped)."""
+    return '"' + re.sub(r'(["\\$`])', r"\\\1", os.path.abspath(p)) + '"'
+
+
+def script_hint(interp: str, script: str, *args: str) -> str:
+    """«python3 "/abs/skill/scripts/x.py" …»: the script by its absolute path from this script's own folder."""
+    return " ".join([interp, shell_path(os.path.join(SCRIPTS_DIR, script))] + list(args))
+
+
+def font_face_css(fonts_dir: str = FONTS_DIR):
+    """(css, problem): @font-face rules embedding the woff2 files listed in fonts_dir/fonts.json as base64 data URIs,
+    or ("", why) when the fonts are missing (the page then falls back to the system fonts of its font stack)."""
+    man_p = os.path.join(fonts_dir, "fonts.json")
+    try:
+        man = ac.load_json(man_p)
+    except (OSError, ValueError) as exc:
+        return "", f"تعذر قراءة {man_p}: {exc}"
+    family = re.sub(r"[^A-Za-z0-9 \-]", "", str(man.get("family") or ""))
+    ranges = man.get("unicode_ranges") or {}
+    rules = []
+    for face in man.get("faces") or []:
+        path = os.path.join(fonts_dir, str(face.get("file") or ""))
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            return "", f"ملف الخط غير موجود: {path}"
+        if data[:4] != b"wOF2":
+            return "", f"ملف الخط ليس WOFF2: {path}"
+        rng = ranges.get(face.get("subset"))
+        rules.append("@font-face{font-family:'%s';font-style:normal;font-weight:%d;font-display:swap;"
+                     "src:url(data:font/woff2;base64,%s) format('woff2');%s}"
+                     % (family, int(face.get("weight") or 400), base64.b64encode(data).decode("ascii"),
+                        ("unicode-range:%s;" % re.sub(r"[^0-9A-Fa-fU+,\-]", "", str(rng))) if rng else ""))
+    if not family or not rules:
+        return "", f"لا توجد خطوط معرّفة في {man_p}"
+    return "\n".join(rules), None
+
+
+_CITED_REC_FACT_RE = re.compile(r"f:\s*(rec\.[A-Za-z0-9_.\-]+)")
+
+
+def facts_for_page(facts, narrative) -> dict:
+    """Facts embedded in the page: every fact except the per-record values rec.<id>.<field> (C2), of which only the
+    ones the narrative cites ({{f:rec.…}} tokens, f:rec.… evidence refs); the page holds the records themselves."""
+    blob = json.dumps(narrative, ensure_ascii=False) if narrative else ""
+    keep = [k for k in facts.keys() if not str(k).startswith("rec.")]
+    keep += sorted({k.rstrip(".") for k in _CITED_REC_FACT_RE.findall(blob)} - set(keep))
+    out = {}
+    for k in keep:
+        f = facts.get(k)
+        if isinstance(f, dict):
+            out[k] = {"value": f.get("value"), "unit": f.get("unit"), "label": f.get("label")}
+    return out
+
+
+def build_meta(mapping: dict, rec_doc: dict, config: dict, wb: dict, draft: bool, records: list,
+               narrative: dict = None) -> dict:
     m = mapping or {}
     ent = m.get("entity") or {}
     dp = m.get("data_period") or {}
-    sd = m.get("study_date") or {}
     src = rec_doc.get("source") or {}
     wbf = (wb or {}).get("file") or {}
     sha = src.get("sha256") or wbf.get("sha256") or ""
@@ -499,14 +594,16 @@ def build_meta(mapping: dict, rec_doc: dict, config: dict, wb: dict, draft: bool
     for sc in ac.SCOPES:
         counts[sc] = sum(1 for r in records if r.get("scope") == sc)
     val = config.get("valuation") or {}
-    return {
+    out = {
         "entity": ent.get("name") if isinstance(ent, dict) else (ent or None),
         "entity_evidence": ent.get("evidence") if isinstance(ent, dict) else None,
         "data_period": dp.get("label") if isinstance(dp, dict) else (dp or None),
         "data_period_evidence": dp.get("evidence") if isinstance(dp, dict) else None,
         "analysis_date": m.get("analysis_date") or _dt.date.today().isoformat(),
-        "study_date": sd.get("value") if isinstance(sd, dict) else (sd or None),
-        "study_date_basis": sd.get("basis") if isinstance(sd, dict) else None,
+    }
+    out.update(study_date_meta(m, wb))
+    out.update({
+        "confidentiality": confidentiality_label(config, narrative),
         "currency": config.get("currency") or rec_doc.get("currency") or m.get("currency") or "SAR",
         "file_name": fname,
         "sha256_short": sha[:12] if sha else None,
@@ -516,7 +613,8 @@ def build_meta(mapping: dict, rec_doc: dict, config: dict, wb: dict, draft: bool
         "draft": bool(draft),
         "built_at": _dt.datetime.now().replace(microsecond=0).isoformat(),
         "generator": "build_dashboard.py",
-    }
+    })
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +669,31 @@ def self_test() -> int:
     eq("raw amount kept", sc.walk({"v": 512345678, "s": "value", "raw": "512345678"}), {"v": 512345678, "s": "value", "raw": "512345678"})
     eq("raw phone masked", sc.walk({"v": 501234567, "s": "value", "raw": "0501234567"})["raw"], ac.REDACTED)
     eq("pii key dropped", sc.walk({"supervisor_phone": "x", "name": "y"}), {"name": "y"})
+    # «تاريخ إعداد الدراسة»: the workbook's last-modified date is context, never the study date (fictional dates)
+    wbp = {"file": {"properties": {"modified": "2030-04-09T08:15:00"}}}
+    sdm = study_date_meta({"study_date": {"value": "2030-04-09", "basis": "خصائص المصنف", "evidence": "file.properties.modified"}}, wbp)
+    eq("study date from file properties", (sdm["study_date"], sdm["study_date_stated"], sdm["file_modified"]), (None, False, "2030-04-09"))
+    sdm = study_date_meta({"study_date": {"value": "2030-04-09", "basis": None, "evidence": "—"}}, wbp)
+    eq("study date equal to last-modified", (sdm["study_date"], sdm["file_modified"]), (None, "2030-04-09"))
+    sdm = study_date_meta({"study_date": {"value": "2030-01-15", "basis": "عنوان البيان", "evidence": "ورقة تجريبية!B2"}}, wbp)
+    eq("study date stated in a cell", (sdm["study_date"], sdm["study_date_stated"], sdm["file_modified"]), ("2030-01-15", True, "2030-04-09"))
+    eq("study date absent", study_date_meta({}, None)["study_date"], None)
+    # confidentiality: on by default; the 04 dashboard setting replaces or removes it
+    eq("confidential default", confidentiality_label({}, {}), CONFIDENTIAL_DEFAULT)
+    eq("confidential off", confidentiality_label({"dashboard": {"confidentiality": False}}, {}), None)
+    eq("confidential text", confidentiality_label({}, {"x_confidentiality": "داخلي"}), "داخلي")
+    # printed hints: absolute, quoted paths
+    hint = script_hint("node", "check_dashboard.mjs", "--out", shell_path("مجلد تجريبي/run"))
+    eq("hint quoted absolute", hint.startswith('node "' + os.path.join(SCRIPTS_DIR, "check_dashboard.mjs") + '"')
+       and ('"' + os.path.abspath("مجلد تجريبي/run") + '"') in hint, True)
+    eq("hint escapes", shell_path('/tmp/a"b$c'), '"/tmp/a\\"b\\$c"')
+    # embedded font: six base64 @font-face rules (assets/fonts)
+    css, why = font_face_css()
+    eq("fonts embedded", (why, css.count("@font-face"), "data:font/woff2;base64," in css), (None, 6, True))
+    # per-record facts: only the cited ones are embedded
+    fx = {"records.isolated": {"value": 1, "unit": "count", "label": "x"},
+          "rec.A-1.val.demo": {"value": 5, "unit": "SAR", "label": "y"}, "rec.A-2.val.demo": {"value": 6, "unit": "SAR", "label": "z"}}
+    eq("rec facts cited only", sorted(facts_for_page(fx, {"t": "قيمة {{f:rec.A-1.val.demo}}"})), ["rec.A-1.val.demo", "records.isolated"])
     for f in fails:
         eprint("فشل: " + f)
     print(f"build_dashboard --self-test: {'ناجح' if not fails else 'فشل ' + str(len(fails))}")
@@ -625,8 +748,9 @@ def main(argv=None) -> int:
         narrative = {"contract_version": ac.CONTRACT_VERSION}
     if validation is None:
         if not draft:
-            eprint("خطأ: 07_validation.json غير موجود. شغّل أولًا:\n"
-                   f"  python3 scripts/validate_analysis.py --run-dir {run}\nأو استخدم --draft لمعاينة مسودة.")
+            eprint("خطأ: 07_validation.json غير موجود. شغّل أولًا:\n  "
+                   + script_hint("python3", "validate_analysis.py", "--run-dir", shell_path(run))
+                   + "\nأو استخدم --draft لمعاينة مسودة.")
             return 1
         eprint("تنبيه: 07_validation.json غير موجود؛ تُبنى مسودة لم تجتز التحقق.")
     else:
@@ -657,6 +781,9 @@ def main(argv=None) -> int:
         if n != 1:
             eprint(f"خطأ: القالب يجب أن يحتوي العلامة {mark} مرة واحدة (وُجدت {n}).")
             return 1
+    if template.count(FONT_MARK) > 1:
+        eprint(f"خطأ: القالب يحتوي العلامة {FONT_MARK} أكثر من مرة.")
+        return 1
 
     vocab = ac.load_vocab()
     field_meta = rec_doc.get("field_meta") or (mapping or {}).get("field_meta") or {}
@@ -685,7 +812,7 @@ def main(argv=None) -> int:
 
     analysis = {
         "contract_version": ac.CONTRACT_VERSION,
-        "meta": build_meta(mapping, rec_doc, config, wb, draft, records),
+        "meta": build_meta(mapping, rec_doc, config, wb, draft, records, narrative),
         "vocab": vocab,
         "field_meta": field_meta,
         "records": records,
@@ -696,8 +823,9 @@ def main(argv=None) -> int:
         "workbook_map_summary": workbook_summary(wb, mapping),
         "issues": issues,
         "validation": validation_summary(validation),
-        # counts outside 05 (isolated records, hidden sheets …) — the {{f:key}} vocabulary, read by the template
-        "facts": {k: {"value": f.get("value"), "unit": f.get("unit"), "label": f.get("label")} for k, f in facts.items()},
+        # counts outside 05 (isolated records, hidden sheets …) — the {{f:key}} vocabulary, read by the template;
+        # per-record values (rec.*) only when the narrative cites them
+        "facts": facts_for_page(facts, narrative),
     }
     sc = Scrubber()
     analysis = sc.walk(analysis)
@@ -709,7 +837,9 @@ def main(argv=None) -> int:
     data_js = data_js.replace("</", "<\\/").replace("<!--", "<\\u0021--")
     if re.search(r"</script|<!--", engine, re.IGNORECASE):
         engine = engine.replace("</", "<\\/").replace("<!--", "<\\!--")
-    html = template.replace(ENGINE_MARK, engine, 1)
+    fonts_css, font_problem = font_face_css() if FONT_MARK in template else ("", None)
+    html = template.replace(FONT_MARK, fonts_css, 1)
+    html = html.replace(ENGINE_MARK, engine, 1)
     # the data block is inserted last so that nothing inside the data can be mistaken for a marker
     html = html.replace(DATA_MARK, "const DATA = " + data_js + ";", 1)
     out_html = os.path.join(run, "dashboard.html")
@@ -720,8 +850,11 @@ def main(argv=None) -> int:
         eprint("تنبيه: رموز {{m:...}} تشير إلى مؤشرات أو حقول غير موجودة في 05_metrics.json وعُرضت «غير متاح»: "
                + "، ".join(sorted(set(tr.unknown))))
     if tr.unknown_facts:
-        eprint("تنبيه: رموز {{f:...}} تشير إلى حقائق غير موجودة (python3 scripts/facts.py --run-dir RUN يسردها) "
+        eprint("تنبيه: رموز {{f:...}} تشير إلى حقائق غير موجودة (يسردها "
+               + script_hint("python3", "facts.py", "--run-dir", shell_path(run)) + ") "
                "وعُرضت «غير متاح»: " + "، ".join(sorted(set(tr.unknown_facts))))
+    if font_problem:
+        eprint("تنبيه: لم يُضمَّن الخط العربي في اللوحة (" + font_problem + ")؛ تُستخدم خطوط النظام.")
     if drop:
         eprint(f"حُذفت حقول بيانات شخصية من السجلات: {len(drop)} حقل.")
     if sc.keys_dropped or sc.values_masked:
@@ -739,7 +872,7 @@ def main(argv=None) -> int:
     state = "مسودة لم تجتز التحقق الآلي" if draft else "نسخة نهائية"
     print(f"تم البناء — {state}: {out_json} ({kb(out_json)}) · {out_html} ({kb(out_html)})")
     print(f"  السجلات: {len(records)} · المؤشرات: {len((metrics.get('metrics') or {}))} · رموز السرد المعالجة: {tr.count}")
-    print(f"  الخطوة التالية: node {os.path.join('scripts', 'check_dashboard.mjs')} --html {out_html} --out {run}")
+    print("  الخطوة التالية: " + script_hint("node", "check_dashboard.mjs", "--html", shell_path(out_html), "--out", shell_path(run)))
     return 0
 
 

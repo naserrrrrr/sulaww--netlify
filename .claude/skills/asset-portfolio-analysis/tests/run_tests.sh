@@ -77,7 +77,7 @@ say "   المجلد: ${BUILD}"
 # --- 0. prerequisites -----------------------------------------------------------------------
 say "[0] المتطلبات"
 if "${PY[@]}" -c "import openpyxl, jsonschema" >/dev/null 2>&1; then pass "python3 + openpyxl + jsonschema"
-else fail "python3 + openpyxl + jsonschema غير متاحة (pip install -r requirements.txt)"; fi
+else fail "python3 + openpyxl + jsonschema غير متاحة (python3 -m pip install -r requirements.txt)"; fi
 "${PY[@]}" -c "import hijridate" >/dev/null 2>&1 && pass "hijridate" || say "  تنبيه: hijridate غير مثبتة؛ قد تختلف نتائج تحويل التواريخ الهجرية"
 
 # --- 1. fixture ----------------------------------------------------------------------------------
@@ -102,9 +102,27 @@ if have_script "$S/compute_metrics.py" "compute_metrics --init-config" && have_f
   run_step "compute_metrics --init-config" 0 "${PY[@]}" "$S/compute_metrics.py" --init-config \
     --records "$RUN/03_records.json" --out "$RUN/04_metrics_config.json" || true
 fi
+if [[ -f "$RUN/04_metrics_config.json" ]]; then
+  # C1: the analyst's «يحتاج تحقق» flag on one metric (fictional reason) — carried into 05, the card and the workbook
+  "${PY[@]}" - "$RUN/04_metrics_config.json" <<'PYEOF'
+import json, sys
+c = json.load(open(sys.argv[1], encoding="utf-8"))
+m = next(m for m in c["metrics"] if m["id"] == "property_revenue")
+m["review"] = {"status": "needs_verification", "reason": "إيراد إحدى العمارات له رقم بديل في كشف التحصيل لم يُطابق بعد"}
+json.dump(c, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+PYEOF
+fi
 if have_script "$S/compute_metrics.py" "compute_metrics" && have_files "compute_metrics" "$RUN/04_metrics_config.json"; then
   run_step "compute_metrics" 0 "${PY[@]}" "$S/compute_metrics.py" --records "$RUN/03_records.json" \
     --config "$RUN/04_metrics_config.json" --out "$RUN/05_metrics.json" --print || true
+  run_step "05 carries the review flag of 04 unchanged (C1)" 0 "${PY[@]}" -c '
+import json, sys
+c = json.load(open(sys.argv[1], encoding="utf-8")); m = json.load(open(sys.argv[2], encoding="utf-8"))
+spec = next(x for x in c["metrics"] if x["id"] == "property_revenue")
+got = m["metrics"]["property_revenue"].get("review")
+print(got)
+sys.exit(0 if got == spec["review"] and all("review" not in r for k, r in m["metrics"].items() if k != "property_revenue") else 1)' \
+    "$RUN/04_metrics_config.json" "$RUN/05_metrics.json" || true
   run_step "compute_metrics --filters use=investment --print" 0 "${PY[@]}" "$S/compute_metrics.py" \
     --records "$RUN/03_records.json" --config "$RUN/04_metrics_config.json" --filters '{"use":"investment"}' --print || true
 fi
@@ -284,6 +302,26 @@ if [[ -f "$TESTS_DIR/test_final_polish.py" ]]; then
   run_step "tests/test_final_polish.py (scope_ids, workbook board wording, top lists, section totals, author masking, summary hygiene)" 0 \
     "${PY[@]}" "$TESTS_DIR/test_final_polish.py" || true
 else skip "tests/test_final_polish.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_engine_text.py" ]]; then
+  run_step "tests/test_engine_text.py (metric review flag, rec facts, top-action order, Arabic counts, reconciliation, docs)" 0 \
+    "${PY[@]}" "$TESTS_DIR/test_engine_text.py" || true
+else skip "tests/test_engine_text.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_workbook_export.py" ]]; then
+  # SKIPs inside (exit 0) when LibreOffice is absent; ~10–20 s with it
+  run_step "tests/test_workbook_export.py (workbook formulas recalculate in LibreOffice to their stored values)" 0 \
+    env APA_BUILD_DIR="$BUILD" "${PY[@]}" "$TESTS_DIR/test_workbook_export.py" || true
+else skip "tests/test_workbook_export.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_dashboard_board.py" ]]; then
+  BB_ARGS=(--work "$BUILD/dashboard_board")
+  [[ "${APA_SKIP_BROWSER:-0}" == "1" ]] && BB_ARGS+=(--skip-browser)
+  run_step "tests/test_dashboard_board.py (review flag, data notes, priority, one-asset charts, mobile cards, print, confidentiality, study date, font, hints)" 0 \
+    "${PY[@]}" "$TESTS_DIR/test_dashboard_board.py" "${BB_ARGS[@]}" || true
+else skip "tests/test_dashboard_board.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_install.sh" ]]; then
+  # install.sh into a scratch HOME (pip stubbed, no network); under 1 s
+  run_step "tests/test_install.sh (install.sh in a scratch HOME, re-run from the installed copy)" 0 \
+    env APA_BUILD_DIR="$BUILD" bash "$TESTS_DIR/test_install.sh" || true
+else skip "tests/test_install.sh (غير موجود)"; fi
 if [[ -f "$TESTS_DIR/robustness/test_inspect_robustness.py" ]]; then
   # honours APA_BUILD_DIR (writes to $APA_BUILD_DIR/robustness), else a temp dir removed afterwards
   run_step "tests/robustness/test_inspect_robustness.py" 0 env APA_BUILD_DIR="$BUILD" "${PY[@]}" \

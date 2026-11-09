@@ -4,7 +4,7 @@
 Writes RUN/01_workbook_map.json and RUN/01_workbook_map.md (data-contract.md §1).
 
 Usage:
-    python3 scripts/inspect_workbook.py <file.xlsx|.xlsm|.xls|.ods|.xlsb> --out RUN
+    python3 "$SKILL_DIR/scripts/inspect_workbook.py" <file.xlsx|.xlsm|.xls|.ods|.xlsb> --out RUN
 
 Design rules:
   * Generic: no sheet names, row numbers or amounts are hard-coded.
@@ -37,7 +37,7 @@ from collections import Counter, defaultdict  # noqa: E402
 from apa_common import (  # noqa: E402
     AMBIGUOUS_DATE_NOTE, ANOMALY_TYPE_AR, CONTRACT_VERSION, EXCEL_ERRORS, NA_TOKENS, NOT_APPLICABLE_TOKENS, REDACTED,
     clean_text, extract_years, is_filler, is_pii_header, is_total_label, looks_like_phone, mask_pii, name_key,
-    normalize_arabic, parse_date, parse_number, pii_value_hits, ref, save_json, sha256_file,
+    normalize_arabic, parse_date, parse_number, pii_value_hits, ref, save_json, sha256_file, ar_agree, ar_count, ar_n,
 )
 import formula_eval as fe  # noqa: E402
 from functools import lru_cache  # noqa: E402
@@ -1539,7 +1539,7 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
     if broken:
         r0, c0, t0, v0 = broken[0]
         an.add("excel_error", "high", sv.name, ref(sv.name, f"{col_letter(c0)}{r0}"),
-               f"{len(broken)} صيغة تحتوي مرجعًا مكسورًا #REF! (مثل {col_letter(c0)}{r0}: {short(t0, 80)})"
+               f"{ar_n(len(broken), 'formula')} {ar_agree(len(broken), 'تحتوي', 'تحتويان', 'تحتوي')} مرجعًا مكسورًا #REF! (مثل {col_letter(c0)}{r0}: {short(t0, 80)})"
                + (f"؛ قيمتها المخزنة {fmt_num(jnum(v0)) if isinstance(jnum(v0), (int, float)) else jnum(v0)} لا يُعتمد عليها"
                   if v0 is not None else "") + ". المرجع الأصلي حُذف أو نُقل؛ تُصحح الصيغة قبل استخدام قيمتها.",
                {"count": len(broken), "examples": [{"ref": f"{col_letter(c)}{r}", "formula": t,
@@ -1557,7 +1557,7 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
                                else None})
         share = len(missing) / max(1, len(sv.formulas))
         an.add("cached_missing", "high", sv.name, ref(sv.name, f"{col_letter(missing[0][1])}{missing[0][0]}"),
-               f"{len(missing)} من {len(sv.formulas)} صيغة في الورقة بلا قيمة محسوبة مخزنة "
+               f"{len(missing)} من {ar_n(len(sv.formulas), 'formula', case='gen')} في الورقة بلا قيمة محسوبة مخزنة "
                f"(مثل {', '.join(x['ref'] for x in recomputed[:5])}). "
                + ("يبدو أن الملف حُفظ دون إعادة حساب (مثلًا بواسطة برنامج آلي). " if share > 0.9 else "")
                + "يلزم فتح الملف وإعادة حسابه في Excel أو LibreOffice قبل الاعتماد على قيم هذه الخلايا؛ "
@@ -1577,8 +1577,8 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
         hdr = sa.header_for(r0, c)
         codes = Counter(x[2] for x in items)
         an.add("excel_error", "high", sv.name, ref(sv.name, area_ref(c, [x[0] for x in items])),
-               f"{len(items)} خلية في العمود {col_letter(c)}" + (f" «{short(hdr, 60)}»" if hdr else "")
-               + f" تحمل خطأ Excel ({'، '.join(f'{k}×{v}' for k, v in codes.items())})"
+               f"{ar_n(len(items), 'cell')} في العمود {col_letter(c)}" + (f" «{short(hdr, 60)}»" if hdr else "")
+               + f" {ar_agree(len(items), 'تحمل', 'تحملان', 'تحمل')} خطأ Excel ({'، '.join(f'{k}×{v}' for k, v in codes.items())})"
                + (f"، مثل {col_letter(c)}{r0} = {code0}" + (f" من الصيغة {f0}" if f0 else "")) +
                ". القيم غير متاحة ولا تُعامل كصفر.",
                {"rows": compress_ints([x[0] for x in items])[:30], "codes": dict(codes),
@@ -1604,7 +1604,7 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
                + f" = {fmt_num(cached_s) if diff is not None else cached_s} لا تطابق إعادة حساب صيغتها {text0} = "
                + f"{fmt_num(val_s) if diff is not None else val_s}"
                + (f" (الفرق {fmt_diff(diff)})" if diff is not None else "")
-               + (f"؛ ويتكرر ذلك في {len(items)} خلية بالعمود" if len(items) > 1 else "")
+               + (f"؛ ويتكرر ذلك في {ar_n(len(items), 'cell', case='gen')} بالعمود" if len(items) > 1 else "")
                + ". قد يكون المصنف لم يُعد حسابه بعد آخر تعديل؛ أعد الحساب في Excel وتحقق.",
                {"formula": text0, "cached": cached_s, "recomputed": val_s, "count": len(items),
                 "examples": [{"ref": f"{col_letter(c)}{x[0]}", "formula": x[2],
@@ -1682,7 +1682,7 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
             else:
                 detail += "."
         if len(items) > 1:
-            detail += f" تتكرر المشكلة في {len(items)} صفًا"
+            detail += f" تتكرر المشكلة في {ar_n(len(items), 'row', case='gen')}"
             if all_re:
                 detail += f" (مجموع المخزن {fmt_num(tot_cached)} مقابل {fmt_num(tot_re)})"
             detail += "."
@@ -1715,7 +1715,7 @@ def check_formulas(sa: SheetAnalysis, sas: dict, book: Book, ev: fe.Evaluator, a
                f"قيمة العمود {col_letter(c)} «{short(hdr, 60)}» في {col_letter(c)}{r0} مشتقة بالطرح من الإجمالي: "
                f"{text0} = {fmt_num(jnum(cached0))} (الإجمالي {total0['col']} = {fmt_num(total0['value'])} ناقص "
                f"{subs_txt}). ليست قيمة مُدخلة مستقلة؛ لا تُجمع مع الإجمالي ولا تُعرض كتقييم مستقل"
-               + (f"؛ النمط نفسه في {len(items)} صفًا" if len(items) > 1 else "") + ".",
+               + (f"؛ النمط نفسه في {ar_n(len(items), 'row', case='gen')}" if len(items) > 1 else "") + ".",
                {"formula": text0, "cached": jnum(cached0), "total": total0, "subtracted": subs0,
                 "rows": compress_ints([x[0] for x in items])[:30], "count": len(items)},
                order=(r0, c))
@@ -1852,10 +1852,11 @@ def check_totals(sa: SheetAnalysis, an: Anomalies, ev: fe.Evaluator, pii_cols: s
                     an.add("total_mismatch", "high", sv.name, ref(sv.name, cell),
                            f"{cell}" + (f" «{short(hdr, 50)}»" if hdr else "") + f" في صف الإجمالي «{short(label, 40)}» = "
                            f"{fmt_num(actual)}" + (" (رقم مدوّن يدويًا)" if not is_f else f" (الصيغة {sv.formulas[(t_row, c)]})")
-                           + f" بينما {basis} الصفوف {block[0]}–{block[-1]} ({len(block)} صفًا) = {fmt_num(expected)} "
+                           + f" بينما {basis} الصفوف {block[0]}–{block[-1]} ({ar_n(len(block), 'row')}) = {fmt_num(expected)} "
                            f"(الفرق {fmt_diff(actual - expected)})."
-                           + (f" يوجد {n_numtext} رقم مخزن كنص لا تجمعه Excel." if n_numtext else "")
-                           + (f" يوجد {n_text} خلية نصية في التفاصيل." if n_text else ""),
+                           + (f" في التفاصيل {ar_count(n_numtext, 'رقم مخزن كنص', 'رقمان مخزنان كنصين', 'أرقام مخزنة كنصوص', acc='رقمًا مخزنًا كنص', one='رقم واحد مخزن كنص')}"
+                              f" لا {ar_agree(n_numtext, 'تجمعه', 'تجمعهما', 'تجمعها')} صيغ Excel." if n_numtext else "")
+                           + (f" في التفاصيل {ar_count(n_text, 'خلية نصية', 'خليتان نصيتان', 'خلايا نصية', 'f')}." if n_text else ""),
                            {"cell": cell, "value": jnum(actual), "recomputed": jnum(expected), "kind": kind,
                             "block_rows": [block[0], block[-1]], "n_rows": len(block), "formula": sv.formulas.get((t_row, c)),
                             "numeric_text_cells": n_numtext, "text_cells": n_text},
@@ -1927,7 +1928,7 @@ def check_row_totals(sa: SheetAnalysis, an: Anomalies):
                    f"{col_letter(tc)}{r0} «{short(header[tc], 60)}» = {fmt_num(t0)} بينما {col_letter(lc)} (أرض) + "
                    f"{col_letter(bc)} (مبنى) لسنة {'/'.join(map(str, years))} = {fmt_num(a0)} + {fmt_num(b0)} = "
                    f"{fmt_num(a0 + b0)} (الفرق {fmt_diff(t0 - (a0 + b0))})"
-                   + (f"؛ ويتكرر في {len(bad)} صفًا" if len(bad) > 1 else "") +
+                   + (f"؛ ويتكرر في {ar_n(len(bad), 'row', case='gen')}" if len(bad) > 1 else "") +
                    ". لا يُعتمد الإجمالي أو مكوّناته قبل التحقق من المصدر.",
                    {"total_col": col_letter(tc), "land_col": col_letter(lc), "building_col": col_letter(bc),
                     "year": years, "count": len(bad),
@@ -1937,6 +1938,26 @@ def check_row_totals(sa: SheetAnalysis, an: Anomalies):
 
 
 # ---- column-level checks ------------------------------------------------------------------
+def _text_rows_ar(n_text: int, n_rows: int) -> str:
+    """«صف واحد من أصل 12 صفًا في بياناته يحمل نصًا» / «صف بياناته الوحيد يحمل نصًا» (number–noun agreement)."""
+    if n_text >= n_rows:
+        if n_rows <= 1:
+            return "صف بياناته الوحيد يحمل نصًا"
+        if n_rows == 2:
+            return "صفا بياناته كلاهما يحملان نصًا"
+        return f"كل صفوف بياناته ({ar_n(n_rows, 'row')}) تحمل نصوصًا"
+    return (f"{ar_n(n_text, 'row')} من أصل {ar_n(n_rows, 'row', case='gen')} في بياناته "
+            f"{ar_agree(n_text, 'يحمل نصًا', 'يحملان نصًا', 'تحمل نصوصًا', 'تحمل نصوصًا')}")
+
+
+def _value_kinds_ar(pr: dict) -> str:
+    """«7 أرقام ولا نصوص» / «3 أرقام و3 نصوص وتاريخ واحد» from a column profile."""
+    parts = [ar_n(pr.get("numeric", 0), "number"), ar_n(pr.get("text", 0), "text")]
+    if pr.get("date"):
+        parts.append(ar_n(pr["date"], "date"))
+    return " و".join(parts)
+
+
 def check_columns(sa: SheetAnalysis, an: Anomalies):
     sv = sa.sv
     seen_headers = set()
@@ -1962,8 +1983,8 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
             if hdr and "money" in p["hints"] and pr["text"] > 0 and "count" not in p["hints"]:
                 ex = "، ".join(f"«{short(x, 30)}»" for x in p["_text_examples"][:3])
                 an.add("text_in_numeric", "high", sv.name, ref(sv.name, area_ref(c, text_rows) if text_rows else f"{L}:{L}"),
-                       f"العمود {L}{hdr_txt}{fam_label} عنوانه يوحي بمبلغ، لكنه يحتوي نصوصًا في {pr['text']} من {n} صف بيانات "
-                       f"(مثل {ex})" + (f" مقابل {pr['numeric']} قيمة رقمية" if pr["numeric"] else " ولا يحتوي أي رقم")
+                       f"العمود {L}{hdr_txt}{fam_label} عنوانه يوحي بمبلغ، لكن {_text_rows_ar(pr['text'], n)} "
+                       f"(مثل {ex})" + (f" مقابل {ar_count(pr['numeric'], 'قيمة رقمية', 'قيمتان رقميتان', 'قيم رقمية', 'f', case='gen')}" if pr["numeric"] else " ولا يحتوي أي رقم")
                        + ". النص ليس مبلغًا؛ لا يُستخدم هذا العمود قيمةً أو مقامًا ماليًا، ويُربط كحقل نصي إن لزم.",
                        {"col": L, "header": hdr, "text_cells": pr["text"], "numeric_cells": pr["numeric"],
                         "data_rows": n, "text_samples": [short(x, 40) for x in p["_text_examples"][:3]]},
@@ -1987,14 +2008,14 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                         "text_cells": pr["text"]}, order=(first_row, c))
             if pr.get("numeric_text"):
                 an.add("numeric_text", "low", sv.name, ref(sv.name, area_ref(c, [r for r in rows if sv.kind(r, c) == "X"]) or f"{L}:{L}"),
-                       f"{pr['numeric_text']} خلية في العمود {L}{hdr_txt}{fam_label} تحمل أرقامًا مخزنة كنص — "
+                       f"{ar_n(pr['numeric_text'], 'cell')} في العمود {L}{hdr_txt}{fam_label} {ar_agree(pr['numeric_text'], 'تحمل رقمًا مخزنًا', 'تحملان أرقامًا مخزنة', 'تحمل أرقامًا مخزنة')} كنص — "
                        "لا تجمعها SUM في Excel؛ تُحوَّل عند التطبيع مع حفظ النص الأصلي.",
                        {"col": L, "header": hdr, "cells": pr["numeric_text"]}, order=(first_row, c))
             if p["_hijri"]:
                 ex_rows = p["_hijri_rows"][:3]       # Hijri cells only (never a Gregorian «15/03/2019» as example)
                 conv = [_date_example(sv, r, c) for r in ex_rows]
                 an.add("hijri_date_text", "low", sv.name, ref(sv.name, f"{L}{ex_rows[0]}" if ex_rows else f"{L}:{L}"),
-                       f"العمود {L}{hdr_txt} يحتوي {p['_hijri']} تاريخًا هجريًا مخزنًا كنص (مثل «{conv[0]['raw']}» ≈ "
+                       f"في العمود {L}{hdr_txt} {ar_count(p['_hijri'], 'تاريخ هجري', 'تاريخان هجريان', 'تواريخ هجرية')} بصيغة نصية (مثل «{conv[0]['raw']}» ≈ "
                        f"{conv[0]['gregorian'] or 'غير قابل للتحويل'} ميلادي). يُحوَّل بتقويم أم القرى مع حفظ الأصل، "
                        "ولا يُقارن بتواريخ ميلادية قبل التحويل." if conv else
                        f"العمود {L}{hdr_txt} يحتوي تواريخ هجرية نصية.",
@@ -2017,7 +2038,7 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
             ambiguous = [r for r in rows if sv.kind(r, c) == "H"
                          and (parse_date(sv.value(r, c)).get("note") or "").startswith(AMBIGUOUS_DATE_NOTE)]
             if ambiguous:
-                p["notes"].append(f"{len(ambiguous)} تاريخًا نصيًا ملتبسًا (اليوم والشهر ≤ 12، مثل "
+                p["notes"].append(f"{ar_count(len(ambiguous), 'تاريخ نصي ملتبس', 'تاريخان نصيان ملتبسان', 'تواريخ نصية ملتبسة', one='تاريخ نصي واحد ملتبس')} (اليوم والشهر ≤ 12، مثل "
                                   f"«{clean_text(sv.value(ambiguous[0], c))}» في {L}{ambiguous[0]}) — قُرئ يوم/شهر؛ "
                                   "يُتحقق من ترتيب اليوم والشهر في المصدر")
             if "valuation" in p["hints"] and pr["zero"]:
@@ -2030,8 +2051,8 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                     ex = [display_value(sv.value(r, c)) for r in vrows[:3]]
                     an.add("unlabeled_column", "medium" if pr["numeric"] else "low", sv.name,
                            ref(sv.name, area_ref(c, vrows) if vrows else f"{L}:{L}"),
-                           f"العمود {L}{fam_label} بلا عنوان لكنه يحتوي {content_n} قيمة في صفوف البيانات "
-                           f"({pr['numeric']} رقمًا و{pr['text']} نصًا؛ مثل {'، '.join(ex)} في الصفوف {rows_text(vrows, 6)}). "
+                           f"العمود {L}{fam_label} بلا عنوان لكنه يحتوي {ar_n(content_n, 'value', case='acc')} في صفوف البيانات "
+                           f"({_value_kinds_ar(pr)}؛ مثل {'، '.join(ex)} في الصفوف {rows_text(vrows, 6)}). "
                            "معناها غير موثق؛ لا تُستخدم في الحسابات قبل الاستيضاح.",
                            {"col": L, "rows": compress_ints(vrows)[:20], "numeric_cells": pr["numeric"],
                             "text_cells": pr["text"], "samples": ex}, order=(vrows[0] if vrows else first_row, c))
@@ -2105,7 +2126,7 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                     if lower:
                         r0, a0, b0 = lower[0]
                         an.add("vat_inconsistent", "medium", sv.name, ref(sv.name, f"{col_letter(ci)}{r0}"),
-                               f"الإيراد مع الضريبة أقل من بدونها في {len(lower)} صفًا (مثل الصف {r0}: "
+                               f"الإيراد مع الضريبة أقل من بدونها في {ar_n(len(lower), 'row', case='gen')} (مثل الصف {r0}: "
                                f"{fmt_num(b0)} مقابل {fmt_num(a0)}). يُتحقق من أساس الضريبة قبل الاستخدام.",
                                ev_, order=(r0, ci))
 
@@ -2156,7 +2177,7 @@ def check_columns(sa: SheetAnalysis, an: Anomalies):
                     continue
                 nc2 = keys.get("name")
                 an.add("shared_deed", "medium", sv.name, ref(sv.name, f"{col_letter(dc)}{rws[0]}"),
-                       f"رقم الصك «{short(k, 40)}» مشترك بين {len(rws)} صفوف ({rows_text(rws)})"
+                       f"رقم الصك «{short(k, 40)}» مشترك بين {ar_n(len(rws), 'row', case='gen')} ({rows_text(rws)})"
                        + (f": {'، '.join('«' + short(sv.text(r, nc2), 40) + '»' for r in rws[:4])}" if nc2 else "")
                        + ". قد يمثل أصلًا واحدًا بعدة سجلات أو صكًا يغطي عدة قطع؛ يحتاج فصلًا أو تحققًا قبل العد والجمع.",
                        {"col": col_letter(dc), "deed": redact_text(k), "rows": rws[:20], "refs": [ref(sv.name, f"{col_letter(dc)}{r}") for r in rws[:20]]}, order=(rws[0], dc))
@@ -2233,7 +2254,7 @@ def _check_serial(sa: SheetAnalysis, fam, sc: int, rows: list, an: Anomalies, fa
             parts.append(f"تسلسل غير مرتب في الصفوف {rows_text(it['out_of_order_rows'], 6)}")
         an.add("serial_gap", "low", sv.name, ref(sv.name, f"{col_letter(sc)}{it['rows'][0]}:{col_letter(sc)}{it['rows'][1]}"),
                f"عمود التسلسل {col_letter(sc)}{fam_label} في الصفوف {it['rows'][0]}–{it['rows'][1]}: {'؛ '.join(parts)} "
-               f"(من {it['first']} إلى {it['last']} مقابل {it['n_rows']} صف بيانات). لا يُستنتج عدد الأصول من آخر رقم تسلسلي.",
+               f"(من {it['first']} إلى {it['last']} مقابل {ar_n(it['n_rows'], 'row', case='gen')} في البيانات). لا يُستنتج عدد الأصول من آخر رقم تسلسلي.",
                {"col": col_letter(sc), **it}, order=(it["rows"][0], sc))
 
 
@@ -2242,8 +2263,9 @@ def check_sheet_level(sa: SheetAnalysis, an: Anomalies):
     nonempty = sum(1 for r, k in sa.row_kind.items() if k not in ("blank", "filler"))
     if sv.state in ("hidden", "veryHidden"):
         an.add("hidden_sheet", "info", sv.name, ref(sv.name, sv.dimensions or "A1"),
-               f"الورقة «{sv.name.strip()}» {STATE_AR.get(sv.state, sv.state)} وتحتوي {nonempty} صفًا غير فارغ. "
-               "يجب التحقق من وظيفتها ونطاقها وانتمائها للمحفظة قبل استخدام أي من بياناتها.",
+               f"الورقة «{sv.name.strip()}» {STATE_AR.get(sv.state, sv.state)} "
+               + (f"وفيها {ar_n(nonempty, 'row')} غير {ar_agree(nonempty, 'فارغ', 'فارغين', 'فارغة')}. " if nonempty else "ولا صفوف غير فارغة فيها. ")
+               + "يجب التحقق من وظيفتها ونطاقها وانتمائها للمحفظة قبل استخدام أي من بياناتها.",
                {"state": sv.state, "non_empty_rows": nonempty}, order=(0, 0))
     # filler blocks
     run = []
@@ -2259,7 +2281,7 @@ def check_sheet_level(sa: SheetAnalysis, an: Anomalies):
         cells = sum(1 for r in rr for k in sv.kinds.get(r, {}).values() if k == "F")
         cols = sorted({c for r in rr for c, k in sv.kinds.get(r, {}).items() if k == "F"})
         an.add("filler_block", "low", sv.name, ref(sv.name, f"{col_letter(cols[0])}{rr[0]}:{col_letter(cols[-1])}{rr[-1]}"),
-               f"الصفوف {rr[0]}–{rr[-1]} ({len(rr)} صفًا) لا تحتوي إلا مسافات أو محارف غير مرئية (مثل NBSP) في {cells} خلية "
+               f"الصفوف {rr[0]}–{rr[-1]} ({ar_n(len(rr), 'row')}) لا تحتوي إلا مسافات أو محارف غير مرئية (مثل NBSP) في {ar_n(cells, 'cell', case='gen')} "
                f"({col_letter(cols[0])}–{col_letter(cols[-1])}). ليست بيانات وتُستبعد؛ لكنها توسّع نطاق الورقة وقد تُحسب في COUNTA.",
                {"rows": [rr[0], rr[-1]], "n_rows": len(rr), "filler_cells": cells,
                 "cols": [col_letter(cols[0]), col_letter(cols[-1])]}, order=(rr[0], 0))
@@ -2270,7 +2292,7 @@ def check_sheet_level(sa: SheetAnalysis, an: Anomalies):
                  and any(t.min_col <= c <= t.max_col for c, k in sv.kinds.get(r, {}).items() if k not in ("B", "F"))]
         if extra:
             an.add("outside_table_rows", "medium", sv.name, ref(sv.name, f"A{extra[0]}:{col_letter(t.max_col)}{extra[-1]}"),
-                   f"{len(extra)} صف بيانات يقع أسفل جدول Excel «{t.name}» ({t.ref}) خارج نطاقه (الصفوف {rows_text(extra)}). "
+                   f"{ar_n(len(extra), 'row')} من البيانات {ar_agree(len(extra), 'يقع', 'يقعان', 'تقع', 'تقع')} أسفل جدول Excel «{t.name}» ({t.ref}) خارج نطاقه (الصفوف {rows_text(extra)}). "
                    "إجماليات الجدول وصيغه المحسوبة لا تشملها؛ تُراجع قبل الاعتماد على الإجمالي.",
                    {"table": t.name, "table_ref": t.ref, "rows": compress_ints(extra)[:30]}, order=(extra[0], 0))
     # hidden rows / columns with data
@@ -2278,7 +2300,7 @@ def check_sheet_level(sa: SheetAnalysis, an: Anomalies):
     hr = sorted(sv.hidden_rows & data_rows)
     if hr:
         an.add("hidden_rows", "low", sv.name, ref(sv.name, f"A{hr[0]}" if len(hr) == 1 else f"A{hr[0]}:A{hr[-1]}"),
-               f"{len(hr)} صف بيانات مخفي (الصفوف {rows_text(hr)}) — قد تكون مصفاة أو مخفية يدويًا؛ "
+               f"صفوف بيانات مخفية: {ar_n(len(hr), 'row')} (الصفوف {rows_text(hr)}) — قد تكون مصفاة أو مخفية يدويًا؛ "
                "دوال SUBTOTAL(109) تستبعدها. تُراجع قبل الاستبعاد أو الإدراج.",
                {"rows": compress_ints(hr)[:30], "autofilter": sv.autofilter}, order=(hr[0], 0))
     hc = sorted(c for c in sv.hidden_cols if any(sv.kind(r, c) not in ("B", "F") for r in data_rows))
@@ -2434,10 +2456,10 @@ def check_cross_sheet_names(sas: dict, an: Anomalies):
             amt_txt = ""
             if n_amt:
                 q = ex["equal_amounts"][0]
-                amt_txt = (f" منها {n_amt} بمبلغ متساوٍ في الصفين (مثل {q['a']} = {q['b']} = {fmt_num(q['value'])})؛ "
+                amt_txt = (f" منها {ar_n(n_amt, 'name')} بمبلغ متساوٍ في الصفين (مثل {q['a']} = {q['b']} = {fmt_num(q['value'])})؛ "
                            "تساوي المبلغ قرينة إضافية على الربط لا دليل كافٍ.")
             an.add("cross_sheet_name_match", "info", a.sv.name, ref(a.sv.name, f"{col_letter(ac)}:{col_letter(ac)}"),
-                   f"{len(matches)} اسمًا متطابقًا أو متقاربًا بين «{a.sv.name.strip()}» ({col_letter(ac)}) و«{b.sv.name.strip()}» "
+                   f"{ar_count(len(matches), 'اسم متطابق أو متقارب', 'اسمان متطابقان أو متقاربان', 'أسماء متطابقة أو متقاربة', acc='اسمًا متطابقًا أو متقاربًا', one='اسم واحد متطابق أو متقارب')} بين «{a.sv.name.strip()}» ({col_letter(ac)}) و«{b.sv.name.strip()}» "
                    f"({col_letter(bc)}): تطابق بعد التطبيع {cnt.get('exact_key', 0)}، تقارب {cnt.get('loose_key', 0)}، "
                    f"احتواء كلمات {cnt.get('token_subset', 0)} (مثل «{ex['a_name']}» ↔ «{ex['b_name']}»)." + amt_txt +
                    " تشابه الاسم وحده لا يثبت أنه الأصل نفسه؛ يُستخدم مرشحًا للربط بعد مطابقة المعرّف والصك والموقع.",
@@ -2525,10 +2547,10 @@ def register_candidates(sas: dict) -> list:
             reasons.append("دور مقترح: سجل أصول")
         if hints.get("valuation"):
             score += 30
-            reasons.append(f"{hints['valuation']} عمود تقييم")
+            reasons.append(ar_count(hints['valuation'], 'عمود تقييم', 'عمودا تقييم', 'أعمدة تقييم', acc='عمودًا للتقييم'))
         if hints.get("revenue"):
             score += 15
-            reasons.append(f"{hints['revenue']} عمود إيراد")
+            reasons.append(ar_count(hints['revenue'], 'عمود إيراد', 'عمودا إيراد', 'أعمدة إيراد', acc='عمودًا للإيراد'))
         if sa.key_cols.get(fam, {}).get("name") is not None:
             score += 10
             reasons.append("عمود اسم أصل")
@@ -2544,7 +2566,7 @@ def register_candidates(sas: dict) -> list:
             score += 5
             reasons.append("جدول Excel منظم")
         score += min(20.0, n_rows / 10.0)
-        reasons.append(f"{n_rows} صف بيانات")
+        reasons.append(ar_count(n_rows, 'صف بيانات', 'صفا بيانات', 'صفوف بيانات', acc='صفًا من البيانات'))
         out.append({"sheet": sa.sv.name, "role_hint": sa.role, "score": round(score, 1), "header_row": fam,
                     "data_rows": {"from": sa.family_rows[fam][0], "to": sa.family_rows[fam][-1], "count": n_rows},
                     "reasons": reasons})
@@ -2793,7 +2815,7 @@ def write_markdown(path: str, wm: dict, sas: dict):
         if sh["comments"]:
             L.append(f"- تعليقات الخلايا: {len(sh['comments'])}")
         for sec in sh["secondary_tables"]:
-            L.append(f"- جدول فرعي بعنوان الصف {sec['header_row']}: {sec['data_rows']['count']} صف بيانات "
+            L.append(f"- جدول فرعي بعنوان الصف {sec['header_row']}: {ar_count(sec['data_rows']['count'], 'صف بيانات', 'صفا بيانات', 'صفوف بيانات', acc='صفًا من البيانات')} "
                      f"({sec['data_rows']['from']}–{sec['data_rows']['to']})")
         if sh["columns"]:
             L.append("")
@@ -2969,14 +2991,14 @@ def main(argv=None) -> int:
     if not args.quiet:
         s = wm["summary"]
         sev = s["anomalies_by_severity"]
-        print(f"تم فحص المصنف «{wm['file']['name']}»: {s['sheets']} أوراق (المخفية {s['hidden_sheets']})، "
-              f"{s['anomalies']} ملاحظة (مرتفعة {sev['high']}، متوسطة {sev['medium']}، منخفضة {sev['low']}، "
+        print(f"تم فحص المصنف «{wm['file']['name']}»: {ar_n(s['sheets'], 'sheet')} (المخفية {s['hidden_sheets']})، "
+              f"{ar_n(s['anomalies'], 'note')} (مرتفعة {sev['high']}، متوسطة {sev['medium']}، منخفضة {sev['low']}، "
               f"معلوماتية {sev['info']})، أعمدة بيانات شخصية {len(wm['pii_columns'])}، "
               f"خلال {wm['generator']['duration_s']} ث.")
         if wm["register_candidates"]:
             rc = wm["register_candidates"][0]
             print(f"المرشح الأول للسجل الرئيسي: «{rc['sheet']}» (صف العناوين {rc['header_row'] or '—'}، "
-                  f"{rc['data_rows']['count']} صف بيانات).")
+                  f"{ar_count(rc['data_rows']['count'], 'صف بيانات', 'صفا بيانات', 'صفوف بيانات', acc='صفًا من البيانات')}).")
     print(jpath)
     print(mpath)
     return 0

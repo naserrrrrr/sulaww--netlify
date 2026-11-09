@@ -2,7 +2,7 @@
 """Validate a run folder before (and after) the dashboard is built.
 
 Usage:
-  python3 scripts/validate_analysis.py --run-dir RUN [--xlsx SOURCE.xlsx] [--html RUN/dashboard.html]
+  python3 "$SKILL_DIR/scripts/validate_analysis.py" --run-dir RUN [--xlsx SOURCE.xlsx] [--html RUN/dashboard.html]
                                        [--xlsx-out RUN/supporting_workbook.xlsx]
 
 Reads RUN/01..06 (data-contract.md §0-§6), plus RUN/analysis.json when it exists, RUN/09_message.md and
@@ -34,7 +34,8 @@ from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
     ALL_STATUSES, CONTRACT_VERSION, KNOWN_STATUSES, NA_TOKENS, NOT_APPLICABLE_TOKENS,
-    PII_HEADER_RE, SKILL_DIR, clean_text, is_pii_header, load_json, normalize_arabic, save_json, sha256_file, word_count_ar,
+    PII_HEADER_RE, SKILL_DIR, ar_n, clean_text, is_pii_header, load_json, normalize_arabic, review_errors, save_json,
+    sha256_file, word_count_ar,
 )
 
 RUN_FILES = OrderedDict([
@@ -117,6 +118,8 @@ CHECK_TITLES = OrderedDict([
     ("recommendation_fields", "اكتمال حقول كل توصية"),
     ("plan_links", "ارتباط بنود خطة 30/60/90 بتوصيات موجودة"),
     ("top_lists", "أهم ثلاث فجوات وثلاثة إجراءات موجودة"),
+    ("top_actions_priority", "أولويات التوصيات فريدة وأهم الإجراءات مرتبة تصاعديًا بالأولوية"),
+    ("metric_review", "صحة علامة «يحتاج تحقق» على المؤشرات (review)"),
     ("scenarios", "سلامة السيناريوهات (مصادر الافتراضات وعدم الازدواج)"),
     ("pii_text_patterns", "خلو السرد والسجلات من أرقام جوال أو بريد"),
     ("pii_keys", "خلو analysis.json من حقول بيانات شخصية"),
@@ -367,6 +370,9 @@ class Resolver:
         self.record_ids = {r.get("id") for r in ctx.records}
         self.sheets = {s.get("name"): s for s in as_list(ctx.wb.get("sheets")) if isinstance(s, dict)}
         self.sheets_clean = {clean_text(n): n for n in self.sheets if isinstance(n, str)}
+        self.run_dir = ctx.run_dir
+        self.rec_doc = ctx.rec_doc
+        self._facts = None
 
     def resolve(self, ref):
         """Return (ok, note). note explains a failure, or a non-blocking remark on success."""
@@ -400,6 +406,20 @@ class Resolver:
             if mid in self.breakdowns or (mid == "trend" and self.has_trend):
                 return True, None
             return False, f"المؤشر «{mid}» غير موجود في 05_metrics.json"
+        if r.startswith("f:"):
+            # a fact as evidence (data-contract.md §6): {{f:…}} keys, rec.<record_id>.<field_id> included (C2)
+            key = r[2:].strip()
+            if self._facts is None:
+                try:
+                    self._facts = compute_facts(self.run_dir)
+                except Exception:
+                    self._facts = {}
+            if key in self._facts:
+                return True, None
+            if key.startswith("rec."):
+                fact, why = record_fact(self.rec_doc, key)
+                return (True, None) if fact is not None else (False, REC_REASON_AR.get(why, why))
+            return False, "حقيقة غير موجودة في مجلد التشغيل (اعرض المفاتيح بـ facts.py --run-dir)"
         if r.startswith("DQ-"):
             return (True, None) if r in self.dq_ids else (False, "معرّف مشكلة بيانات غير موجود في 03 أو data_issues_extra")
         if r.startswith("WB-"):
@@ -408,7 +428,7 @@ class Resolver:
             return True, None
         if "!" in r:
             return self._cell(r)
-        return False, "مرجع غير معروف (المسموح: m:<مؤشر>، DQ-…، WB-…، معرّف سجل، أو Sheet!A1)"
+        return False, "مرجع غير معروف (المسموح: m:<مؤشر>، f:<حقيقة>، DQ-…، WB-…، معرّف سجل، أو Sheet!A1)"
 
     def _cell(self, r):
         sheet, _, coord = r.rpartition("!")
@@ -555,7 +575,7 @@ def c_exec_summary_length(ctx: Ctx):
     n = summary_word_count(s, ctx)
     if 120 <= n <= 180:
         return []
-    return [(f"الخلاصة التنفيذية {n} كلمة بعد عرض الرموز (المطلوب 120–180؛ يُحتسب الرمز بطوله المعروض: المبلغ كلمتان، "
+    return [(f"الخلاصة التنفيذية {ar_n(n, 'word')} بعد عرض الرموز (المطلوب 120–180؛ يُحتسب الرمز بطوله المعروض: المبلغ كلمتان، "
              "و«غير قابل للاحتساب» ثلاث كلمات)", "06_narrative.json:executive_summary")]
 
 
@@ -1018,12 +1038,67 @@ def c_top_lists(ctx: Ctx):
             continue
         pool = {x.get("id") for x in as_list(n.get(pool_key)) if isinstance(x, dict)}
         if len(lst) > 3:
-            out.append((f"{key} يضم {len(lst)} عناصر؛ الحد الأقصى ثلاثة", f"06_narrative.json:{key}"))
+            out.append((f"{key} يضم {ar_n(len(lst), 'item', case='acc')}؛ الحد الأقصى ثلاثة", f"06_narrative.json:{key}"))
         missing = [x for x in lst if x not in pool]
         if missing:
             out.append((f"عناصر غير موجودة في {label}: {short_list(missing)}", f"06_narrative.json:{key}"))
         if len(set(map(str, lst))) != len(lst):
             out.append(("عناصر مكررة", f"06_narrative.json:{key}"))
+    return out
+
+
+def c_top_actions_priority(ctx: Ctx):
+    """C4: «الأولوية n» is one number everywhere — priorities are unique integers and top_actions lists recommendation
+    ids in ascending priority (the dashboard top-3, the full list, the workbook and the message read the same order)."""
+    ctx.need("narrative")
+    recs = [(i, r) for i, r in enumerate(as_list(ctx.narrative.get("recommendations"))) if isinstance(r, dict)]
+    out = []
+    pr_of = {}
+    seen = defaultdict(list)
+    for i, r in recs:
+        p = r.get("priority")
+        where = f"06_narrative.json:recommendations[{gid(r, i)}].priority"
+        if not isinstance(p, int) or isinstance(p, bool) or p < 1:
+            out.append((f"أولوية التوصية {r.get('id')} «{p}» ليست عددًا صحيحًا موجبًا؛ الأولوية رقم واحد يظهر كما هو في "
+                        "الداشبورد والمرفق والرسالة", where))
+            continue
+        pr_of[r.get("id")] = p
+        seen[p].append(r.get("id"))
+    for p, ids in sorted(seen.items()):
+        if len(ids) > 1:
+            out.append((f"الأولوية {p} مكررة في التوصيات {short_list(ids)}؛ أعط كل توصية أولوية فريدة فلا يتبدل ترتيبها "
+                        "بين أقسام الداشبورد والمرفق", "06_narrative.json:recommendations[].priority"))
+    top = [x for x in as_list(ctx.narrative.get("top_actions")) if x in pr_of]
+    order = [pr_of[x] for x in top]
+    if order != sorted(order):
+        want = sorted(top, key=lambda x: pr_of[x])
+        out.append((f"top_actions بترتيب {short_list(top)} وأولوياتها {short_list(order)}؛ رتّبها تصاعديًا بالأولوية "
+                    f"({short_list(want)}) أو عدّل أولويات التوصيات، ليكون رقم «الأولوية» وموقعها واحدًا في كل مكان",
+                    "06_narrative.json:top_actions"))
+    return out
+
+
+def c_metric_review(ctx: Ctx):
+    """C1: a metric spec's review flag {status: needs_verification, reason: 6–25 words, no digits}, and its copy in 05."""
+    ctx.need("config")
+    out = []
+    specs = [m for m in as_list(ctx.config.get("metrics")) if isinstance(m, dict)]
+    for m in specs:
+        mid = m.get("id")
+        if "review" not in m or m.get("review") is None:
+            continue
+        for e in review_errors(m.get("review")):
+            out.append((f"المؤشر {mid}: {e}", f"04_metrics_config.json:metrics[{mid}].review"))
+    met = ctx.metrics if isinstance(ctx.data.get("metrics"), dict) else {}
+    for m in specs:
+        mid = m.get("id")
+        res = met.get(mid)
+        if not isinstance(res, dict):
+            continue
+        want = m.get("review") if isinstance(m.get("review"), dict) else None
+        if res.get("review") != want:
+            out.append((f"المؤشر {mid}: علامة «يحتاج تحقق» في 05 لا تطابق 04 (review)؛ أعد تشغيل compute_metrics.py",
+                        f"05_metrics.json:{mid}.review"))
     return out
 
 
@@ -1314,7 +1389,7 @@ from apa_common import (  # noqa: E402
     PII_KEY_RE as SHARED_PII_KEY_RE, PII_PATTERNS, RECORD_TYPES, SCOPES, is_total_label, load_vocab, mask_pii,
     name_key, pii_value_hits,
 )
-from facts import FACT_TOKEN_RE, compute_facts  # noqa: E402
+from facts import FACT_TOKEN_RE, REC_REASON_AR, compute_facts, record_fact  # noqa: E402
 
 MESSAGE_NAME = "09_message.md"
 EXPORT_NAME = "supporting_workbook.xlsx"
@@ -1335,6 +1410,8 @@ RECON_STATUS_AR = {
     "mismatch": "فرق غير مفسَّر",
     "recorded_unknown": "القيمة المدونة في صف الإجمالي غير معروفة (فارغة أو نص أو خطأ)",
 }
+RECON_BASIS_AR = {"in_scope": "السجلات ضمن النطاق", "in_scope_section": "سجلات قسمه ضمن النطاق",
+                  "all_records": "كل سجلات المصدر", "all_records_section": "كل سجلات قسمه في المصدر"}
 LEVEL_AR["acknowledged"] = "مُقرّ به"
 
 
@@ -1933,28 +2010,32 @@ def g4b_reconciliation(ctx: Ctx):
             tol = max(0.5, 1e-9 * abs(recorded))
             full, sec = agg(field, True, False), agg(field, True, True)
             all_rec, all_sec = agg(field, False, False), agg(field, False, True)
-            status, matched = "mismatch", None
+            status, matched, on_section = "mismatch", None, False
             for st, (s, n_known, _u, _t) in (("match", full), ("match_section", sec), ("match_all_records", all_rec),
                                              ("match_section_all_records", all_sec)):
                 if n_known and abs(recorded - s) <= tol:
                     status, matched = st, s
+                    on_section = st in ("match_section", "match_section_all_records")
                     break
             if status == "mismatch" and full[3] and abs(recorded - (full[0] - full[3])) <= tol:
                 status, matched = "match_without_text_numbers", round(full[0] - full[3], 2)
             if status == "mismatch" and any(field + "__original" in as_dict(r.get("fields")) for r in by_src.get(sid, [])):
-                for res in (agg(field, True, False, True), agg(field, True, True, True)):
+                for res, is_sec in ((agg(field, True, False, True), False), (agg(field, True, True, True), True)):
                     if res[1] and abs(recorded - res[0]) <= tol:
-                        status, matched = "match_original", res[0]
+                        status, matched, on_section = "match_original", res[0], is_sec
                         break
             # a source with no in-scope value (isolated or supplementary sheet): the difference is taken against every
             # record of the source — «recorded − 0» is never a difference (N3)
             use_all = not full[1] or status in ("match_all_records", "match_section_all_records")
-            base = all_rec if use_all else full
-            diff = round(recorded - (matched if matched is not None else base[0]), 2)
-            item.update(recorded=recorded, sum_in_scope=full[0], n_in_scope_known=full[1], n_in_scope_unknown=full[2],
-                        difference=diff, difference_basis="all_records" if use_all else "in_scope",
-                        sum_all_records=all_rec[0], matched_sum=matched,
-                        status=status, status_ar=RECON_STATUS_AR[status])
+            # difference = recorded − the compared sum (the sum named by difference_basis), never recorded − the matched
+            # sum: a 0 is never shown beside two different numbers (a derived field, numbers stored as text); the sum
+            # that equals the recorded total is matched_sum, with the status saying why
+            compared = (all_sec if use_all else sec) if on_section else (all_rec if use_all else full)
+            basis = ("all_records" if use_all else "in_scope") + ("_section" if on_section else "")
+            diff = round(recorded - compared[0], 2)
+            item.update(recorded=recorded, compared_sum=compared[0], difference=diff, difference_basis=basis,
+                        matched_sum=matched, sum_in_scope=full[0], n_in_scope_known=full[1], n_in_scope_unknown=full[2],
+                        sum_all_records=all_rec[0], status=status, status_ar=RECON_STATUS_AR[status])
             rows.append(item)
             if status == "mismatch":
                 flab = f"«{as_dict(ctx.field_meta.get(field)).get('label') or field}»"
@@ -1982,18 +2063,19 @@ def g4b_md_reconciliation(report: dict) -> list:
     if not rows:
         return []
     lines = [f"## مطابقة الإجماليات المدونة مع مجموع السجلات ({len(rows)})", "",
-             "| الموضع | الحقل | المدون | مجموع السجلات ضمن النطاق | الفرق | أساس الفرق | مجموع كل سجلات المصدر "
-             "| المجموع المطابق للمدون | النتيجة |",
-             "|---|---|---|---|---|---|---|---|---|"]
+             "الفرق = المدون − المجموع المقارن (المجموع الذي يسميه «أساس المقارنة»). «المجموع المطابق للمدون» هو المجموع "
+             "الذي يساوي الإجمالي المدون إن وُجد (قبل الاشتقاق، أو دون أرقام مخزنة كنص…)، والنتيجة تذكر سببه.", "",
+             "| الموضع | الحقل | المدون | المجموع المقارن | أساس المقارنة | الفرق (المدون − المجموع المقارن) "
+             "| المجموع المطابق للمدون | النتيجة | مجموع السجلات ضمن النطاق | مجموع كل سجلات المصدر |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
 
     def num(x):
         return _md_cell(fmt_num(x) if x is not None else None)
     for r in rows:
         lines.append(f"| {_md_cell(r.get('ref'))} | {_md_cell(r.get('field'))} | {num(r.get('recorded'))} | "
-                     f"{num(r.get('sum_in_scope'))} | {num(r.get('difference'))} | "
-                     f"{_md_cell({'all_records': 'كل سجلات المصدر', 'in_scope': 'ضمن النطاق'}.get(r.get('difference_basis'), '—'))} | "
-                     f"{num(r.get('sum_all_records'))} | "
-                     f"{num(r.get('matched_sum'))} | {_md_cell(r.get('status_ar'))} |")
+                     f"{num(r.get('compared_sum'))} | {_md_cell(RECON_BASIS_AR.get(r.get('difference_basis'), '—'))} | "
+                     f"{num(r.get('difference'))} | {num(r.get('matched_sum'))} | {_md_cell(r.get('status_ar'))} | "
+                     f"{num(r.get('sum_in_scope'))} | {num(r.get('sum_all_records'))} |")
     lines.append("")
     return lines
 
@@ -2090,9 +2172,16 @@ def c_fact_tokens(ctx: Ctx):
         key = m.group(1)
         if key in facts:
             continue
-        near = [k for k in facts if k.split(".")[0] == key.split(".")[0]]
-        hint = (f"المفاتيح المتاحة بالبادئة نفسها: {short_list(near, 6)}" if near
-                else "اعرض المفاتيح المتاحة بـ scripts/facts.py --run-dir")
+        if key.startswith("rec."):
+            # C2: rec.<record_id>.<field_id> must name a known numeric value of a record of 03
+            _fact, why = record_fact(ctx.rec_doc, key)
+            hint = (f"{REC_REASON_AR.get(why, why)}؛ الصيغة rec.<معرّف السجل>.<معرّف الحقل> لقيمة رقمية معروفة لأي "
+                    "سجل في 03_records.json")
+        else:
+            near = [k for k in facts if k.split(".")[0] == key.split(".")[0]]
+            hint = (f"المفاتيح المتاحة بالبادئة نفسها: {short_list(near, 6)}" if near
+                    else f'اعرض المفاتيح المتاحة بـ python3 "{os.path.join(SKILL_DIR, "scripts", "facts.py")}" '
+                         f'--run-dir "{ctx.run_dir}"')
         out.append((f"الرمز {m.group(0)} يشير إلى حقيقة غير موجودة في مجلد التشغيل؛ {hint}", f"06_narrative.json:{p}"))
     return out
 
@@ -2192,7 +2281,8 @@ def c_pii_export_patterns(ctx: Ctx):
 
 def c_export_growth_pct(ctx: Ctx):
     """metrics.md §5: a growth result whose comparability is not confirmed appears in the supporting workbook as its
-    change in riyals; its percentage only in a note marked for review — never as a value cell or a «x.x%» text."""
+    change in riyals only — its percentage never appears, neither as a value cell nor as a «x.x%» text (a note «for
+    review only» is no exemption: the dashboard withholds the percentage, so the workbook must too)."""
     exp = g4b_export_cells(ctx)
     if exp is None:
         raise Skip(f"لا يوجد {EXPORT_NAME} في مجلد التشغيل ولم يُمرَّر --xlsx-out")
@@ -2218,13 +2308,13 @@ def c_export_growth_pct(ctx: Ctx):
                         hits.append(f"{sheet}!{coord}")
                 except ValueError:
                     pass
-            elif (any(t in text for t in texts) and "للمراجعة فقط" not in text
+            elif (any(t in text for t in texts)
                   and (re.search(r"نمو|تغير|growth", text) or any(lab and lab in text for lab in labels))):
                 # a «x.x%» text counts only in a growth context: another share may round to the same text
                 hits.append(f"{sheet}!{coord}")
         if hits:
             out.append((f"المرفق الداعم يعرض نسبة {mid} ({v:,.1f}%) وقابلية المقارنة غير مؤكدة؛ المطلوب التغير بالريال "
-                        "دون نسبة (النسبة في عمود الملاحظة للمراجعة فقط). أعد التصدير بالسكربت الحالي",
+                        "دون نسبة في أي خلية، كما في الداشبورد. أعد التصدير بالسكربت الحالي",
                         "، ".join(hits[:8]) + (f" (+{len(hits) - 8})" if len(hits) > 8 else "")))
     return out
 
@@ -2295,7 +2385,7 @@ def _message_candidates(ctx: Ctx) -> set:
         acc.add(float(len(as_list(n.get(key)))))
     plan = as_dict(n.get("plan"))
     acc |= {float(len(as_list(plan.get(k)))) for k in ("d30", "d60", "d90")}
-    for name in ("07_validation.json", "08_dashboard_check.json"):  # «نتيجة الفحوص» quotes the last runs
+    for name in ("07_validation.json", "08_dashboard_check.json"):  # the «المراجعة» line quotes the last runs
         p = os.path.join(ctx.run_dir, name)
         if os.path.isfile(p):
             try:
@@ -2619,7 +2709,7 @@ def c_unknown_classification(ctx: Ctx):
         ids = [r.get("id") for r in ctx.records if r.get("scope") == "in_scope"
                and as_dict(r.get("dims")).get(dim) in (None, "", "unknown")]
         if ids:
-            out.append((f"{len(ids)} سجل ضمن النطاق {label} فيه «غير محدد»: {short_list(ids)}؛ صنّفه بدليل أو وضّح أثر النقص",
+            out.append((f"{ar_n(len(ids), 'record')} ضمن النطاق {label} فيه «غير محدد»: {short_list(ids)}؛ صنّفه بدليل أو وضّح أثر النقص",
                         f"03_records.json:dims.{dim}"))
     return out
 
@@ -2663,9 +2753,8 @@ def c_exec_summary_elements(ctx: Ctx):
         seg_raw, seg_n = _es_segment(s, head_rx)   # the sentence after the heading (the whole summary without one)
         named = sum(1 for it in items if _es_mentions(seg_raw, seg_n, it))
         if enum < need and named < need:
-            out.append((f"الخلاصة تذكر «{label}» دون أن تسميها: عُدّ {enum} بندًا معددًا بعد العبارة و{named} من "
-                        f"{len(items)} عناصر {('top_gaps' if key == 'gaps' else 'top_actions')} مذكورة بأصولها أو رموزها أو "
-                        f"عناوينها؛ اذكر {need} على الأقل بأسمائها", "06_narrative.json:executive_summary"))
+            out.append((f"الخلاصة تذكر «{label}» دون أن تسميها: البنود المعددة بعد العبارة {enum}، والمذكور بأصله أو رمزه أو عنوانه "
+                        f"{named} من {ar_n(len(items), 'item', case='gen')} في {('top_gaps' if key == 'gaps' else 'top_actions')}؛ اذكر {need} على الأقل بأسمائها", "06_narrative.json:executive_summary"))
     return out
 
 
@@ -4076,6 +4165,16 @@ def c_nq_recommendation_quality(ctx: Ctx):
             out.append((f"الأولويات {short_list(pr)} ليست ترتيبًا متسلسلًا فريدًا (1…{len(pr)})"
                         + (f"؛ مكررة: {short_list(dups)}" if dups else "") + "؛ رتّب التوصيات بحسب الأثر والإلحاح وقوة الدليل "
                         "وقابلية التنفيذ والتكلفة", "06_narrative.json:recommendations[].priority"))
+    # C4: the top actions are the recommendations with the lowest priority numbers (the order itself blocks under
+    # top_actions_priority)
+    pr_of = {r.get("id"): r.get("priority") for _, r in recs if isinstance(r.get("priority"), int)}
+    top = [x for x in as_list(ctx.narrative.get("top_actions")) if x in pr_of]
+    if top:
+        outside = sorted((p, rid) for rid, p in pr_of.items() if rid not in top and p < max(pr_of[x] for x in top))
+        if outside:
+            out.append((f"التوصيات {short_list([rid for _, rid in outside])} أولويتها أعلى من بعض أهم الإجراءات "
+                        f"({short_list(top)}) ولم تُدرج فيها؛ أهم الإجراءات هي التوصيات ذات أصغر أرقام الأولوية",
+                        "06_narrative.json:top_actions"))
 
     def score(r):
         rk = as_dict(r.get("ranking"))
@@ -4409,6 +4508,8 @@ CHECKS = [
     ("recommendation_fields", "blocking", c_recommendation_fields),
     ("plan_links", "blocking", c_plan_links),
     ("top_lists", "blocking", c_top_lists),
+    ("top_actions_priority", "blocking", c_top_actions_priority),
+    ("metric_review", "blocking", c_metric_review),
     ("scenarios", "blocking", c_scenarios),
     ("pii_text_patterns", "blocking", c_pii_text_patterns),
     ("pii_keys", "blocking", c_pii_keys),

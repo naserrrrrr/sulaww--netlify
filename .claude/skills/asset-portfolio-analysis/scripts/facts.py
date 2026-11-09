@@ -23,7 +23,16 @@ Keys are stable, ASCII, dot-separated:
                                           to describe an isolated statement apart from the metrics (max_share is the
                                           largest line as a % of the sum, unit "pct")
     sections.<source_id>.r<row>.records   records between the previous total row of the source and total row <row>
-Token grammar: {{f:<key>}} with key matching [A-Za-z0-9_.\-]+ (see FACT_TOKEN_RE).
+    rec.<record_id>.<field_id>            the known numeric value of one field of any record of 03 (in scope, isolated
+                                          or excluded), e.g. rec.STM-r7.rev.2025.recorded — to state a figure that
+                                          another source disputes beside the one the metric uses. Money fields
+                                          (revenue/expense/valuation, unit SAR) render as money. An unknown record, an
+                                          unknown field or a value that is not a known number is not a fact (the token
+                                          is unresolvable: fact_tokens blocks). compute_facts lists the rec.* keys that
+                                          06_narrative.json cites ({{f:…}} tokens and «f:…» evidence refs);
+                                          record_fact() resolves any other one.
+Token grammar: {{f:<key>}} with key matching [A-Za-z0-9_.\-]+ (see FACT_TOKEN_RE); a record id with other characters
+cannot be cited as a fact.
 """
 from __future__ import annotations
 
@@ -38,6 +47,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 PROPERTY_ROLES = ("asset_register", "managed_properties", "allocation")
 FACT_TOKEN_RE = re.compile(r"\{\{\s*f:\s*([A-Za-z0-9_.\-]+)\s*\}\}")
+FACT_REF_RE = re.compile(r"^\s*f:\s*([A-Za-z0-9_.\-]+)\s*$")      # an evidence ref «f:<key>»
+REC_PREFIX = "rec."
+KNOWN = ("value", "derived", "zero_recorded", "zero_confirmed")
+_MONEY_GROUPS = ("revenue", "expense", "valuation")
 _MONEY_KEYS = ("value", "recorded", "recomputed", "recomputed_from_details", "cached", "difference", "diff",
                "sum", "total", "expected", "sections_sum")
 
@@ -51,6 +64,103 @@ def _load(path):
 
 def _num(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _unit_of(field: str, meta: dict) -> str:
+    """SAR for revenue/expense/valuation fields (formatted as money like other money facts), pct for percent fields."""
+    m = meta.get(field) or meta.get(field.replace("__original", "")) or {}
+    unit = str(m.get("unit") or "").strip()
+    if m.get("group") in _MONEY_GROUPS or unit.upper() in ("SAR", "SR") or (
+            not m.get("group") and field.startswith(("rev.", "exp.", "val.", "noi."))):
+        return "SAR"
+    if unit in ("%", "pct", "percent"):
+        return "pct"
+    return "number"
+
+
+def record_fact(rec_doc: dict, key: str):
+    """Resolve «rec.<record_id>.<field_id>» against 03_records.json: (fact dict, None) or (None, reason code).
+
+    Reason codes: not_rec (the key does not start with rec.), unknown_record, unknown_field, not_numeric (the value is
+    blank, text, an error, «غير متاح» … — unknown values are never facts). A record id may hold dots (REG-1.2): every
+    split of the key is tried and the one whose record holds the field wins."""
+    if not isinstance(key, str) or not key.startswith(REC_PREFIX):
+        return None, "not_rec"
+    rest = key[len(REC_PREFIX):]
+    records = {}
+    for r in (rec_doc or {}).get("records") or []:
+        if isinstance(r, dict) and isinstance(r.get("id"), str):
+            records.setdefault(r["id"], r)
+    meta = (rec_doc or {}).get("field_meta") or {}
+    seen_record = None
+    for i, ch in enumerate(rest):
+        if ch != ".":
+            continue
+        rid, field = rest[:i], rest[i + 1:]
+        r = records.get(rid)
+        if r is None or not field:
+            continue
+        seen_record = seen_record or r
+        tv = (r.get("fields") or {}).get(field)
+        if not isinstance(tv, dict):
+            continue
+        if tv.get("s") not in KNOWN or not _num(tv.get("v")):
+            return None, "not_numeric"
+        lab = (meta.get(field) or {}).get("label") or field
+        name = r.get("name") or rid
+        return {"value": tv["v"], "unit": _unit_of(field, meta), "label": f"{lab} — {name} ({rid})",
+                "source": f"03_records.json:records[{rid}].fields.{field}", "ref": tv.get("ref")}, None
+    return None, ("unknown_field" if seen_record is not None else "unknown_record")
+
+
+REC_REASON_AR = {
+    "unknown_record": "لا يوجد سجل بهذا المعرّف في 03_records.json",
+    "unknown_field": "السجل موجود لكن الحقل غير موجود فيه",
+    "not_numeric": "قيمة الحقل ليست رقمًا معروفًا (فارغة أو نص أو خطأ أو غير متاحة)",
+    "not_rec": "المفتاح لا يبدأ بـ rec.",
+}
+
+
+def _cited_keys(narrative) -> list:
+    """Fact keys cited in 06: {{f:…}} tokens in any string and «f:…» evidence refs (strings or {ref} objects)."""
+    out = []
+
+    def walk(x):
+        if isinstance(x, str):
+            out.extend(m.group(1) for m in FACT_TOKEN_RE.finditer(x))
+            m = FACT_REF_RE.match(x)
+            if m:
+                out.append(m.group(1))
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+        elif isinstance(x, dict):
+            for y in x.values():
+                walk(y)
+    walk(narrative)
+    return list(dict.fromkeys(out))
+
+
+def record_fact_example(rec_doc: dict):
+    """(key, fact) of one resolvable rec.* key for the listing: an isolated money field first, else any number."""
+    best = None
+    meta = (rec_doc or {}).get("field_meta") or {}
+    for r in (rec_doc or {}).get("records") or []:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9_.\-]+", r["id"]):
+            continue
+        for f, tv in (r.get("fields") or {}).items():
+            if not isinstance(tv, dict) or tv.get("s") not in KNOWN or not _num(tv.get("v")):
+                continue
+            rank = (0 if r.get("scope") != "in_scope" else 1) + (0 if _unit_of(f, meta) == "SAR" else 2)
+            if best is None or rank < best[0]:
+                best = (rank, f"{REC_PREFIX}{r['id']}.{f}")
+            if rank == 0:
+                break
+        if best and best[0] == 0:
+            break
+    if best is None:
+        return None, None
+    return best[1], record_fact(rec_doc, best[1])[0]
 
 
 def compute_facts(run_dir: str) -> "OrderedDict[str, dict]":
@@ -182,6 +292,15 @@ def compute_facts(run_dir: str) -> "OrderedDict[str, dict]":
                 if _num(v) and re.fullmatch(r"[A-Za-z0-9_\-]+", str(k)):
                     unit = "number" if k in _MONEY_KEYS else "count"
                     put(f"wb.{aid}.{k}", v, unit, f"{aid} ({a.get('type')}): {k}", f"01_workbook_map.json:anomalies[{aid}].evidence.{k}")
+    # rec.<record_id>.<field_id>: the record values 06 cites (tokens and evidence refs); any other one resolves
+    # through record_fact() — never one entry per record and field
+    if records:
+        narrative = _load(os.path.join(run_dir, "06_narrative.json"))
+        for key in _cited_keys(narrative) if narrative else []:
+            if key.startswith(REC_PREFIX) and key not in out:
+                fact, _why = record_fact(rec, key)
+                if fact is not None:
+                    out[key] = fact
     return out
 
 
@@ -191,7 +310,14 @@ def main(argv=None):
     ap.add_argument("--run-dir", required=True)
     a = ap.parse_args(argv)
     for k, f in compute_facts(a.run_dir).items():
+        if k.startswith(REC_PREFIX):
+            continue   # record values: the pattern below, not one line per record and field
         print(f"{{{{f:{k}}}}}\t{f['value']}\t{f['unit']}\t{f['label']}")
+    rec = _load(os.path.join(a.run_dir, "03_records.json")) or {}
+    key, fact = record_fact_example(rec)
+    print("{{f:rec.<record_id>.<field_id>}}\t—\t—\tالقيمة الرقمية المعروفة لحقل أي سجل في 03_records.json (ضمن النطاق "
+          "أو معزول أو مستبعد)؛ حقول الإيراد والمصروف والتقييم تُعرض مبلغًا"
+          + (f"؛ مثال: {{{{f:{key}}}}} = {fact['value']}" if key and fact else ""))
     return 0
 
 

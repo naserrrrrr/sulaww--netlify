@@ -2,7 +2,7 @@
 """normalize.py — build 03_records.json from the workbook and Claude's 02_mapping.json.
 
 Usage:
-    python3 scripts/normalize.py --xlsx <file.xlsx> --mapping RUN/02_mapping.json --out RUN/03_records.json
+    python3 "$SKILL_DIR/scripts/normalize.py" --xlsx <file.xlsx> --mapping RUN/02_mapping.json --out RUN/03_records.json
 
 Implements data-contract.md §3–§4: typed values (TV) with source references, explicit
 zero/blank/unknown statuses, derived fields, dimension rules, per-record overrides and
@@ -41,7 +41,7 @@ from apa_common import (  # noqa: E402
     S_NOT_APPLICABLE, S_NOT_AVAILABLE, S_TEXT, S_VALUE, S_ZERO_AS_MISSING, S_ZERO_CONFIRMED, S_ZERO_RECORDED,
     SKILL_DIR, USES, WAQF_VALUES, clean_text, is_filler, is_pii_header, is_total_label, load_json, load_vocab,
     looks_like_phone, name_key, normalize_arabic, parse_date, parse_number, ref, save_json, sha256_file,
-    REDACTED, mask_pii, pii_value_hits, foreign_currency, FOREIGN_CURRENCY_NOTE,
+    REDACTED, mask_pii, pii_value_hits, foreign_currency, FOREIGN_CURRENCY_NOTE, ar_count, ar_n,
 )
 import formula_eval  # noqa: E402
 
@@ -352,26 +352,10 @@ def rows_text(rows: list) -> str:
     return "، ".join(out)
 
 
-_COUNT_FORMS = {  # one, two, 3–10, 11–99, hundreds (100, 101, 102 …)
-    "row": ("صف واحد", "صفّان", "صفوف", "صفًا", "صف"),
-    "record": ("سجل واحد", "سجلان", "سجلات", "سجلًا", "سجل"),
-    "value": ("قيمة واحدة", "قيمتان", "قيم", "قيمة", "قيمة"),
-}
-
-
-def count_ar(n: int, noun: str) -> str:
-    """Arabic number–noun agreement: 1 → «سجل واحد»، 2 → «سجلان»، 3–10 → «5 سجلات»، 11–99 → «12 سجلًا»، 100 → «100 سجل»."""
-    one, two, few, many, hundred = _COUNT_FORMS[noun]
-    if n == 1:
-        return one
-    if n == 2:
-        return two
-    r = n % 100
-    if 3 <= r <= 10:
-        return f"{n} {few}"
-    if r >= 11:
-        return f"{n} {many}"
-    return f"{n} {hundred}"
+def count_ar(n: int, noun: str, case: str = "nom") -> str:
+    """Arabic number–noun agreement (apa_common.ar_n): 0 → «لا سجلات»، 1 → «سجل واحد»، 2 → «سجلان» («سجلين» after a
+    preposition: case="gen")، 3–10 → «5 سجلات»، 11–99 → «12 سجلًا»، 100 → «100 سجل»."""
+    return ar_n(n, noun, case=case)
 
 
 def fmt(x) -> str:
@@ -1200,7 +1184,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
                 ctx.stats["rows_skipped_with_content"] += 1
                 ctx.excluded_rows.append(OrderedDict([
                     ("source_id", sid), ("sheet", sheet), ("row", row),
-                    ("reason", f"تُخطّي الصف لأن خانة {skip_col}{row} (skip_if_blank) فارغة رغم وجود بيانات في: "
+                    ("reason", f"تم تخطي الصف لأن خانة {skip_col}{row} (skip_if_blank) فارغة رغم وجود بيانات في: "
                                + "، ".join(f"{c}{row}" for c in others))]))
                 continue
         merge_notes = []
@@ -1305,7 +1289,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
         issues.add("blank_rows_skipped", "low", ref(sheet, f"{wcol}{lo}:{wcol}{hi}"), [],
                    detail + " — كل خاناتها المربوطة فارغة أو مسافات.",
                    "لا أثر على المؤشرات؛ لم تُنشأ منها سجلات",
-                   "تُجووزت الصفوف وعُدّت فقط؛ ضيّق data_rows إن كانت خارج السجل", source_id=sid, count=n)
+                   "تم تجاوز الصفوف وعدّها فقط؛ ضيّق data_rows إن كانت خارج السجل", source_id=sid, count=n)
     if section_rows:
         lab_col = id_col or key_col or "A"
         issues.add("section_label_skipped", "low", join_refs([ref(sheet, f"{lab_col}{r}") for r, _ in section_rows]), [],
@@ -1313,7 +1297,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
                    + ("عنوان قسم لا سجل" if len(section_rows) == 1 else "عناوين أقسام لا سجلات") + ": "
                    + "، ".join(f"الصف {r} «{lab}»" for r, lab in section_rows[:6]) + ".",
                    "لا أثر على المؤشرات؛ لم تُنشأ منها سجلات",
-                   "تُجووزت كعناوين أقسام؛ إن كانت تصنّف السطور التي تحتها (مدينة، حي) فأضف التصنيف بـ dim_rules",
+                   "تم تجاوزها كعناوين أقسام؛ إن كانت تصنّف السطور التي تحتها (مدينة، حي) فأضف التصنيف بـ dim_rules",
                    source_id=sid, rows=[r for r, _ in section_rows])
     after_rows = totals_after_range(ctx, src, sheet, ws, wsf, end, last_row, id_col, name_col, data_cols, row_values)
     for row, why in after_rows:
@@ -1330,7 +1314,7 @@ def read_source(ctx: Ctx, src: dict, sheet: str) -> list:
     if skipped_content:
         refs = [r for _, rs in skipped_content for r in rs]
         issues.add("row_skipped_with_content", "medium", join_refs(refs), [],
-                   f"تُخطّي في المصدر {sid} {count_ar(len(skipped_content), 'row')} لأن خانة {skip_col} (skip_if_blank) "
+                   f"تم تخطي {count_ar(len(skipped_content), 'row', 'gen')} في المصدر {sid} لأن خانة {skip_col} (skip_if_blank) "
                    f"فارغة رغم وجود بيانات مربوطة: الصفوف {rows_text([r for r, _ in skipped_content])}.",
                    "بيانات هذه الصفوف لا تدخل أي مؤشر؛ قد يكون الإجمالي ناقصًا إن كانت سطورًا تابعة لأصل",
                    "لم تُنشأ منها سجلات وأُدرجت في excluded_rows؛ صنّفها في mapping (عمود اسم آخر، أو مصدر ربط، أو "
@@ -1746,7 +1730,7 @@ def apply_derived(records: list, rules: list, issues: Issues, meta: dict) -> Non
                 treat = f"مُلئت قيمة {flabel(field, meta)} غير المعروفة بالقيمة المشتقة ({fw}) دون تغيير القيم المعروفة"
             detail = f"اشتقاق موثق في التحليل: {rule['reason']}. سجلات مشتقة: {len(changed)}"
             if failed:
-                detail += f"؛ تعذر الاشتقاق لـ {count_ar(len(failed), 'record')} (بقيت غير معروفة)"
+                detail += f"؛ تعذر الاشتقاق في {count_ar(len(failed), 'record', 'gen')} (بقيت قيمها غير معروفة)"
             issues.add("derived_field", "medium" if when == "always" else "low", join_refs(refs) or field,
                        changed + failed, detail, impact_for(field, "money", meta), treat, field=field,
                        dev_note=f"derived_fields: {field} = {formula} (when: {when})"
@@ -1909,7 +1893,7 @@ def apply_rollups(records: list, by_id: dict, overrides: dict, issues: Issues, m
         ids = [rid] + list(ru["from"])
         if done:
             issues.add("rollup_applied", "low", f"02_mapping.json/records/{rid}/rollup", ids,
-                       f"جُمعت مبالغ {count_ar(len(kids), 'record')} تابعة في الأصل {rid}: "
+                       f"جُمعت في الأصل {rid} مبالغ سجلاته التابعة ({count_ar(len(kids), 'record')}): "
                        + "؛ ".join(f"{f} = {fmt(t)}" for f, t in done) + f". الدليل: {ru['evidence']}",
                        "تدخل المبالغ مرة واحدة على مستوى الأصل؛ السجلات التابعة خارج النطاق",
                        "طُبّق التجميع كما ورد في 02_mapping.json")
@@ -1988,7 +1972,7 @@ def check_out_of_vocabulary(records: list, issues: Issues) -> None:
                 g["examples"].append(raw)
     for (dim, field), g in groups.items():
         issues.add("dim_out_of_vocabulary", "high", join_refs(g["refs"]), g["ids"],
-                   f"قيم البعد «{dim}» من الحقل {field} خارج المفردات المعتمدة في {count_ar(len(g['ids']), 'record')}: "
+                   f"قيم البعد «{dim}» من الحقل {field} خارج المفردات المعتمدة في {count_ar(len(g['ids']), 'record', 'gen')}: "
                    + "؛ ".join(f"«{x}»" for x in g["examples"]) + f". المسموح: {_vocab_text(dim)}.",
                    "خُزّن البعد «غير محدد» فتُستبعد هذه السجلات من المؤشرات المقيدة بهذا البعد",
                    f"لم يُخمَّن التصنيف؛ حوّل النصوص إلى الرموز عبر dim_rules (dim: {dim}) أو records بدليل",
@@ -2079,7 +2063,7 @@ def check_vat(records: list, issues: Issues, meta: dict) -> None:
                 equal_refs.extend([ex.get("ref"), inc.get("ref")])
         if equal_ids:
             issues.add("vat_equal", "low", join_refs(equal_refs), equal_ids,
-                       f"الإيراد مع الضريبة يساوي الإيراد بدون ضريبة للفترة {p} في {count_ar(len(equal_ids), 'record')}؛ "
+                       f"الإيراد مع الضريبة يساوي الإيراد بدون ضريبة للفترة {p} في {count_ar(len(equal_ids), 'record', 'gen')}؛ "
                        "قد يعني عدم خضوع الإيراد للضريبة أو عدم فصلها في الملف — لا يثبت أيهما من الملف وحده.",
                        impact_for(ex_f, "money", meta),
                        "استُخدم الحقل بدون ضريبة كما هو؛ لم تُطبَّق نسبة ضريبة افتراضية")
@@ -2160,9 +2144,9 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
     # {f}: the field's Arabic label; {nrec}: «سجل واحد / سجلان / 5 سجلات / 12 سجلًا». Analyst instructions (which part
     # of 02_mapping.json to change) go to `dev_note`, never into the board-facing detail/impact/treatment.
     texts = {
-        "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {nrec}",
+        "text_in_numeric": ("medium", "نص في حقل رقمي ({f}) في {nrec_gen}",
                             "لم يُحوَّل النص إلى رقم ولم يُعامل كصفر؛ القيمة غير معروفة مع حفظ النص الأصلي", None),
-        "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {nrec}",
+        "percent_in_amount": ("medium", "نسبة مئوية مدونة في حقل مبلغ أو مساحة أو عدد ({f}) في {nrec_gen}",
                               "لم تُحوَّل إلى رقم ولم تُجمع؛ القيمة غير معروفة مع حفظ النص الأصلي، ويلزم التحقق من "
                               "المبلغ الفعلي في المصدر", None),
         "foreign_currency": ("high", "مبالغ بعملة غير عملة الدراسة في الحقل {f} ({nrec})",
@@ -2175,7 +2159,7 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
         "zero_from_blank_inputs": ("medium", "صيغ ناتجها المخزن 0 لأن مدخلاتها فارغة في الحقل {f} ({nrec})",
                                    "عوملت القيمة كغير متاحة لا كصفر مسجل؛ الصفر هنا نتيجة خانات فارغة وليس رقمًا مدونًا",
                                    None),
-        "excel_error": ("high", "خطأ صيغة Excel في الحقل {f} في {nrec}",
+        "excel_error": ("high", "خطأ صيغة Excel في الحقل {f} في {nrec_gen}",
                         "عوملت القيمة كغير معروفة؛ يلزم تصحيح الصيغة في المصدر", None),
         "zero_as_missing": ("medium", "قيمة صفرية في الحقل {f} ({nrec}) حيث لا يُعد الصفر قيمة مقبولة",
                             "عومل الصفر كغير متاح ولم يدخل في المجاميع", "zero_policy = missing"),
@@ -2198,7 +2182,8 @@ def check_field_statuses(records: list, issues: Issues, meta: dict, kinds: dict)
         sev, det, treat, dev = texts[typ]
         if typ == "zero_as_missing" and group_of(f, meta) not in ("valuation",):
             sev = "low"
-        detail = det.format(f=flabel(f, meta), nrec=count_ar(len(g["ids"]), "record"))
+        detail = det.format(f=flabel(f, meta), nrec=count_ar(len(g["ids"]), "record"),
+                            nrec_gen=count_ar(len(g["ids"]), "record", "gen"))
         if g["examples"] and typ not in ("pii_redacted",):
             detail += " — أمثلة: " + "؛ ".join(f"«{x}»" for x in g["examples"])
         extra = {"dev_note": dev} if dev else {}
@@ -2243,7 +2228,7 @@ def check_deeds(records: list, issues: Issues) -> None:
         if len(ids) < 2:
             continue
         issues.add("shared_deed", "medium", join_refs([tv.get("ref") for _, tv in items]), ids,
-                   f"رقم الصك «{items[0][1]['v']}» مشترك بين {count_ar(len(ids), 'record')}.",
+                   f"رقم الصك «{items[0][1]['v']}» مشترك بين {count_ar(len(ids), 'record', 'gen')}.",
                    "قد يمثل أصلًا واحدًا مسجلًا أكثر من مرة (ازدواج) أو أصلًا يحتاج فصلًا",
                    "لم تُدمج السجلات؛ يلزم التحقق من الصك وحدود كل سجل")
 
@@ -2304,13 +2289,13 @@ def main(argv=None) -> int:
         return 2
     errs = schema_errors(mapping, args.schema)
     if errs:
-        eprint(f"ملف mapping غير مطابق للمخطط ({len(errs)} خطأ):")
+        eprint(f"ملف mapping غير مطابق للمخطط ({ar_n(len(errs), 'error')}):")
         for e in errs:
             eprint(e)
         return 2
     errs = semantic_errors(mapping)
     if errs:
-        eprint(f"ملف mapping غير متسق ({len(errs)} خطأ):")
+        eprint(f"ملف mapping غير متسق ({ar_n(len(errs), 'error')}):")
         for e in errs:
             eprint(e)
         return 2
@@ -2336,10 +2321,10 @@ def main(argv=None) -> int:
     save_json(args.out, out)
     st = out["stats"]
     sev = st["issues_by_severity"]
-    print(f"تم: {st['records']} سجل → {args.out}")
+    print(f"تم: {ar_n(st['records'], 'record')} → {args.out}")
     print(f"  حسب النوع: {st['by_type']} | حسب النطاق: {st['by_scope']}")
-    print(f"  مشكلات البيانات: {st['issues']} (مرتفع {sev.get('high', 0)}، متوسط {sev.get('medium', 0)}، "
-          f"منخفض {sev.get('low', 0)}) | أعمدة شخصية محذوفة: {st['pii_columns_dropped']}")
+    print(f"  مشكلات البيانات: {st['issues']} (مرتفعة الخطورة {sev.get('high', 0)}، متوسطة {sev.get('medium', 0)}، "
+          f"منخفضة {sev.get('low', 0)}) | أعمدة شخصية محذوفة: {st['pii_columns_dropped']}")
     print(f"  صفوف فارغة متجاوزة: {st['rows_skipped_blank']} | مستبعدة: {st['rows_excluded']} | إجماليات مستبعدة آليًا: "
           f"{st['rows_total_excluded']} | متخطاة رغم وجود بيانات: {st['rows_skipped_with_content']} | مدمجة بالربط: "
           f"{st['rows_joined']}")

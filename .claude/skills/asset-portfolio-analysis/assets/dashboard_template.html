@@ -7,6 +7,9 @@
 <meta name="robots" content="noindex, nofollow">
 <title>لوحة محفظة الأصول</title>
 <style>
+/* Arabic web font (IBM Plex Sans Arabic, OFL), embedded base64 by build_dashboard.py from assets/fonts/: the screen and the
+   printed PDF share one typeface on every device, with no network request */
+/*__APA_FONTS__*/
 /* ===== Tokens ===================================================================== */
 :root {
   --bg: #F6F7F9; --surface: #FFFFFF; --surface-2: #FAFBFC;
@@ -96,6 +99,11 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .identity { background: var(--surface); border-top: 4px solid var(--navy); border-bottom: 1px solid var(--line); }
 .identity-in { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding-top: 28px; padding-bottom: 8px; }
 .eyebrow { color: var(--green); font-weight: 700; font-size: 13.5px; letter-spacing: 0; }
+.eyebrow-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+/* confidentiality marking (meta.confidentiality, on by default): header here, every printed page via @page */
+.conf-mark { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--navy); border: 1px solid var(--navy); border-radius: 6px; padding: 0 8px; line-height: 1.8; white-space: nowrap; }
+.conf-mark[hidden] { display: none; }
+.foot .conf-line { font-weight: 700; color: var(--navy); }
 .identity h1 { font-size: 30px; font-weight: 700; margin-top: 4px; }
 .identity h1.na { color: var(--na-ink); font-weight: 600; }
 .identity-sub { color: var(--ink-2); margin-top: 4px; }
@@ -105,6 +113,8 @@ code { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; 
 .meta-grid dt { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .meta-grid dd { margin: 2px 0 0; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; font-size: 14px; }
 .meta-grid dd .sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 400; color: var(--muted); font-size: 12px; line-height: 1.55; }
+/* on paper a caption cannot be expanded: the whole caption prints (never cut with «…»); the screen keeps one line */
+.meta-grid dd .sub-print { display: none; font-weight: 400; color: var(--muted); }
 /* identification evidence (cell references, sources, file) behind one disclosure: the header keeps value + one line */
 .meta-ev { margin: 0 0 14px; font-size: 13px; }
 .meta-ev > summary { cursor: pointer; color: var(--navy-2); font-weight: 600; display: list-item; width: max-content; max-width: 100%; min-height: 32px; padding: 4px 4px 2px; }
@@ -169,6 +179,7 @@ main { padding-bottom: 48px; }
 .kpi-value.is-na::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; }
 .kpi-reason { font-size: 13px; color: var(--na-ink); }
 .kpi-note { font-size: 13px; color: var(--ink-2); }
+.table-review-note { margin: 0 0 10px; font-size: 13px; padding: 6px 10px; }
 .kpi-caveat { font-size: 12.5px; color: var(--warn-ink); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 4px 8px; }
 .kpi-def { font-size: 12.5px; color: var(--muted); }
 .kpi-def.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -221,6 +232,11 @@ main { padding-bottom: 48px; }
 .chart-empty { display: flex; gap: 10px; align-items: flex-start; background: var(--na-bg); color: var(--na-ink); border-radius: 10px; padding: 14px 16px; font-size: 14px; }
 .chart-empty::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--na); flex: none; margin-top: 7px; }
 .chart-note { font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+/* fewer than two assets with values: one compact sentence replaces the distribution, concentration and comparison
+   placeholders (no grey boxes, on screen or paper) and the revenue trend takes the full width */
+.chart-card.scope-note { padding: 0; border: 0; background: none; box-shadow: none; }
+.chart-card.scope-note .chart-body { margin-top: 0; }
+.scope-note-text { font-size: 14px; color: var(--ink-2); line-height: 1.8; margin: -4px 0 0; }
 .chart-svg .rid-txt { font-size: 10.5px; fill: var(--muted); }
 .chart-svg .bar-same { fill: none; stroke: #0B5E46; stroke-width: 2; stroke-dasharray: 4 3; }
 .sw-same { width: 12px; height: 12px; border: 2px dashed #0B5E46; border-radius: 3px; display: inline-block; flex: none; }
@@ -275,6 +291,12 @@ tr[data-role="asset-row"].is-selected td { background: var(--navy-soft); }
 .flag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 6px; background: var(--na-bg); color: var(--na-ink); margin: 1px 0 1px 4px; line-height: 1.7; }
 .flag.ok { background: var(--ok-bg); color: var(--ok-ink); }
 .links-n { display: inline-flex; min-width: 24px; justify-content: center; border-radius: 999px; background: var(--navy-soft); color: var(--navy); font-weight: 700; font-size: 12px; padding: 0 8px; }
+/* sort control for the stacked phone cards (the column headers are hidden there) */
+.mobile-sort { display: none; }
+/* consecutive rows that share one long reason: the reason once, as a group line (each row keeps it in its title) */
+tr.grp-row td { background: var(--surface-2); color: var(--ink-2); font-size: 13px; font-weight: 600; }
+tr.grp-row .grp-n { font-weight: 400; color: var(--muted); }
+td.same-reason { color: var(--muted); font-size: 12.5px; }
 
 /* ===== Assets layout + detail ===================================================== */
 .assets-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
@@ -358,6 +380,26 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .field select { width: 100%; }
   .identity-in { flex-direction: column; gap: 12px; }
 }
+/* ===== Phone asset table (≤ 600px): each row is a card of label/value pairs, so value, revenue, yield and the data
+   status are visible without horizontal scrolling; the column-header band gives way to one sort control ===== */
+@media (max-width: 600px) {
+  #asset-table-wrap { overflow-x: visible; border: 0; background: none; border-radius: 0; }
+  #asset-table, #asset-table tbody { display: block; width: 100%; }
+  #asset-table thead { display: none; }
+  #asset-table tr[data-role="asset-row"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  #asset-table tr[data-role="asset-row"].is-selected { border-color: var(--navy-2); box-shadow: 0 0 0 2px var(--navy-soft); }
+  #asset-table tr[data-role="asset-row"] td { display: block; padding: 0; border: 0; min-width: 0; text-align: start; white-space: normal; background: none; order: 3; }
+  #asset-table tr[data-role="asset-row"] td[data-col="name"] { grid-column: 1 / -1; order: 0; min-width: 0; }
+  #asset-table tr[data-role="asset-row"] td[data-col="value"], #asset-table tr[data-role="asset-row"] td[data-col="revenue"],
+  #asset-table tr[data-role="asset-row"] td[data-col="yield"], #asset-table tr[data-role="asset-row"] td[data-col="links"] { order: 1; }
+  #asset-table tr[data-role="asset-row"] td[data-col="flags"] { grid-column: 1 / -1; order: 2; }
+  #asset-table td[data-label]::before { content: attr(data-label); display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); line-height: 1.5; }
+  #asset-table td .num { font-size: 15px; font-weight: 700; }
+  #asset-table tbody > tr:not([data-role="asset-row"]) { display: block; }
+  #asset-table tbody > tr:not([data-role="asset-row"]) td { display: block; border: 0; }
+  .mobile-sort { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; }
+  .mobile-sort select { flex: 1 1 auto; min-width: 0; }
+}
 @media (max-width: 480px) {
   body { font-size: 14.5px; }
   .wrap { padding: 0 16px; }
@@ -395,13 +437,15 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .ks-label { display: block; font-size: 11.5px; color: var(--muted); font-weight: 600; line-height: 1.4; }
   .ks-value { display: block; font-size: 15px; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; }
   .ks-value.is-na { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .ks-flag { display: block; font-size: 11px; font-weight: 700; color: var(--warn-ink); line-height: 1.4; }
   .ks-link { grid-column: 1 / -1; font-size: 12.5px; }
   .ks-caveat { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--ink-2); }
 }
 
 /* ===== Print ====================================================================== */
 @media print {
-  @page { size: A4; margin: 14mm 12mm; }
+  /* the bottom margin holds the page footer (confidentiality marking and page number, injected with meta.confidentiality) */
+  @page { size: A4; margin: 14mm 12mm 15mm; }
   [data-print="hide"] { display: none !important; }
   body { background: #fff; font-size: 12.5px; overflow: visible; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-shadow: none !important; }
@@ -431,33 +475,49 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .section-note { break-inside: avoid; }
   /* the KPI heading and note stay with the first row of cards (no forced page: it left page 2 half empty) */
   #h-kpis, #kpi-note { break-after: avoid; page-break-after: avoid; }
-  .plan-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  /* 30/60/90 plan: three stacked full-width blocks (three side-by-side columns split between pages and left the last
+     page mostly empty); inside a block its items sit side by side, and an item never splits */
+  .plan-grid { display: block; }
+  .plan-col { padding: 8px 10px; }
+  .plan-col + .plan-col { margin-top: 8px; }
+  .plan-col > h3 { margin-bottom: 6px; font-size: 13.5px; }
+  .plan-items { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; align-items: start; }
+  .plan-item, .plan-item:first-of-type { border-top: 0; padding: 0; padding-inline-start: 8px; border-inline-start: 2px solid var(--line); }
+  .plan-item .act { font-size: 12px; line-height: 1.6; }
+  .plan-item .meta { font-size: 10.5px; line-height: 1.5; }
+  .plan-items > .empty-note { grid-column: 1 / -1; padding: 6px 10px; font-size: 11.5px; }
   /* the executive view prints; the study details stay on screen (brief §11: «ضع التفاصيل في أقسام إضافية») */
   #sec-details { display: none !important; }
   .identity-in { padding-top: 12px; }
   .meta-grid { margin: 8px 0 12px; }
   .meta-grid > div { padding: 6px 10px; }
+  .meta-grid dd .sub { display: none; }
+  .meta-grid dd .sub-print { display: block; font-size: 10px; line-height: 1.5; }
   .summary-text { padding: 12px 16px; }
   .summary-text p { font-size: 13px; line-height: 1.75; max-width: none; }
   .kpi, .chart-card { break-inside: avoid; page-break-inside: avoid; }
-  /* long gap/action items and plan columns may continue on the next page (whole-block moves left pages a third
-     empty); their heading stays with the first lines. An assessment card moves whole (a card split at its top left an
-     empty card frame at the foot of page 1) */
-  .item, .plan-col { break-inside: auto; page-break-inside: auto; }
+  /* a gap or action card never splits across pages (a card continued on the next page lost its «الأثر المتوقع» from
+     view); a plan block may continue on the next page between its items, its heading staying with the first items.
+     An assessment card moves whole (a card split at its top left an empty card frame at the foot of page 1) */
+  .item { break-inside: avoid; page-break-inside: avoid; padding: 10px 14px; }
+  .item h4 { font-size: 13.5px; }
+  .item p, .assess p { font-size: 12px; line-height: 1.65; }
+  .item .badges { margin: 4px 0; }
+  .plan-col { break-inside: auto; page-break-inside: auto; }
   .assess { break-inside: avoid; page-break-inside: avoid; }
   .item-head, .assess h4, .plan-col > h3, .plan-col > .plan-head { break-after: avoid; page-break-after: avoid; }
   .summary-text p, .plan-item, .item .chips, .assess .chips { break-inside: avoid; }
   details:not([open]) { display: none; }
   .chart-data { display: none; }
   .tip { display: none !important; }
-  /* print stays short (≤ 8 A4 pages): four KPI columns, definitions kept to 2 lines (the full text is on screen and in
-     the supporting workbook) except under a yield card, whose scope, basis, valuation date and included/excluded
-     counts stay on paper (brief §6, §11); the asset-comparison chart draws compact rows on paper */
+  /* print stays short (≤ 8 A4 pages): four KPI columns; every definition prints in full in a smaller size (a clamped
+     definition ended in «…» on paper, where the on-screen toggle cannot open it), and a yield card keeps its scope,
+     basis, valuation date and included/excluded counts (brief §6, §11); the asset-comparison chart draws compact
+     rows on paper */
   .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .kpi { padding: 8px 10px; gap: 4px; }
-  .kpi-def.clamp { -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+  .kpi-def, .kpi-def.clamp { -webkit-line-clamp: unset; display: block; overflow: visible; font-size: 10.5px; line-height: 1.5; }
   .kpi-meta { display: flex; font-size: 10px; line-height: 1.45; padding-top: 4px; gap: 1px; }
-  .kpi[data-kind="ratio"] .kpi-def.clamp { -webkit-line-clamp: unset; display: block; overflow: visible; }
   .kpi-value { font-size: 17px; }
   .kpi-title { font-size: 13px; }
   .kpi-label { font-size: 11px; }
@@ -483,7 +543,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
 <header class="identity" id="identity">
   <div class="wrap identity-in">
     <div>
-      <p class="eyebrow">دراسة محفظة الأصول — العرض التنفيذي لمجلس الإدارة</p>
+      <div class="eyebrow-row"><p class="eyebrow">دراسة محفظة الأصول — العرض التنفيذي لمجلس الإدارة</p>
+        <span class="conf-mark" id="conf-mark" data-role="confidentiality" hidden></span></div>
       <h1 id="entity-name">لوحة محفظة الأصول</h1>
       <p class="identity-sub" id="identity-sub"></p>
       <div class="kpi-strip" id="kpi-strip" data-print="hide" role="group" aria-label="أبرز المؤشرات"></div>
@@ -541,8 +602,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     <div class="toolbar">
       <div class="search"><label class="sr-only" for="table-search">بحث في الجدول</label>
         <input type="search" id="table-search" data-role="table-search" placeholder="ابحث بالاسم أو المعرف أو الموقع…" autocomplete="off"></div>
+      <label class="mobile-sort"><span class="field-label">ترتيب الأصول</span>
+        <select id="mobile-sort" data-role="table-sort-mobile" aria-label="ترتيب الأصول"></select></label>
       <p class="count-line" id="count-line" aria-live="polite"></p>
     </div>
+    <p class="kpi-caveat table-review-note" id="table-review-note" data-role="table-review-note" role="note" hidden></p>
     <div class="assets-layout" id="assets-layout">
       <div class="table-wrap" id="asset-table-wrap">
         <table data-role="asset-table" id="asset-table" aria-describedby="count-line"><caption class="sr-only">السجلات ضمن نطاق الدراسة والتصفية الحالية؛ اختر صفًا لعرض تفاصيله</caption><thead></thead><tbody></tbody></table>
@@ -623,6 +687,24 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   var WB = D.workbook_map_summary || {};
   var ANOM = {};
   (WB.anomalies || []).forEach(function (a) { if (a && a.id) ANOM[a.id] = a; });
+  /** The data notes of one record (C3): 03 issues listed on it (issue_ids) or naming it (record_ids), the analyst's
+   *  06 data_issues_extra naming it (merged into D.issues by the build), and 01 workbook anomalies attached to it. The
+   *  asset-table chip and the asset detail panel read this one list (as does the workbook «الأصول» notes column). */
+  function recIssues(rec) {
+    var out = [], seen = {};
+    var push = function (x) {
+      if (!x || typeof x !== 'object') return;
+      var k = x.id ? 'id:' + x.id : null;
+      if (k ? seen[k] : out.indexOf(x) >= 0) return;
+      if (k) seen[k] = 1;
+      out.push(x);
+    };
+    if (!rec) return out;
+    (Array.isArray(rec.issue_ids) ? rec.issue_ids : []).forEach(function (i) { push(ISSUE[i] || ANOM[i]); });
+    ISSUES.forEach(function (x) { if (x && Array.isArray(x.record_ids) && x.record_ids.indexOf(rec.id) >= 0) push(x); });
+    (WB.anomalies || []).forEach(function (a) { if (a && Array.isArray(a.record_ids) && a.record_ids.indexOf(rec.id) >= 0) push(a); });
+    return out;
+  }
   var KNOWN = ['value', 'derived', 'zero_recorded', 'zero_confirmed'];
   var PERIODS = Array.isArray(CFG.periods) ? CFG.periods : [];
   var FILTER_DIMS = Array.isArray(CFG.filters) ? CFG.filters.filter(function (d) { return typeof d === 'string' && d !== 'period'; }) : [];
@@ -635,7 +717,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   // ---------------------------------------------------------------------------
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
-  // Bidi: after Arabic letters a number becomes an "Arabic number", so "-75,000" shows as "75,000-", "2025-12-02"
+  // Bidi: after Arabic letters a number becomes an "Arabic number", so "-75,000" shows as "75,000-", "2031-03-14"
   // as "02-12-2025", and two Latin ids in a row ("R1 \u2014 REG-7") are read as one left-to-right run ("REG-7 \u2014 R1").
   // Such tokens are isolated left-to-right for display only: negative numbers, percentages, ISO dates (with time),
   // hyphen-joined digit groups, cell ranges (C2:D2), and ids/keys holding a digit, hyphen or dot (REG-7, DQ-002, R1,
@@ -756,12 +838,16 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     f = f || {};
     return FILTER_DIMS.some(function (d) { return f[d] !== null && f[d] !== undefined && f[d] !== ''; });
   }
-  /** Arabic number-noun agreement: one, two (dual), 3–10 (plural), 11+ (singular accusative). */
+  /** Arabic number-noun agreement (apa_common.ar_count): 0 → «لا <plural>», one, two (dual), n % 100 in 3–10 → plural,
+   *  11–99 → singular accusative, n ≥ 100 with n % 100 in 0–2 → singular genitive («100 سجل»); thousands separators. */
   function nNoun(n, one, two, few, many) {
-    if (n === 0) return '0 ' + String(many).replace(/\u064B\u0627(?=\s|$)/g, '').replace(/\u064B/g, '');   // «0 سجل», never «0 سجلًا»
+    if (n === 0) return 'لا ' + few;
     if (n === 1) return one;
     if (n === 2) return two;
-    return n + ' ' + (n >= 3 && n <= 10 ? few : many);
+    var r = Math.abs(n) % 100, num = Number(n).toLocaleString('en-US');
+    if (r >= 3 && r <= 10) return num + ' ' + few;
+    if (r >= 11) return num + ' ' + many;
+    return num + ' ' + String(many).replace(/\u064B\u0627(?=\s|$)/g, '').replace(/\u064B/g, '');
   }
 
   // ---------------------------------------------------------------------------
@@ -876,14 +962,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function levelF(x) { return LEVEL_F[x] || str(x); }
   var RANKING_FEM = { evidence_strength: 1, feasibility: 1, cost_level: 1 };
   function rankLevel(k, x) { return RANKING_FEM[k] ? levelF(x) : levelAr(x); }
-  /** Arabic number-noun agreement for "record": 1 سجل واحد · 2 سجلان · 3–10 سجلات · otherwise سجلًا. */
-  function nRec(n) {
-    if (n === 0) return '0 سجل';
-    if (n === 1) return 'سجل واحد';
-    if (n === 2) return 'سجلان';
-    return n + ' ' + (n >= 3 && n <= 10 ? 'سجلات' : 'سجلًا');
-  }
-  function recNoun(n) { return n >= 3 && n <= 10 ? 'سجلات' : (n <= 2 ? 'سجل' : 'سجلًا'); }
+  /** Arabic number-noun agreement for "record": لا سجلات · سجل واحد · سجلان · 3–10 سجلات · 11–99 سجلًا · 100 سجل. */
+  function nRec(n) { return nNoun(n, 'سجل واحد', 'سجلان', 'سجلات', 'سجلًا'); }
+  function recNoun(n) { var r = Math.abs(n) % 100; return r >= 3 && r <= 10 ? 'سجلات' : (r >= 11 ? 'سجلًا' : 'سجل'); }
+  /** «مشمول n سجلات» on a card; 0 → «لا سجلات مشمولة». */
+  function inclRec(n) { return n ? 'مشمول ' + nRec(n) : 'لا سجلات مشمولة'; }
 
   // ---------------------------------------------------------------------------
   // Record helpers
@@ -898,14 +981,15 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return d.managed_for_others === true || list(d.ownership).indexOf('managed_for_others') >= 0;
   }
   var MANAGED_TAG = 'مدار للغير — ليس دخلًا للجمعية';
-  /** Location column: dims.location, falling back to the district; both when both are known. */
+  /** Location column: dims.location, falling back to the district; both when both are known. A district shown in place
+   *  of an unknown location is labelled («الحي: …»), so the column never reads as the location field of the workbook. */
   function locText(rec) {
     var d = (rec && rec.dims) || {};
     var loc = d.location, dist = d.district;
     var has = function (x) { return x !== null && x !== undefined && x !== '' && x !== 'unknown' && !(Array.isArray(x) && !x.length); };
-    if (has(loc) && has(dist) && str(loc) !== str(dist)) return dimText(rec, 'location') + ' · ' + dimText(rec, 'district');
+    if (has(loc) && has(dist) && str(loc) !== str(dist)) return dimText(rec, 'location') + ' · ' + dimLabel('district') + ': ' + dimText(rec, 'district');
     if (has(loc)) return dimText(rec, 'location');
-    if (has(dist)) return dimText(rec, 'district');
+    if (has(dist)) return dimLabel('district') + ': ' + dimText(rec, 'district');
     return dimText(rec, 'location');
   }
   var ID_TOKEN = /[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)+/g;
@@ -1049,7 +1133,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var fm = /^f:([A-Za-z0-9_.\-]+)$/.exec(ref);
     if (fm && FACTS[fm[1]]) {
       var fx = FACTS[fm[1]];
-      add(chip, humanize(fx.label || fm[1]) + ': ');
+      // a record fact's label ends with its record id «… — name (ID)»: the id is isolated so no parenthesis is stranded
+      var flab = humanize(fx.label || fm[1]);
+      var fid = /^([\s\S]*\S)\s*\(([A-Za-z][A-Za-z0-9_.\-]*)\)$/.exec(flab);
+      add(chip, h('bdi', { dir: 'rtl' }, fid ? [fid[1] + ' · ', idc(fid[2])] : flab, ':'));
       add(chip, h('span', { class: 'num' }, fx.unit === 'SAR' ? fmtMoney(fx.value) : fx.unit === 'pct' ? fmtPct(fx.value) : fmtPlain(fx.value)));
       return chip;
     }
@@ -1215,21 +1302,43 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (META.draft) add(sub, pill('مسودة — لم تجتز التحقق الآلي', 'warn'));
     else if (vs.available) add(sub, pill('اجتازت التحقق الآلي' + (vs.warning_count ? ' (' + (vs.warning_count === 1 ? 'تنبيه واحد' : vs.warning_count === 2 ? 'تنبيهان' : vs.warning_count + (vs.warning_count <= 10 ? ' تنبيهات' : ' تنبيهًا')) + ')' : ''), 'ok'));
     if (META.draft) $('#draft-banner').hidden = false;
+    // confidentiality marking (on by default; build_dashboard.confidentiality_label): header, footer and every printed page
+    var conf = META.confidentiality ? str(META.confidentiality) : '';
+    var cm = $('#conf-mark');
+    if (cm) { cm.textContent = conf; cm.hidden = !conf; }
+    if (conf) {
+      var css = conf.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ');
+      var pageStyle = document.createElement('style');
+      pageStyle.id = 'page-footer-style';
+      pageStyle.textContent = '@media print { @page { @bottom-center { content: "' + css + ' \u00B7 صفحة " counter(page) " من " counter(pages); ' +
+        'direction: rtl; font-family: "IBM Plex Sans Arabic", Tahoma, "DejaVu Sans", sans-serif; font-size: 8.5pt; font-weight: 600; color: #12324A; } } }';
+      document.head.appendChild(pageStyle);
+    }
 
     var dl = clear($('#meta-grid'));
     var evl = clear($('#meta-ev-list'));
     // each identification item (brief §11.5) shows its value and one short line; the full evidence (cell references,
     // sources) is in the «المصدر والدليل» disclosure, so the executive summary starts within the first screen
+    // the screen shows one short line (the full text is in the disclosure); paper cannot be expanded, so the whole
+    // caption prints — never a line cut with «…» (printLine keeps its first clause only when it is very long)
     function item(label, value, subText, evidence) {
       var full = str(subText);
       var line = shortLine(full, 38);
-      add(dl, h('div', null, h('dt', null, label), h('dd', null, value, line ? h('span', { class: 'sub', title: line !== full ? full : null }, line) : null)));
+      add(dl, h('div', null, h('dt', null, label), h('dd', null, value,
+        line ? h('span', { class: 'sub', title: line !== full ? full : null }, line) : null,
+        full ? h('span', { class: 'sub-print' }, printLine(full)) : null)));
       if (evidence !== undefined ? evidence : (line !== full ? full : null)) add(evl, [h('dt', null, label), h('dd', null, evidence !== undefined ? evidence : full)]);
     }
     var counts = META.counts || {};
     if (!ent) item('الجهة', h('span', { class: 'muted' }, 'غير مذكورة في الملف'), META.entity_evidence ? str(META.entity_evidence) : 'لا يذكر الملف اسم الجهة');
     item('فترة البيانات', META.data_period ? str(META.data_period) : 'غير محددة في الملف', META.data_period_evidence ? 'المصدر: ' + str(META.data_period_evidence) : null);
-    item('تاريخ إعداد الدراسة', META.study_date ? h('span', { class: 'num' }, str(META.study_date)) : 'غير محدد', META.study_date_basis ? str(META.study_date_basis) : null);
+    // brief §2: the preparation date the file states; the workbook's last-modified timestamp is context only, never
+    // presented as the study date (build_dashboard.study_date_meta)
+    if (META.study_date) item('تاريخ إعداد الدراسة', h('span', { class: 'num' }, str(META.study_date)), META.study_date_basis ? str(META.study_date_basis) : null);
+    else item('تاريخ إعداد الدراسة', h('span', { class: 'muted' }, 'غير مذكور في الملف'),
+      META.file_modified ? 'آخر تعديل للملف المصدر: ' + str(META.file_modified) : 'لا يذكر الملف تاريخ إعداد أو اعتماد',
+      'لا يذكر الملف تاريخ إعداد أو اعتماد للدراسة' + (META.file_modified ? '؛ آخر تعديل للملف المصدر (خصائص المصنف): ' + str(META.file_modified) +
+        '، وهو تاريخ حفظ الملف لا تاريخ إعداد الدراسة' : '') + '.');
     item('تاريخ التحليل', h('span', { class: 'num' }, str(META.analysis_date || '')), 'لا يُفترض أنه سنة البيانات');
     var vl = META.valuation || CFG.valuation || {};
     var vlFull = vl.field ? [str(vl.date_text), vl.basis ? ' · ' + str(vl.basis) : ''].join('') : str(vl.reason || '');
@@ -1239,6 +1348,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       'خارج المؤشرات: معزول ' + (counts.isolated || 0) + ' · مستبعد ' + (counts.excluded || 0));
     add(evl, [h('dt', null, 'الملف المصدر'), h('dd', null, META.file_name ? bdi(META.file_name) : 'غير معروف',
       META.sha256_short ? [' · البصمة: ', h('code', null, str(META.sha256_short))] : null)]);
+  }
+  /** A caption for paper: the whole text, or its first whole clause (up to «؛») when the text is very long — never cut
+   *  inside a clause and never ended with «…». */
+  function printLine(s) {
+    s = str(s).replace(/\s+/g, ' ').trim();
+    if (s.length <= 150) return s;
+    var first = s.split(/[؛;]\s*/)[0].trim();
+    return first || s;
   }
   /** First clause of a text (up to «؛» or a full stop), cut at a word boundary to about max characters. */
   function shortLine(s, max) {
@@ -1289,10 +1406,17 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!out.length) out = GAPS.slice().sort(function (a, b) { return (SEV_ORDER[a.severity] || 3) - (SEV_ORDER[b.severity] || 3); });
     return out.slice(0, 3);
   }
+  // C4: the top actions follow the recommendations' priority (ascending), and the number on each card is that
+  // recommendation's «الأولوية n» — the same number as in the full list, the workbook and the delivery message
+  function prioNum(r) { return typeof (r && r.priority) === 'number' && isFinite(r.priority) ? r.priority : null; }
   function topActions() {
     var ids = list(NAR.top_actions);
     var out = ids.map(function (id) { return RECO[id]; }).filter(Boolean);
-    if (!out.length) out = RECS.slice().sort(function (a, b) { return (a.priority || 99) - (b.priority || 99); });
+    if (!out.length) out = RECS.slice();
+    out = out.map(function (r, i) { return [r, i]; }).sort(function (a, b) {
+      var pa = prioNum(a[0]), pb = prioNum(b[0]);
+      return ((pa === null ? 99 : pa) - (pb === null ? 99 : pb)) || (a[1] - b[1]);
+    }).map(function (p) { return p[0]; });
     return out.slice(0, 3);
   }
   function provenBadge(g) {
@@ -1322,8 +1446,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     ta.forEach(function (r, i) {
       var gl = list(r.gap_ids).map(function (gid) { return GAP[gid] ? str(gid) + ' — ' + str(GAP[gid].title) : str(gid); }).join('؛ ');
       var rk = r.ranking && typeof r.ranking === 'object' ? r.ranking : {};
-      add(abox, h('article', { class: 'item action', 'data-role': 'top-action', 'data-rec-id': str(r.id) },
-        h('div', { class: 'item-head' }, h('span', { class: 'rank', 'aria-hidden': 'true' }, String(i + 1)), h('h4', null, recTitle(r))),
+      var pn = prioNum(r);
+      add(abox, h('article', { class: 'item action', 'data-role': 'top-action', 'data-rec-id': str(r.id), 'data-priority': pn === null ? null : String(pn) },
+        h('div', { class: 'item-head' }, h('span', { class: 'rank', title: pn === null ? null : 'الأولوية ' + pn, 'aria-hidden': 'true' }, String(pn === null ? i + 1 : pn)),
+          h('h4', null, pn === null ? null : h('span', { class: 'sr-only' }, 'الأولوية ' + pn + ': '), recTitle(r))),
         h('div', { class: 'badges' }, r.target ? pill(str(r.target), 'navy') : null,
           Object.keys(RANKING_AR).filter(function (k) { return rk[k]; }).slice(0, 3).map(function (k) { return pill(RANKING_AR[k] + ': ' + rankLevel(k, rk[k]), 'neutral'); })),
         r.title && r.first_action ? h('p', null, h('span', { class: 'lbl' }, 'الإجراء الأول: '), str(r.first_action)) : null,
@@ -1398,6 +1524,33 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function resultPill(r) {
     if (growthRiyalOnly(r) && typeof r.value === 'number') return pill('قابلية المقارنة ' + growthCompWord(r) + ' — تغير بالريال فقط', 'warn');
     return pill(resultStatusText(r), metricStatus(r && r.status).tone);
+  }
+  function resultTone(r) { return growthRiyalOnly(r) && typeof r.value === 'number' ? 'warn' : metricStatus(r && r.status).tone; }
+  // C1 metric review flag: a metric spec of 04 may carry review {status: "needs_verification", reason} (copied into its
+  // 05 result). It belongs to the spec, so it holds under every period and filter: the card shows the amber
+  // «يحتاج تحقق» chip in place of the green «مكتمل…» one, with the reason as one caveat line (screen and paper).
+  var SPEC_BY_ID = {};
+  list(CFG.metrics).forEach(function (m) { if (m && m.id) SPEC_BY_ID[m.id] = m; });
+  var REVIEW_AR = 'يحتاج تحقق';
+  function reviewOf(r) {
+    var id = r && r.id;
+    var cands = [SPEC_BY_ID[id] && SPEC_BY_ID[id].review, r && r.review, M05[id] && M05[id].review];
+    for (var i = 0; i < cands.length; i++) {
+      var x = cands[i];
+      if (x && typeof x === 'object' && x.status === 'needs_verification') return x;
+    }
+    return null;
+  }
+  function reviewPill() { return h('span', { class: 'pill tone-warn', 'data-role': 'review-chip' }, h('span', { class: 'dot', 'aria-hidden': 'true' }), REVIEW_AR); }
+  function reviewCaveat(rv, label) {
+    return h('p', { class: 'kpi-caveat', role: 'note', 'data-role': 'review-caveat' }, (label ? label + ': ' : '') + str(rv.reason));
+  }
+  /** Status chips of a result: the review chip replaces a green «مكتمل» one; a partial or warning status stays beside it. */
+  function statusPills(r) {
+    var rv = reviewOf(r);
+    var known = typeof r.value === 'number';
+    if (!rv) return known ? [resultPill(r)] : [];
+    return [reviewPill()].concat(known && resultTone(r) !== 'ok' ? [resultPill(r)] : []);
   }
   function naText(r) {
     if (r.status === 'empty') return emptyCause(r) === 'filters' ? 'لا توجد سجلات ضمن التصفية الحالية' : 'لا توجد سجلات مؤهلة';
@@ -1498,8 +1651,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       lines.push(h('span', null, cnt));
     } else if (r.kind === 'sum') {
       var nu = r.n_unknown !== undefined ? r.n_unknown : list(r.excluded).length;
-      if (r.status === 'partial') lines.push(h('span', null, 'لا يشمل ' + nRec(nu) + ' ' + (nu === 1 ? 'قيمته' : 'قيمها') + ' غير معروفة (لا تُحسب صفرًا) · مشمول ' + (r.n_included || 0)));
-      else if (typeof r.value === 'number') lines.push(h('span', null, 'مشمول ' + nRec(r.n_included || 0)));
+      if (r.status === 'partial') lines.push(h('span', null, 'لا يشمل ' + nRec(nu) + ' ' + (nu === 1 ? 'قيمته' : 'قيمها') + ' غير معروفة (لا تُحسب صفرًا) · ' + inclRec(r.n_included || 0)));
+      else if (typeof r.value === 'number') lines.push(h('span', null, inclRec(r.n_included || 0)));
       if (r.valuation_date) lines.push(h('span', null, h('b', null, 'التقييم: '), str(r.valuation_date)));
       else if (r.period_text) lines.push(h('span', null, h('b', null, 'الفترة: '), str(r.period_text)));
     } else if (r.kind === 'coverage') {
@@ -1546,7 +1699,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       var known = typeof r.value === 'number' && isFinite(r.value);
       var txt = known ? (r.unit === 'SAR' ? fmtCompact(r.value) + ' ' + CUR : fmtUnit(r.value, r.unit)) : naText(r);
       add(box, h('div', { class: 'ks-item' }, h('span', { class: 'ks-label' }, str(r.short_label || r.label || id)),
-        h('span', { class: 'ks-value' + (known ? '' : ' is-na') }, txt)));
+        h('span', { class: 'ks-value' + (known ? '' : ' is-na') }, txt),
+        reviewOf(r) ? h('span', { class: 'ks-flag', 'data-role': 'review-chip' }, REVIEW_AR) : null));
     });
     var iso = isolatedAssetLike();
     if (box.children.length && iso) add(box, h('p', { class: 'ks-caveat', role: 'note', 'data-role': 'isolated-caveat' },
@@ -1567,8 +1721,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         if (r.label && r.short_label && r.label !== r.short_label) add(card, h('p', { class: 'kpi-label' }, str(r.label)));
         if (r.kind === 'ratio' && r.status === 'partial') add(card, h('p', { class: 'kpi-eyebrow' }, 'عائد الجزء القابل للاحتساب'));
         add(card, h('div', { class: 'kpi-main', 'data-metric-id': str(r.id) }, valueNode(r)));
-        if (typeof r.value === 'number') add(card, h('div', { class: 'kpi-status' }, resultPill(r)));
+        var rv = reviewOf(r);
+        var pills = statusPills(r);
+        if (pills.length) add(card, h('div', { class: 'kpi-status' }, pills));
         add(card, reasonLine(r));
+        if (rv) { card.setAttribute('data-review', 'needs_verification'); add(card, reviewCaveat(rv)); }
         add(card, coverageCaveat(r));
         if (r.definition) add(card, defBlock([{ text: str(r.definition) }]));
         add(card, metaLines(r));
@@ -1576,14 +1733,20 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         var gt = g.key === 'counts' ? 'عدد السجلات ضمن النطاق' : rs.map(function (x) { return str(x.short_label || x.label); }).join(' و');
         add(card, h('div', { class: 'kpi-head' }, h('h3', { class: 'kpi-title' }, gt)));
         var split = h('div', { class: 'kpi-split' });
+        var reviews = [];
         rs.forEach(function (x) {
-          add(split, h('div', { class: 'kpi-sub', 'data-metric-id': str(x.id) },
+          var xr = reviewOf(x);
+          if (xr) reviews.push([str(x.short_label || x.label), xr]);
+          add(split, h('div', { class: 'kpi-sub', 'data-metric-id': str(x.id), 'data-review': xr ? 'needs_verification' : null },
             h('p', { class: 'kpi-sub-label' }, str(x.short_label || x.label)),
             valueNode(x),
-            (x.status !== 'complete' && typeof x.value === 'number') ? h('p', { class: 'kpi-substatus' + (metricStatus(x.status).tone === 'warn' ? ' warn' : '') }, resultStatusText(x)) : null,
+            xr ? h('p', { class: 'kpi-substatus warn', 'data-role': 'review-chip' }, REVIEW_AR)
+              : ((x.status !== 'complete' && typeof x.value === 'number') ? h('p', { class: 'kpi-substatus' + (metricStatus(x.status).tone === 'warn' ? ' warn' : '') }, resultStatusText(x)) : null),
             reasonLine(x)));
         });
         add(card, split);
+        if (reviews.length) card.setAttribute('data-review', 'needs_verification');
+        reviews.forEach(function (p) { add(card, reviewCaveat(p[1], p[0])); });
         add(card, defBlock(rs.map(function (x) { return { label: str(x.short_label || x.label), text: str(x.definition) }; })));
       }
       grid.appendChild(card);
@@ -2002,7 +2165,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var srPts = sr ? list(sr.points) : [];
     var varies = t.n_known_varies === true || (t.n_known_varies === undefined && pts.some(function (p) { return pts[0] && p.n_known !== pts[0].n_known; }));
     var showSame = !!(varies && sr && sr.n > 0 && srPts.length === pts.length);
-    var H = 250, padTop = 26, axisH = 46;
+    var H = state.printing ? 200 : 250, padTop = 26, axisH = 46;   // a lower chart on paper (≤ 8 A4 pages)
     var y0 = H - axisH;
     var slot = W / Math.max(1, pts.length);
     var bw = Math.min(24, slot * (showSame ? 0.3 : 0.4));
@@ -2063,6 +2226,27 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return fig;
   }
 
+  /** Records of the current filters holding a known positive value or revenue (the panels that compare assets need two). */
+  function valuedRecordIds(all) {
+    var vf = valField(), rf = revField();
+    return list(all.record_ids || all.records).filter(function (id) {
+      var r = REC[id];
+      if (!r) return false;
+      var v = vf ? fv(r, vf) : null, rv = rf ? fv(r, rf) : null;
+      return (typeof v === 'number' && v > 0) || (typeof rv === 'number' && rv > 0);
+    });
+  }
+  /** Fewer than two records with values: one compact sentence replaces the distribution, concentration and comparison
+   *  placeholders (no empty boxes on screen or paper); the revenue trend follows at full width. */
+  function chartScopeNote(ids, trendShown) {
+    var why = ids.length === 1
+      ? 'أصل واحد ضمن النطاق والتصفية الحالية بقيمة أو إيراد معروف (' + recName(ids[0]) + ')، فلا تُعرض توزيعات القيمة والإيراد ولا تركّزهما ولا مقارنة الأصول؛ هذه الرسوم تتطلب أصلين على الأقل.'
+      : 'لا يوجد ضمن النطاق والتصفية الحالية أصل بقيمة أو إيراد معروف، فلا تُعرض توزيعات القيمة والإيراد ولا تركّزهما ولا مقارنة الأصول.';
+    if (trendShown) why += ' ويعرض الرسم التالي تطور الإيراد عبر الفترات.';
+    return h('figure', { class: 'chart-card wide scope-note', 'data-role': 'chart', 'data-chart-id': 'asset-panels', 'data-scope': ids.length === 1 ? 'single' : 'none' },
+      h('div', { class: 'chart-body' }, h('p', { class: 'scope-note-text', 'data-role': 'chart-empty', role: 'note' }, why)));
+  }
+  function isPlaceholder(fig) { return !!fig && !fig.querySelector('svg') && !!fig.querySelector('[data-role="chart-empty"]'); }
   function renderCharts(all) {
     var grid = $('#chart-grid');
     var probe = h('div', { class: 'chart-card' }, h('div', { class: 'chart-body' }));
@@ -2077,12 +2261,27 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     // on paper the concentration and trend charts take the full width: in a half column their notes wrap into a
     // page-tall card (the print stays within 8 A4 pages)
     var pw = !!state.printing;
-    // no breakdown configured: one short note in board language instead of two empty «… حسب نوع الأصل» cards
-    var dist = breakdownDims().length ? [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn)] : [chartNoBreakdown()];
-    var conc = chartConcentration(all, pw ? Ww : Wn), trend = chartTrend(all, pw ? Ww : Wn);
-    var figs = dist.concat([chartComparison(all, Ww), conc, trend]);
-    if (pw) { conc.classList.add('wide'); trend.classList.add('wide'); }
-    else trend.classList.remove('wide');   // keep the grid tidy: the trend chart shares a row with concentration
+    var valued = valuedRecordIds(all);
+    var collapsed = valued.length < 2;
+    var lab = $('#bd-dim') && $('#bd-dim').closest ? $('#bd-dim').closest('label') : null;
+    if (lab) lab.hidden = collapsed || !breakdownDims().length;
+    var figs;
+    if (collapsed) {
+      var tr1 = chartTrend(all, Ww);
+      tr1.classList.add('wide');
+      var trendShown = !isPlaceholder(tr1);
+      if (!trendShown) tr1.setAttribute('data-print', 'hide');
+      figs = [chartScopeNote(valued, trendShown), tr1];
+    } else {
+      // no breakdown configured: one short note in board language instead of two empty «… حسب نوع الأصل» cards
+      var dist = breakdownDims().length ? [chartBreakdown(all, 'value', Wn), chartBreakdown(all, 'revenue', Wn)] : [chartNoBreakdown()];
+      var conc = chartConcentration(all, pw ? Ww : Wn), trend = chartTrend(all, pw ? Ww : Wn);
+      figs = dist.concat([chartComparison(all, Ww), conc, trend]);
+      if (pw) { conc.classList.add('wide'); trend.classList.add('wide'); }
+      else trend.classList.remove('wide');   // keep the grid tidy: the trend chart shares a row with concentration
+      // a panel holding only a placeholder stays on screen but never prints as an empty box
+      figs.forEach(function (f) { if (isPlaceholder(f)) f.setAttribute('data-print', 'hide'); });
+    }
     figs.forEach(function (f) { add(grid, f); });
   }
 
@@ -2117,13 +2316,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       if (!(tr && tr.s === 'not_applicable')) flags.push('الإيراد: ' + statusAr(tr ? tr.s : 'absent'));
     }
     if (vf && !isKnown(rec, vf) && isAssetType(rec)) { var tv = tvOf(rec, vf); flags.push('التقييم: ' + statusAr(tv ? tv.s : 'absent')); }
-    var ni = list(rec.issue_ids).length;
+    var ni = recIssues(rec).length;   // the same list as the detail panel (C3)
     return { rec: rec, v: v, rv: rv, y: y, yNa: na, yNc: nc, flags: flags, issues: ni, links: citeCount(rec.id) };
   }
   var COLS = [
     { key: 'name', label: 'الأصل / السجل', sort: function (d) { return str(d.rec.name); } },
     { key: 'asset_type', label: function () { return dimLabel('asset_type'); }, sort: function (d) { return dimText(d.rec, 'asset_type'); } },
-    { key: 'location', label: function () { return dimLabel('location'); }, sort: function (d) { return locText(d.rec); } },
+    { key: 'location', label: function () { return DISTRICT_ONLY ? dimLabel('location') + ' / ' + dimLabel('district') : dimLabel('location'); }, sort: function (d) { return locText(d.rec); } },
     { key: 'use', label: function () { return dimLabel('use'); }, sort: function (d) { return dimText(d.rec, 'use'); } },
     { key: 'income_nature', label: function () { return dimLabel('income_nature'); }, sort: function (d) { return dimText(d.rec, 'income_nature'); } },
     { key: 'value', num: true, label: 'القيمة المسجلة', hsub: function () { var vl = CFG.valuation || {}; return str(vl.label || ''); }, sort: function (d) { return d.v; } },
@@ -2132,6 +2331,41 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     { key: 'flags', label: 'حالة البيانات', sort: function (d) { return d.flags.length + d.issues; } },
     { key: 'links', num: true, label: 'الروابط', hsub: function () { return 'فجوات وتوصيات'; }, sort: function (d) { return d.links; } }
   ];
+  // some in-scope record shows its district in place of an unknown location: the column says so in its heading too
+  var DISTRICT_ONLY = RECORDS.some(function (r) {
+    var d = (r && r.scope === 'in_scope' && r.dims) || {};
+    var has = function (x) { return x !== null && x !== undefined && x !== '' && x !== 'unknown' && !(Array.isArray(x) && !x.length); };
+    return has(d.district) && !has(d.location);
+  });
+  function colLabel(key) {
+    var c = COLS.filter(function (x) { return x.key === key; })[0];
+    return c ? (typeof c.label === 'function' ? c.label() : c.label) : key;
+  }
+  // the phone cards hide the header band: one select sorts them (numeric columns in both directions)
+  var MOBILE_SORTS = [['value', -1, 'الأعلى أولًا'], ['value', 1, 'الأدنى أولًا'], ['revenue', -1, 'الأعلى أولًا'], ['revenue', 1, 'الأدنى أولًا'],
+    ['yield', -1, 'الأعلى أولًا'], ['yield', 1, 'الأدنى أولًا'], ['name', 1, 'أ–ي'], ['flags', -1, 'الأكثر ملاحظات أولًا'], ['links', -1, 'الأكثر أولًا'],
+    ['asset_type', 1, 'أ–ي'], ['location', 1, 'أ–ي']];
+  function buildMobileSort() {
+    var sel = $('#mobile-sort');
+    if (!sel) return;
+    clear(sel);
+    MOBILE_SORTS.forEach(function (m, i) { add(sel, h('option', { value: String(i) }, colLabel(m[0]) + ' — ' + m[2])); });
+    sel.addEventListener('change', function () {
+      var m = MOBILE_SORTS[Number(sel.value)];
+      if (!m) return;
+      state.sort.key = m[0];
+      state.sort.dir = m[1];
+      renderTable(state.last);
+    });
+  }
+  function syncMobileSort() {
+    var sel = $('#mobile-sort');
+    if (!sel) return;
+    var i = -1;
+    MOBILE_SORTS.forEach(function (m, k) { if (i < 0 && m[0] === state.sort.key && m[1] === state.sort.dir) i = k; });
+    if (i < 0) MOBILE_SORTS.forEach(function (m, k) { if (i < 0 && m[0] === state.sort.key) i = k; });
+    if (i >= 0) sel.value = String(i);
+  }
   function buildTableHead() {
     var thead = clear($('#asset-table thead'));
     var tr = h('tr');
@@ -2159,6 +2393,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       th.setAttribute('aria-sort', active ? (state.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
       th.querySelector('.arr').textContent = active ? (state.sort.dir > 0 ? '▲' : '▼') : '';
     });
+    syncMobileSort();
   }
   function norm(s) {
     return String(s || '').normalize('NFKC').replace(/[ً-ٰٟـ]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي')
@@ -2207,22 +2442,29 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         'aria-label': str(rec.name) + ' — اضغط Enter لعرض التفاصيل' });
       var typeTag = rec.record_type && rec.record_type !== 'asset' ? ' · ' + ((V.record_type && V.record_type[rec.record_type]) || rec.record_type) : '';
       var managed = isManaged(rec);
-      add(tr, h('td', null, h('span', { class: 'rname' }, str(rec.name || rec.id)), h('span', { class: 'rid' }, idc(rec.id), typeTag),
+      // data-col / data-label: on a phone (≤ 600px) each row is a card of label/value pairs (CSS reads data-label)
+      var td = function (key, attrs) {
+        var a = { 'data-col': key };
+        if (key !== 'name') a['data-label'] = colLabel(key);
+        Object.keys(attrs || {}).forEach(function (k) { a[k] = attrs[k]; });
+        return h.apply(null, ['td', a].concat(Array.prototype.slice.call(arguments, 2)));
+      };
+      add(tr, td('name', null, h('span', { class: 'rname' }, str(rec.name || rec.id)), h('span', { class: 'rid' }, idc(rec.id), typeTag),
         managed ? h('span', { class: 'flag managed', 'data-role': 'managed-tag' }, MANAGED_TAG) : null));
-      add(tr, h('td', null, dimText(rec, 'asset_type')));
-      add(tr, h('td', null, locText(rec)));
-      add(tr, h('td', null, dimText(rec, 'use')));
-      add(tr, h('td', null, dimText(rec, 'income_nature')));
-      add(tr, h('td', { class: 'n' }, vf ? moneyCell(d.v, tvOf(rec, vf)) : h('span', { class: 'na-val' }, 'لا يوجد تقييم')));
-      add(tr, h('td', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf), managed) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
-      add(tr, h('td', { class: 'n', 'data-yield-status': d.yNc ? 'not_comparable' : null }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y))
+      add(tr, td('asset_type', null, dimText(rec, 'asset_type')));
+      add(tr, td('location', null, locText(rec)));
+      add(tr, td('use', null, dimText(rec, 'use')));
+      add(tr, td('income_nature', null, dimText(rec, 'income_nature')));
+      add(tr, td('value', { class: 'n' }, vf ? moneyCell(d.v, tvOf(rec, vf)) : h('span', { class: 'na-val' }, 'لا يوجد تقييم')));
+      add(tr, td('revenue', { class: 'n' }, rf ? moneyCell(d.rv, tvOf(rec, rf), managed) : h('span', { class: 'na-val' }, 'لا يوجد حقل إيراد')));
+      add(tr, td('yield', { class: 'n', 'data-yield-status': d.yNc ? 'not_comparable' : null }, typeof d.y === 'number' ? h('span', { class: 'num' }, fmtPct(d.y))
         : (d.yNc ? h('span', { class: 'muted small', title: d.yNc }, 'غير قابل للمقارنة') : h('span', { class: 'muted small', title: d.yNa || 'يلزم الإيراد والتقييم معًا' }, '—'))));
-      var fl = h('td');
+      var fl = td('flags', { 'data-issues': String(d.issues) });
       d.flags.forEach(function (f) { add(fl, h('span', { class: 'flag' }, f)); });
-      if (d.issues) add(fl, h('span', { class: 'flag' }, nNoun(d.issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات')));
+      if (d.issues) add(fl, h('span', { class: 'flag', 'data-role': 'issue-chip' }, nNoun(d.issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات')));
       if (!d.flags.length && !d.issues) add(fl, h('span', { class: 'flag ok' }, 'مكتملة'));
       add(tr, fl);
-      add(tr, h('td', { class: 'n' }, d.links ? h('span', { class: 'links-n', title: 'عدد الفجوات والتوصيات التي تستشهد بالسجل' }, String(d.links)) : h('span', { class: 'muted' }, '—')));
+      add(tr, td('links', { class: 'n' }, d.links ? h('span', { class: 'links-n', title: 'عدد الفجوات والتوصيات التي تستشهد بالسجل' }, String(d.links)) : h('span', { class: 'muted' }, '—')));
       tr.addEventListener('click', function () { openDetail(rec.id, tr); });
       tr.addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openDetail(rec.id, tr); }
@@ -2232,6 +2474,14 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!rows.length) add(tb, h('tr', null, h('td', { colspan: String(COLS.length), class: 'muted' }, q ? 'لا توجد سجلات تطابق البحث.' : 'لا توجد سجلات ضمن التصفية الحالية.')));
     var cl = $('#count-line');
     cl.textContent = 'يعرض ' + rows.length + ' من ' + ids.length + ' ' + recNoun(ids.length) + ' ضمن التصفية الحالية' + (q ? ' (مع البحث)' : '') + '. اختر صفًا لعرض تفاصيله ودليله.';
+    // a figure quoted from a row keeps the caveat of its flagged card (C1): the table names the flagged metrics once
+    var rvNote = $('#table-review-note');
+    if (rvNote) {
+      var flagged = Object.keys(SPEC_BY_ID).filter(function (id) { return reviewOf({ id: id }); }).map(metricShort);
+      rvNote.hidden = !flagged.length;
+      rvNote.textContent = flagged.length ? REVIEW_AR + ': أرقام الجدول المرتبطة بـ«' + flagged.join('» و«') +
+        '» تخضع للتحقق نفسه المذكور على بطاقاتها في «المؤشرات الرئيسية»، فلا تُقتبس دون ذكر سببه.' : '';
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2314,10 +2564,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(fsec, h('div', { class: 'table-wrap' }, t));
     add(colB, fsec);
 
-    var iss = [];
-    list(rec.issue_ids).forEach(function (i) { if (ISSUE[i] && iss.indexOf(ISSUE[i]) < 0) iss.push(ISSUE[i]); });
-    ISSUES.forEach(function (x) { if (list(x.record_ids).indexOf(rec.id) >= 0 && iss.indexOf(x) < 0) iss.push(x); });
-    var isec = h('div', { class: 'detail-sec' }, h('h4', null, 'ملاحظات البيانات على السجل (' + iss.length + ')'));
+    var iss = recIssues(rec);   // the same list as the table chip (C3)
+    var isec = h('div', { class: 'detail-sec', 'data-role': 'record-issues', 'data-count': String(iss.length) }, h('h4', null, 'ملاحظات البيانات على السجل (' + iss.length + ')'));
     if (!iss.length) add(isec, h('p', { class: 'small muted' }, 'لا توجد ملاحظات مسجلة.'));
     iss.forEach(function (x) {
       add(isec, h('div', { class: 'cite' }, h('b', null, idc(x.id)), ' · الأهمية ', levelF(x.severity), ' — ', humanize(x.detail),
@@ -2546,6 +2794,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         ['القيمة', typeof r.value === 'number' ? [growthRiyalOnly(r) ? growthRiyalNodes(r, { 'data-role': 'calc-value' })
           : h('span', { class: 'num', 'data-role': 'calc-value' }, fmtUnit(r.value, r.unit)), r.note ? ' — ' + str(r.note) : null]
           : naText(r) + (r.status === 'empty' ? ' — ' + emptyReason(r) : (r.reason ? ' — ' + str(r.reason) : ''))],
+        ['يحتاج تحقق', reviewOf(r) ? str(reviewOf(r).reason) : null],
         ['التعريف', str(r.definition)],
         ['طريقة الحساب', formulaWords(spec, r)],
         ['الحقول المستخدمة', fieldsTxt && fieldsTxt.length ? fieldsTxt : '—'],
@@ -2574,7 +2823,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
       }).join(' · ')]);
       if (r.kind === 'diff' && typeof r.a_sum === 'number') pairs.push(['المجموعان', fmtMoney(r.a_sum) + ' − ' + fmtMoney(r.b_sum)]);
       var art = h('article', { class: 'calc', 'data-metric-id': str(spec.id) },
-        h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), resultPill(r)),
+        h('h5', null, str(r.label || spec.id), kindTag(r.kind_tag), reviewOf(r) ? statusPills(r) : resultPill(r)),
         kvList(pairs),
         h('details', { class: 'sub' }, h('summary', null, 'السجلات المشمولة (' + list(r.included_ids).length + ') والمستبعدة (' + exList.length + ')'),
           h('p', { class: 'small lbl' }, 'المشمولة:'), namesList(list(r.included_ids)),
@@ -2646,18 +2895,42 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     setCount('issues', rows.length);
   }
 
+  /** Records outside the indicators. Consecutive rows that share the same reason are grouped under one reason line
+   *  (one long reason repeated on dozens of rows made the table unreadable); every row stays in the table, searchable, and keeps
+   *  its reason in its title. A reason used once stays in its own row. */
+  function groupedReasonTable(out) {
+    var t = h('table', { class: 'data-table', 'data-role': 'exclusions-table' });
+    var cols = ['السجل', 'النوع', 'النطاق', 'السبب', 'المصدر'];
+    add(t, h('thead', null, h('tr', null, cols.map(function (c) { return h('th', { scope: 'col' }, c); }))));
+    var tb = h('tbody');
+    var reasonOf = function (r) { return str(r.scope_reason).replace(/\s+/g, ' ').trim(); };
+    for (var i = 0; i < out.length;) {
+      var why = reasonOf(out[i]);
+      var j = i + 1;
+      while (j < out.length && reasonOf(out[j]) === why) j++;
+      var n = j - i;
+      if (n > 1 && why) add(tb, h('tr', { class: 'grp-row', 'data-role': 'reason-group', 'data-count': String(n) },
+        h('td', { colspan: String(cols.length) }, h('span', { class: 'grp-n' }, 'السبب (' + nRec(n) + '): '), why)));
+      for (var k = i; k < j; k++) {
+        var r = out[k];
+        add(tb, h('tr', { title: why || null },
+          h('td', null, recButton(r.id)),
+          h('td', null, (V.record_type && V.record_type[r.record_type]) || str(r.record_type)),
+          h('td', null, (V.scope && V.scope[r.scope]) || str(r.scope)),
+          n > 1 && why ? h('td', { class: 'same-reason' }, 'السبب أعلاه') : h('td', null, why || '—'),
+          h('td', null, refc((r.source && (r.source.ref_name || r.source.sheet)) || ''))));
+      }
+      i = j;
+    }
+    add(t, tb);
+    return h('div', { class: 'table-wrap' }, t);
+  }
   function renderExclusions() {
     var b = clear(SEC.exclusions.body);
     var out = RECORDS.filter(function (r) { return r.scope !== 'in_scope'; });
     add(b, h('h4', null, 'سجلات خارج نطاق المؤشرات (' + out.length + ')'));
     if (!out.length) add(b, h('p', { class: 'muted' }, 'كل السجلات ضمن نطاق الدراسة.'));
-    else add(b, simpleTable([
-      { label: 'السجل', cell: function (r) { return recButton(r.id); } },
-      { label: 'النوع', cell: function (r) { return (V.record_type && V.record_type[r.record_type]) || str(r.record_type); } },
-      { label: 'النطاق', cell: function (r) { return (V.scope && V.scope[r.scope]) || str(r.scope); } },
-      { label: 'السبب', cell: function (r) { return str(r.scope_reason) || '—'; } },
-      { label: 'المصدر', cell: function (r) { return refc((r.source && (r.source.ref_name || r.source.sheet)) || ''); } }
-    ], out));
+    else add(b, groupedReasonTable(out));
     var ex = list(D.excluded_rows);
     if (ex.length) {
       add(b, h('h4', null, 'صفوف استُبعدت أثناء التطبيع (' + ex.length + ')'));
@@ -2726,7 +2999,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function renderSources() {
     var b = clear(SEC.sources.body);
     add(b, kvList([['الملف', META.file_name ? bdi(META.file_name) : 'غير معروف'], ['بصمة SHA-256 (مختصرة)', META.sha256_short ? h('code', null, str(META.sha256_short)) : '—'],
-      ['تاريخ إعداد الدراسة', META.study_date ? str(META.study_date) + (META.study_date_basis ? ' — ' + str(META.study_date_basis) : '') : 'غير محدد'],
+      ['تاريخ إعداد الدراسة', META.study_date ? str(META.study_date) + (META.study_date_basis ? ' — ' + str(META.study_date_basis) : '')
+        : 'غير مذكور في الملف' + (META.file_modified ? ' — آخر تعديل للملف المصدر (خصائص المصنف): ' + str(META.file_modified) + '، وهو ليس تاريخ إعداد الدراسة' : '')],
       ['تواريخ التقييم', list(META.valuation_dates).map(function (v) { return str(v.year) + (v.basis ? ' — ' + str(v.basis) : ''); }).join('؛ ') || '—']]));
     var s = list(NAR.sources);
     if (s.length) {
@@ -2990,6 +3264,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function renderFooter() {
     var f = clear($('#footer'));
     var when = META.built_at ? str(META.built_at).replace('T', ' ').slice(0, 16) : '';
+    if (META.confidentiality) add(f, h('p', { class: 'conf-line', 'data-role': 'confidentiality-footer' }, str(META.confidentiality)));
     add(f, h('p', null, 'أُعدّت هذه اللوحة آليًا من مجلد التشغيل', when ? [' في ', h('bdi', { dir: 'ltr' }, when)] : null,
       '. البيانات مضمّنة في الملف ولا تتصل اللوحة بأي خادم، ولا تعرض بيانات اتصال أو معرفات شخصية.'));
   }
@@ -3062,6 +3337,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     buildFilterControls();
     buildDimSelector();
     buildTableHead();
+    buildMobileSort();
     buildDetailsShell();
     renderSummary();
     renderPriorities();
@@ -3119,6 +3395,10 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     }
     render();
     window.APA_UI = { getFilters: getFilters, setFilters: setFilters, render: render };
+    // the embedded web font is decoded asynchronously: chart labels measured before it was ready are redrawn once
+    try {
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (state.last) renderCharts(state.last); });
+    } catch (e) { /* older browsers: the charts keep their first measurement */ }
   }
 
   try { init(); } catch (e) {

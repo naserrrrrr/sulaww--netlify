@@ -2,7 +2,7 @@
 """Compare two run folders of the same portfolio (brief §12, data-contract.md §6 `version_comparison`).
 
 Usage:
-  python3 scripts/compare_versions.py --prev RUN_OLD --curr RUN --out RUN/version_comparison.json
+  python3 "$SKILL_DIR/scripts/compare_versions.py" --prev RUN_OLD --curr RUN --out RUN/version_comparison.json
 
 Reads 03_records.json of both runs (required), plus 04_metrics_config.json, 05_metrics.json, 06_narrative.json
 and 02_mapping.json when present. Records are matched by id first, then by deed number (fields.deed_no), then by

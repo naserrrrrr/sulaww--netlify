@@ -67,7 +67,7 @@
 - **`missing`:** الافتراضي لأعمدة `val.*` والمساحات. الصفر فيها «لم يُقيَّم» ولا يُجمع.
 - **الصفر المؤكد:** لا تحوّل صفرًا إلى `zero_confirmed` إلا بدليل صريح في `records.<id>.field_overrides`، مثل ملاحظة «الأصل شاغر للترميم» أو إفادة المستخدم.
 
-**صيغة مدخلاتها فارغة:** صيغة مثل `=C5*12` قيمتها المخزنة 0 وكل الخلايا التي تقرؤها فارغة أو غير متاحة أو خطأ (ولو عبر صيغ وسيطة) يرصدها `inspect_workbook.py` (`formula_blank_inputs`، ويستثني صيغ العدّ COUNT)، ويحوّلها `normalize.py` في الأعمدة الرقمية المربوطة إلى `not_available` مع المشكلة `zero_from_blank_inputs` (متوسطة)، فلا تدخل المجاميع صفرًا ولا تُحسب في «قيمة الاستثماري بإيراد صفري». (`normalize.py` لا يستثني صيغ العدّ، فإن ربطت عمود عدد بصيغة COUNT فراجع حالته.)
+**صيغة مدخلاتها فارغة:** صيغة مثل `=C5*12` قيمتها المخزنة 0 وكل الخلايا التي تقرؤها فارغة أو غير متاحة أو خطأ (ولو عبر صيغ وسيطة) يرصدها `inspect_workbook.py` (`formula_blank_inputs`، ويستثني صيغ العدّ COUNT)، ويحوّلها `normalize.py` في الأعمدة الرقمية المربوطة إلى `not_available` مع المشكلة `zero_from_blank_inputs` (متوسطة)، فلا تدخل المجاميع صفرًا ولا تُحسب في «قيمة الأصول الاستثمارية بإيراد صفري». (`normalize.py` لا يستثني صيغ العدّ، فإن ربطت عمود عدد بصيغة COUNT فراجع حالته.)
 
 **أبعاد التصنيف المقيدة** (`use`، `income_nature`، `ownership`، `waqf`، `managed_for_others`) تقبل رموز `assets/vocab.json` فقط: حوّل النص العربي في الخلايا («استثماري»، «إيجار») إلى رموزه عبر `dim_rules`. والقيمة خارج المفردات تُخزن `unknown` مع المشكلة `dim_out_of_vocabulary` (مانعة للسجلات ضمن النطاق)، والقيمة الحرفية خارجها في الربط توقف التطبيع.
 
@@ -186,7 +186,7 @@
 ## 12. حلقة المراجعة
 
 ```bash
-python3 $SKILL_DIR/scripts/normalize.py --xlsx "$SRC" --mapping "$RUN/02_mapping.json" --out "$RUN/03_records.json"
+python3 "$SKILL_DIR/scripts/normalize.py" --xlsx "$SRC" --mapping "$RUN/02_mapping.json" --out "$RUN/03_records.json"
 ```
 
 1. اقرأ `stats` و`issues` في `03`.

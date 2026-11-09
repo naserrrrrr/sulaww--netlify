@@ -314,6 +314,9 @@
     };
     var t = texts(spec, period);
     TEXT_KEYS.forEach(function (k) { res[k] = t[k]; });
+    // analyst flag «يحتاج تحقق» (IMPLEMENTATION_NOTES review): copied unchanged under every filter and period
+    var rv = own(spec, 'review');
+    if (isObj(rv)) res.review = JSON.parse(JSON.stringify(rv));
     return res;
   }
 

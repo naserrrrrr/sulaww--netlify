@@ -3,11 +3,11 @@
 
 Usage:
     # 1) draft the metric configuration from 03_records.json (Claude reviews/edits it afterwards)
-    python3 scripts/compute_metrics.py --init-config --records RUN/03_records.json --out RUN/04_metrics_config.json
+    python3 "$SKILL_DIR/scripts/compute_metrics.py" --init-config --records RUN/03_records.json --out RUN/04_metrics_config.json
     # 2) compute 05_metrics.json (default filters + parity cases for the dashboard)
-    python3 scripts/compute_metrics.py --records RUN/03_records.json --config RUN/04_metrics_config.json --out RUN/05_metrics.json
+    python3 "$SKILL_DIR/scripts/compute_metrics.py" --records RUN/03_records.json --config RUN/04_metrics_config.json --out RUN/05_metrics.json
     # 3) ad-hoc check of a filtered view (prints an Arabic table; --out optional)
-    python3 scripts/compute_metrics.py --records RUN/03_records.json --config RUN/04_metrics_config.json \
+    python3 "$SKILL_DIR/scripts/compute_metrics.py" --records RUN/03_records.json --config RUN/04_metrics_config.json \
         --filters '{"use":"investment"}' --print
 
 The arithmetic lives in metric_engine.py (Python twin of assets/metric_engine.js).
@@ -28,7 +28,9 @@ from collections import OrderedDict
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from apa_common import CONTRACT_VERSION, KNOWN_STATUSES, SKILL_DIR, load_json, load_vocab, save_json  # noqa: E402
+from apa_common import (  # noqa: E402
+    CONTRACT_VERSION, KNOWN_STATUSES, REVIEW_LABEL_AR, SKILL_DIR, ar_n, load_json, load_vocab, review_errors, save_json,
+)
 import metric_engine as me  # noqa: E402
 from normalize import schema_errors as _schema_errors  # noqa: E402
 
@@ -642,7 +644,7 @@ def metric_texts(mid: str, p: dict, val: dict, meta: dict, src: str) -> dict:
         unavailable_reason="لا توجد مصروفات تشغيل مربوطة بسجلات النطاق لهذه الفترة (إن كانت في ورقة مستقلة فاربطها "
                            "بالسجلات عبر join برابط مؤكد في 02)؛ غياب المصروفات لا يعني أنها صفر")
     T["zero_rev_investment_value"] = dict(
-        label="قيمة الأصول الاستثمارية المسجلة بإيراد صفري", short_label="قيمة الاستثماري بإيراد صفري",
+        label="قيمة الأصول الاستثمارية المسجلة بإيراد صفري", short_label="قيمة الأصول الاستثمارية بإيراد صفري",
         definition=f"مجموع {val.get('label') or 'التقييم'} للأصول الاستثمارية التي إيرادها في {P} صفر مدوّن في الملف (مؤكد بدليل أو غير متحقق من سببه). الصفر لا يثبت الشغور أو تعثر التحصيل، والخانات الفارغة لا تُحسب هنا.",
         scope_text="الأصول الاستثمارية ضمن النطاق ذات إيراد صفري مدوّن، عدا المدار للغير", basis=vbasis,
         valuation_date=vdate, period_text=period_text, source_text=both_src, unavailable_reason=no_both,
@@ -990,6 +992,8 @@ def print_table(res: dict, filters: dict) -> None:
         st_txt = st_ar.get(st) or STATUS_AR_FALLBACK.get(st, str(st))
         if st == "empty" and r.get("empty_cause") == "scope":
             st_txt = "لا توجد سجلات مؤهلة في الملف"  # the vocab text speaks of a filter (C3)
+        if isinstance(r.get("review"), dict):
+            st_txt = f"{REVIEW_LABEL_AR} ({st_txt})"
         rows.append((f"{r.get('short_label') or r.get('label')} [{mid}]", fmt_value(r.get("value"), r.get("unit")),
                      st_txt, f"{r.get('n_included')}/{r.get('n_scope')}"))
     widths = [max(len(str(row[i])) for row in rows) for i in range(4)]
@@ -998,6 +1002,8 @@ def print_table(res: dict, filters: dict) -> None:
         if i == 0:
             print("-+-".join("-" * w for w in widths))
     for mid, r in res["metrics"].items():
+        if isinstance(r.get("review"), dict):
+            print(f"  • {mid}: {REVIEW_LABEL_AR} — {r['review'].get('reason')}")
         if r.get("reason") and r.get("status") in ("not_computable", "not_comparable", "empty"):
             print(f"  • {mid}: {r['reason']}")
         elif r.get("note"):
@@ -1074,10 +1080,14 @@ def main(argv=None) -> int:
     verrs = (schema_errors(config, args.schema) + semantic_errors(config, rec_doc.get("records") or [])
              + comparability_errors(config, rec_doc.get("field_meta") or {}))
     if verrs:
-        eprint(f"ملف الإعداد غير مطابق ({len(verrs)} خطأ):")
+        eprint(f"ملف الإعداد غير مطابق ({ar_n(len(verrs), 'error')}):")
         for e in verrs:
             eprint(e)
         return 2
+    for m in config.get("metrics") or []:
+        if m.get("review") is not None:   # C1: the validator blocks a malformed flag (metric_review)
+            for e in review_errors(m["review"]):
+                eprint(f"تنبيه: metrics/{m.get('id')}/review: {e} — يرفضه التحقق (metric_review) حتى يُصحَّح")
     used = numeric_fields_used(config)
     ferrs = me.check_records(rec_doc.get("records") or [], used)
     if ferrs:
@@ -1092,7 +1102,7 @@ def main(argv=None) -> int:
         save_json(args.out, out)
         n_part = sum(1 for r in out["metrics"].values() if r["status"] == "partial")
         n_nc = sum(1 for r in out["metrics"].values() if r["status"] in ("not_computable", "not_comparable"))
-        print(f"تم: {len(out['metrics'])} مؤشر → {args.out} (جزئي {n_part}، غير قابل للاحتساب/المقارنة {n_nc}، "
+        print(f"تم: {ar_n(len(out['metrics']), 'indicator')} → {args.out} (جزئي {n_part}، غير قابل للاحتساب/المقارنة {n_nc}، "
               f"حالات تطابق {len(out['parity_cases'])})")
 
     if args.do_print:

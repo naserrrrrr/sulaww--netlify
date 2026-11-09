@@ -156,12 +156,12 @@ def test_export_growth_check():
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "ملخص"
-        ws["A1"], ws["B1"], ws["C1"] = "تغير الإيراد", 25.0, "النسبة 25.0% للمراجعة فقط"
+        ws["A1"], ws["B1"], ws["C1"] = "تغير الإيراد", 25.0, "النسبة المحسوبة 25.0% للمراجعة فقط، لا تُقرأ نموًا"
         ws["D1"], ws["E1"] = "حصة أكبر سطر 25.0% من المجموع", "تغير الإيراد 25.0% عن العام السابق"
         wb.save(path)
         out = va.c_export_growth_pct(va.Ctx(d))
-        check("a % value cell and a «x.x%» growth text are reported; the review note and an unrelated share are not",
-              len(out) == 1 and "ملخص!B1" in out[0][1] and "ملخص!E1" in out[0][1] and "C1" not in out[0][1]
+        check("a % value cell, a «x.x%» growth text and a «للمراجعة فقط» note are reported; an unrelated share is not",
+              len(out) == 1 and "ملخص!B1" in out[0][1] and "ملخص!E1" in out[0][1] and "ملخص!C1" in out[0][1]
               and "D1" not in out[0][1], out)
         wb = openpyxl.Workbook()
         wb.active["A1"], wb.active["B1"] = "تغير الإيراد", 2000

@@ -10,6 +10,7 @@ Pure stdlib; no I/O. Imported by compute_metrics.py and tests/test_metric_engine
 """
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -37,6 +38,7 @@ IMPLEMENTATION_NOTES = [
     "Dashboard filters: every key except 'period' whose value is not null/'' adds {eq:[dim,value]}, or {has:[dim,value]} when any record holds a list for that dim.",
     "Optional spec key text_by_period[period] overrides label/short_label/definition/scope_text/basis/period_text/valuation_date/source_text/unavailable_reason/empty_text for that period.",
     "growth spec keys prev/curr default to '{REV_PREV}'/'{REV}'.",
+    "review: a spec object review = {status: 'needs_verification', reason} is copied unchanged into every result of that metric (any period, any filter, any status); absent otherwise.",
 ]
 
 TEXT_KEYS = ("label", "short_label", "definition", "scope_text", "basis", "valuation_date",
@@ -522,6 +524,9 @@ def _base_result(spec: dict, period: Optional[str]) -> dict:
         "card_group": spec.get("card_group"), "kind_tag": spec.get("kind_tag"),
     }
     res.update(_texts(spec, period))
+    if isinstance(spec.get("review"), dict):
+        # analyst flag «يحتاج تحقق» (data-contract.md §5): copied unchanged under every filter and period
+        res["review"] = copy.deepcopy(spec["review"])
     return res
 
 

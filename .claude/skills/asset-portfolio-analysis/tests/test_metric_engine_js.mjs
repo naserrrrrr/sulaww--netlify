@@ -597,6 +597,22 @@ function test_text_by_period() {
   assert.equal(r.definition, null);             // missing text keys are null, not undefined
 }
 
+function test_review_passthrough() {
+  // C1: the analyst's review flag is copied unchanged under every period and filter, whatever the status
+  const eng = engine();
+  const review = { status: 'needs_verification', reason: 'رقم بديل في بيان آخر من الملف لم يُحسم بعد' };
+  const spec = { id: 'pr', kind: 'sum', field: '{REV}', unit: 'SAR', label: 'إيراد', review };
+  for (const f of [{ period: '2025' }, { period: '2024' }, { location: 'nowhere' }, {}]) {
+    const r = eng.compute(spec, f);
+    assert.deepEqual(r.review, review, JSON.stringify(f));
+    assert.notEqual(r.review, review);          // a copy, not the spec object
+  }
+  const vp = eng.compute(Object.assign({}, spec, { valid_periods: ['2025'] }), { period: '2024' });
+  assert.equal(vp.status, 'not_comparable');
+  assert.deepEqual(vp.review, review);
+  assert.equal('review' in eng.compute({ id: 'p2', kind: 'sum', field: '{REV}', unit: 'SAR' }, { period: '2025' }), false);
+}
+
 function test_standard_metric_set() {
   // The standard metric ids/kinds of compute_metrics.py --init-config, on the fixture.
   const W_ASSET = ASSET, W_NOT_MANAGED = NOT_MFO, W_RENT = { eq: ['income_nature', 'rent'] };
@@ -736,12 +752,14 @@ function cross_config() {
       { id: 'cnt', kind: 'count', where: ASSET, card: true, card_group: 'counts', card_order: 1 },
       { id: 'cnt_op', kind: 'count', where: { eq: ['record_type', 'operating_activity'] } },
       { id: 'val', kind: 'sum', field: '{VAL}', where: { all: [ASSET, NOT_MFO] }, unit: 'SAR' },
-      { id: 'rev', kind: 'sum', field: '{REV}', where: { all: [W_RENT, NOT_MFO] }, unit: 'SAR', text_by_period: { 2024: { label: 'L24' } } },
+      { id: 'rev', kind: 'sum', field: '{REV}', where: { all: [W_RENT, NOT_MFO] }, unit: 'SAR', text_by_period: { 2024: { label: 'L24' } },
+        review: { status: 'needs_verification', reason: 'رقم بديل في بيان آخر من الملف لم يُحسم بعد' } },
       { id: 'yield', kind: 'ratio', num: '{REV}', den: '{VAL}', scale: 100, where: { all: [ASSET, NOT_MFO] } },
       { id: 'yield_pos', kind: 'ratio', num: '{REV}', den: '{VAL}', scale: 100, where: { all: [ASSET, { gt: ['{REV}', 0] }] } },
       { id: 'noi', kind: 'diff', a: '{REV}', b: '{EXP}', where: { all: [W_RENT, NOT_MFO] }, unavailable_reason: 'no exp' },
       { id: 'zero_val', kind: 'sum', field: '{VAL}', where: { all: [ASSET, { status: ['{REV}', ['zero_recorded', 'zero_confirmed']] }] } },
-      { id: 'cov', kind: 'coverage', fields: ['{REV}', '{VAL}', '{EXP}'], where: ASSET },
+      { id: 'cov', kind: 'coverage', fields: ['{REV}', '{VAL}', '{EXP}'], where: ASSET,
+        review: { status: 'needs_verification', reason: 'التغطية تخص جزءًا من المحفظة وإن بدت مكتملة' } },
       { id: 'growth', kind: 'growth', where: { all: [W_RENT, NOT_MFO] } },
       { id: 'conc_val', kind: 'concentration', field: '{VAL}', top: 3, where: ASSET },
       { id: 'conc_rev', kind: 'concentration', field: '{REV}', top: 2 },
@@ -833,7 +851,7 @@ const TESTS = {
   test_ratio_zero_included_and_exclusion_reasons, test_diff_and_missing_expense, test_growth,
   test_concentration_tiebreak_and_hhi, test_coverage, test_trend_same_records, test_valid_periods,
   test_empty_cause_and_empty_as_zero, test_unresolved_placeholder, test_breakdown_list_dim_and_none,
-  test_trend, test_filters_and_compute_all, test_text_by_period, test_standard_metric_set,
+  test_trend, test_filters_and_compute_all, test_text_by_period, test_review_passthrough, test_standard_metric_set,
   test_determinism_independent_of_input_order, test_does_not_mutate_input, test_loading_modes,
   test_cross_check_with_python_engine
 };

@@ -41,7 +41,7 @@
 - **فحوص المراجع في `validate_analysis.py`:**
   - مراجع الفجوات يجب أن تُحال إلى شيء موجود (`gap_evidence`، فحص مانع).
   - مراجع التقييم والقوة والتوصيات يُنبَّه عليها (`evidence_refs_other`).
-- **الأرقام:** كل رقم في السرد رمز `{{m:metric_id}}` أو `{{m:metric_id.field}}` أو `{{m:metric_id.field.sub}}`، أو `{{f:key}}` لحقائق الملف خارج المؤشرات (عدد المعزول، والأوراق المخفية، وقيم شذوذ `WB-…`، وقيم صفوف الإجمالي المستبعدة؛ اعرض مفاتيحها بـ`python3 $SKILL_DIR/scripts/facts.py --run-dir "$RUN"`). والرمز المجهول مانع (`metric_tokens`، `fact_tokens`). الأرقام المكتوبة يدويًا، ومنها النسب والمبالغ بـ«ألف/مليون»، يُنبَّه عليها (`hand_typed_numbers`)، ومطابقتها لمؤشر تعني وجوب استبدالها بالرمز (`numbers_as_tokens`).
+- **الأرقام:** كل رقم في السرد رمز `{{m:metric_id}}` أو `{{m:metric_id.field}}` أو `{{m:metric_id.field.sub}}`، أو `{{f:key}}` لحقائق الملف خارج المؤشرات (عدد المعزول، والأوراق المخفية، وقيم شذوذ `WB-…`، وقيم صفوف الإجمالي المستبعدة، و`{{f:rec.<record_id>.<field_id>}}` لقيمة حقل أي سجل في 03 كالرقم البديل الذي يعارض به بيانٌ آخر رقمَ المؤشر؛ اعرض مفاتيحها بـ`python3 "$SKILL_DIR/scripts/facts.py" --run-dir "$RUN"`). والرقم المتنازع عليه يُذكر بالرقمين معًا برمزيهما لا بوصف تقريبي، ومؤشره يحمل علامة «يحتاج تحقق» (`metrics.md` §1). والرمز المجهول مانع (`metric_tokens`، `fact_tokens`). الأرقام المكتوبة يدويًا، ومنها النسب والمبالغ بـ«ألف/مليون»، يُنبَّه عليها (`hand_typed_numbers`)، ومطابقتها لمؤشر تعني وجوب استبدالها بالرمز (`numbers_as_tokens`).
 - **النسبة الجزئية** في السرد تُسمّى «عائد الجزء القابل للاحتساب» في الجملة نفسها مع عدد المشمول (`partial_unnamed`، تحذير)، و**النمو غير المؤكد التماثل** لا يُقدَّم حكمًا بالنمو (`growth_token_caveat`، تحذير).
 - **المصادر:** كل مصدر في `sources[]` بنوعه (`file`، `web`، `user`)، وتاريخه وحدوده.
 
@@ -51,8 +51,8 @@
 
 ```bash
 # المحفظة (الافتراضي) ثم كل مجموعة متجانسة
-python3 $SKILL_DIR/scripts/compute_metrics.py --records "$RUN/03_records.json" --config "$RUN/04_metrics_config.json" --filters '{"use":"investment"}' --print
-python3 $SKILL_DIR/scripts/compute_metrics.py --records "$RUN/03_records.json" --config "$RUN/04_metrics_config.json" --filters '{"location":"<قيمة>"}' --print
+python3 "$SKILL_DIR/scripts/compute_metrics.py" --records "$RUN/03_records.json" --config "$RUN/04_metrics_config.json" --filters '{"use":"investment"}' --print
+python3 "$SKILL_DIR/scripts/compute_metrics.py" --records "$RUN/03_records.json" --config "$RUN/04_metrics_config.json" --filters '{"location":"<قيمة>"}' --print
 ```
 
 - **المجموعات المتجانسة:** حسب الاستخدام، وطبيعة الدخل، ونوع الأصل، والموقع. أي بعد في `filters`، أو توزيع في `breakdowns` من `05`.

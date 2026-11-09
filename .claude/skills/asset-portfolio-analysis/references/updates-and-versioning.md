@@ -24,7 +24,7 @@
 ## 3. المقارنة بمعرّفات الأصول [§12.2]
 
 ```bash
-python3 $SKILL_DIR/scripts/compare_versions.py --prev "<RUN_OLD>" --curr "$RUN" --out "$RUN/version_comparison.json"
+python3 "$SKILL_DIR/scripts/compare_versions.py" --prev "<RUN_OLD>" --curr "$RUN" --out "$RUN/version_comparison.json"
 ```
 
 **المطابقة:** تجري بالمعرّف أولًا، ثم برقم الصك (`fields.deed_no`)، ثم بالاسم المطبّع مع الحي. والمطابقة الأخيرة «محتملة» تحتاج تأكيدك قبل البناء عليها. وقواعدها:

@@ -142,6 +142,148 @@ def word_count_ar(text: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Metric review flag (04 metrics[].review -> 05 metrics[id].review; data-contract.md §5)
+# ---------------------------------------------------------------------------
+REVIEW_STATUSES = ("needs_verification",)
+REVIEW_LABEL_AR = "يحتاج تحقق"
+REVIEW_MIN_WORDS, REVIEW_MAX_WORDS = 6, 25
+_ANY_DIGIT_RE = re.compile(r"[0-9٠-٩۰-۹]")
+
+
+def review_errors(review: Any) -> list:
+    """Arabic reasons why a metric `review` object is malformed ([] when valid): an unknown status, a reason outside
+    6–25 words, or a digit in the reason (the reason is a sentence for the board; numbers come from tokens)."""
+    if not isinstance(review, dict):
+        return ["review يجب أن يكون كائنًا {\"status\": \"needs_verification\", \"reason\": \"…\"}"]
+    errs = []
+    extra = sorted(k for k in review if k not in ("status", "reason"))
+    if extra:
+        errs.append("مفاتيح غير معروفة في review: " + "، ".join(map(str, extra)))
+    if review.get("status") not in REVIEW_STATUSES:
+        errs.append(f"حالة review «{review.get('status')}» غير معروفة؛ المسموح: needs_verification")
+    reason = review.get("reason")
+    if not isinstance(reason, str) or not clean_text(reason):
+        errs.append("review بلا سبب (reason)")
+    else:
+        n = word_count_ar(reason)
+        if not REVIEW_MIN_WORDS <= n <= REVIEW_MAX_WORDS:
+            errs.append(f"سبب review من {ar_n(n, 'word', case='gen')}؛ المطلوب جملة من {REVIEW_MIN_WORDS} إلى {REVIEW_MAX_WORDS} كلمة")
+        if _ANY_DIGIT_RE.search(reason):
+            errs.append("سبب review يحتوي أرقامًا؛ اكتبه جملة بلا أرقام (الأرقام برموز السرد وفي الأدلة)")
+    return errs
+
+
+# ---------------------------------------------------------------------------
+# Arabic number–noun agreement (every generated text that renders a count)
+# ---------------------------------------------------------------------------
+def _acc_word(w: str) -> str:
+    """Indefinite accusative of one word: «صف» → «صفًا»، «قيمة» → «قيمة»، «خطأ» → «خطأً»، «مبنى» → «مبنًى»."""
+    if not w or not re.search(r"[ء-ي]$", w) or w.endswith(("ًا", "ً", "ًى")):
+        return w
+    if w.endswith("ة"):
+        return w
+    if w.endswith("ى"):
+        return w[:-1] + "ًى"
+    if w.endswith(("اء", "أ")):
+        return w + "ً"
+    return w + "ًا"
+
+
+def _oblique_dual(phrase: str) -> str:
+    """Accusative/genitive dual: «صفان هجريان» → «صفين هجريين»، «قيمتان» → «قيمتين»."""
+    return " ".join(w[:-2] + "أين" if w.endswith("آن") else w[:-2] + "ين" if w.endswith("ان") else w
+                    for w in phrase.split(" "))
+
+
+def ar_count(n, singular: str, dual: str, plural: str, gender: str = "m", *, acc: str = None,
+             case: str = "nom", zero: str = None, one: str = None) -> str:
+    """An Arabic count phrase with number–noun agreement.
+
+    singular/dual/plural are the noun (or noun + adjective) forms, e.g. («تاريخ هجري», «تاريخان هجريان»,
+    «تواريخ هجرية»); gender "m"/"f" chooses «واحد»/«واحدة». `acc` is the indefinite accusative singular used for
+    11–99 (default: «ًا» added to every word that takes it, so pass it for an idafa such as «صفَّ بيانات»).
+    `case` = "acc" or "gen" when the phrase is the object of a verb or follows a preposition: it only changes the
+    forms for 1 («صفًا واحدًا») and 2 («صفين»); the counted forms of 3+ do not change. `one` replaces the whole
+    phrase for 1 (e.g. «اسم واحد متطابق» rather than «اسم متطابق واحد»).
+
+        0                  → «لا <plural>» (or `zero`)        «لا نصوص»
+        1                  → «<singular> واحد/واحدة»           «اسم واحد»، «قيمة واحدة»
+        2                  → the dual                          «قيمتان» («قيمتين» with case acc/gen)
+        n % 100 in 3–10    → «n <plural>»                      «7 قيم»، «105 صفوف»
+        n % 100 in 11–99   → «n <accusative singular>»         «15 صفًا»، «12 قيمة»
+        n ≥ 100, n % 100 in 0–2 → «n <genitive singular>»      «100 صف»، «2,001 سجل»
+    Numbers of 1,000 and more are written with thousands separators.
+    """
+    if isinstance(n, float) and n.is_integer():
+        n = int(n)
+    if not isinstance(n, int) or isinstance(n, bool):
+        return f"{n} {plural}"
+    one_word = "واحدة" if gender == "f" else "واحد"
+    num = f"{n:,}"
+    if n == 0:
+        return zero if zero is not None else f"لا {plural}"
+    if n == 1:
+        if one is not None:
+            return one
+        if case == "acc":
+            return f"{acc if acc is not None else ' '.join(_acc_word(w) for w in singular.split(' '))} {_acc_word(one_word)}"
+        return f"{singular} {one_word}"
+    if n == 2:
+        return _oblique_dual(dual) if case in ("acc", "gen") else dual
+    r = abs(n) % 100
+    if 3 <= r <= 10:
+        return f"{num} {plural}"
+    if r >= 11:
+        return f"{num} {acc if acc is not None else ' '.join(_acc_word(w) for w in singular.split(' '))}"
+    return f"{num} {singular}"
+
+
+# Common counted nouns of the generated texts: key -> (singular, dual, plural, gender[, accusative])
+AR_NOUNS = {
+    "row": ("صف", "صفان", "صفوف", "m"),
+    "record": ("سجل", "سجلان", "سجلات", "m"),
+    "value": ("قيمة", "قيمتان", "قيم", "f"),
+    "cell": ("خلية", "خليتان", "خلايا", "f"),
+    "formula": ("صيغة", "صيغتان", "صيغ", "f"),
+    "sheet": ("ورقة", "ورقتان", "أوراق", "f"),
+    "column": ("عمود", "عمودان", "أعمدة", "m"),
+    "number": ("رقم", "رقمان", "أرقام", "m"),
+    "text": ("نص", "نصان", "نصوص", "m"),
+    "name": ("اسم", "اسمان", "أسماء", "m"),
+    "date": ("تاريخ", "تاريخان", "تواريخ", "m"),
+    "error": ("خطأ", "خطآن", "أخطاء", "m"),
+    "issue": ("مشكلة", "مشكلتان", "مشكلات", "f"),
+    "note": ("ملاحظة", "ملاحظتان", "ملاحظات", "f"),
+    "field": ("حقل", "حقلان", "حقول", "m"),
+    "line": ("سطر", "سطران", "أسطر", "m"),
+    "warning": ("تنبيه", "تنبيهان", "تنبيهات", "m"),
+    "word": ("كلمة", "كلمتان", "كلمات", "f"),
+    "indicator": ("مؤشر", "مؤشران", "مؤشرات", "m"),
+    "item": ("عنصر", "عنصران", "عناصر", "m"),
+}
+
+
+def ar_agree(n, one: str, two: str, few: str, many: str = None) -> str:
+    """The verb or adjective form that agrees with a count phrase of ar_count: 1 → one, 2 → two, n % 100 in 3–10 →
+    few, otherwise many (default: one). ar_agree(3, "يقع", "يقعان", "تقع", "تقع") → «تقع»."""
+    if n == 1:
+        return one
+    if n == 2:
+        return two
+    if isinstance(n, int) and 3 <= abs(n) % 100 <= 10:
+        return few
+    return one if many is None else many
+
+
+def ar_n(n, key: str, **kw) -> str:
+    """ar_count with a noun of AR_NOUNS: ar_n(7, "value") → «7 قيم»، ar_n(1, "row") → «صف واحد»."""
+    forms = AR_NOUNS[key]
+    if len(forms) > 4 and "acc" not in kw:
+        kw["acc"] = forms[4]
+    return ar_count(n, forms[0], forms[1], forms[2], forms[3], **kw)
+
+
+# ---------------------------------------------------------------------------
 # Number parsing
 # ---------------------------------------------------------------------------
 AMOUNT_KINDS = ("money", "area", "count")   # a '%' or a «12.500» here is never read as a plain decimal
@@ -457,6 +599,45 @@ def ref(sheet: str, coord: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Study date (shared by build_dashboard.py meta and export_workbook.py «ملخص»)
+# ---------------------------------------------------------------------------
+# a date taken from the workbook's file properties (last modified), not stated in a cell or a title of the file
+_FILE_PROPS_RE = re.compile(r"propert|modified|خصائص|آخر تعديل", re.IGNORECASE)
+
+
+def study_date_meta(mapping: dict, wb: dict) -> dict:
+    """«تاريخ إعداد الدراسة» (brief §2): a date the file states (cell, title) is the study date; the workbook's
+    last-modified timestamp never is. Then study_date is None and file_modified keeps that date as context."""
+    sd = (mapping or {}).get("study_date")
+    if isinstance(sd, dict):
+        value, basis, evidence = sd.get("value"), sd.get("basis"), sd.get("evidence")
+    else:
+        value, basis, evidence = sd, None, None
+    props = (((wb or {}).get("file") or {}).get("properties") or {})
+    modified_day = str(props.get("modified"))[:10] if props.get("modified") else None
+    v = str(value).strip() if value not in (None, "") else None
+    ev, bs = str(evidence or ""), str(basis or "")
+    cell_ref = "!" in ev   # a stated date names its cell («Sheet!A1»)
+    from_props = bool(v) and not cell_ref and (
+        bool(_FILE_PROPS_RE.search(ev)) or bool(_FILE_PROPS_RE.search(bs)) or (modified_day is not None and v[:10] == modified_day))
+    if not v or from_props:
+        return {"study_date": None, "study_date_stated": False, "study_date_basis": basis or None,
+                "file_modified": modified_day or (v[:10] if v and re.match(r"\d{4}-\d{2}-\d{2}", v) else None)}
+    return {"study_date": v, "study_date_stated": True, "study_date_basis": basis or None, "file_modified": modified_day}
+
+
+def study_date_text(meta: dict) -> str:
+    """Board text of «تاريخ إعداد الدراسة» from study_date_meta(): the stated date (with its basis), else «غير مذكور
+    في الملف» with the source file's last-modified date as context — never that timestamp as the study date."""
+    meta = meta or {}
+    if meta.get("study_date"):
+        basis = meta.get("study_date_basis")
+        return str(meta["study_date"]) + (f" ({basis})" if basis else "")
+    fm = meta.get("file_modified")
+    return "غير مذكور في الملف" + (f" — آخر تعديل للملف المصدر: {fm}" if fm else "")
+
+
+# ---------------------------------------------------------------------------
 # Total / subtotal row labels (shared by inspect_workbook.py and normalize.py)
 # ---------------------------------------------------------------------------
 # Applied to normalize_arabic(text).strip(): hamza/taa-marbuta are already folded (إجمالي → اجمالي, جملة → جمله).
@@ -525,7 +706,7 @@ ISSUE_TYPE_AR = {
     "date_unparsed": "تاريخ تعذر تحويله",
     "formula_no_cache": "صيغ بلا قيم مخزنة",
     "pii_redacted": "بيانات شخصية حُجبت",
-    "blank_rows_skipped": "صفوف فارغة تُخطّيت",
+    "blank_rows_skipped": "صفوف فارغة تم تخطيها",
     "derived_field": "حقل مشتق صراحةً",
     "dim_out_of_vocabulary": "تصنيف خارج القائمة المرجعية",
     "duplicate_id": "معرّف مكرر",
@@ -546,8 +727,8 @@ ISSUE_TYPE_AR = {
     "rollup_conflict": "تعارض في تجميع الوحدات",
     "rollup_incomplete": "تجميع وحدات غير مكتمل",
     "rollup_unknown_record": "تجميع لسجل غير موجود",
-    "row_skipped_with_content": "صف تُخطّي وفيه بيانات",
-    "section_label_skipped": "صف عنوان قسم تُخطّي",
+    "row_skipped_with_content": "صف تم تخطيه وفيه بيانات",
+    "section_label_skipped": "صف عنوان قسم تم تخطيه",
     "shared_deed": "رقم صك مشترك بين أكثر من سجل",
     "sheet_scope_mismatch": "نطاق الورقة لا يطابق قرارها",
     "total_like_row": "صف يشبه الإجمالي",

@@ -17,14 +17,15 @@ color: green
    - إن تعددت الملفات المحتملة فاختر أحدثها واذكر البدائل.
    - إن لم تجد ملفًا فأعد ذلك فورًا دون تحليل.
 3. **لا تنشر شيئًا ولا ترسله لأي جهة**، ولا تعدّل الملف الأصلي. كل المخرجات تُكتب في مجلد التشغيل `outputs/portfolio-analysis/...` فقط. لا تُدرج بيانات الملف في استعلامات البحث على الويب.
-4. **لا تدّعِ اجتياز فحص لم يُشغَّل.** شغّل `validate_analysis.py` و`check_dashboard.mjs`، وانظر بنفسك إلى لقطات `screens/` (مقاطع سطح المكتب `desktop_01.png`…، و`details_open.png`، ولقطات الجوال، و`print.pdf`) قبل التسليم. وبعد `export_workbook.py` وكتابة `09_message.md` أعد `validate_analysis.py` ليفحص المرفق والرسالة.
+4. **لا تدّعِ اجتياز فحص لم يُشغَّل.** شغّل `python3 "$SKILL_DIR/scripts/validate_analysis.py"` و`node "$SKILL_DIR/scripts/check_dashboard.mjs"` كما في الخطوة 10 من المهارة، وانظر بنفسك بأداة Read إلى لقطات `screens/` قبل التسليم: مقاطع سطح المكتب `desktop_01.png`…، ومقاطع التفاصيل المفتوحة `details_open_01.png`… (لا `details_open.png` الكاملة، فهي أطول من أن تُقرأ)، و`mobile.png` و`mobile_360.png` و`mobile_detail.png` و`mobile_table.png`، وكل صفحة من `print.pdf`. وبعد `export_workbook.py` وكتابة `09_message.md` أعد `validate_analysis.py` ليفحص المرفق والرسالة.
 5. **لا تُقرّ بتحذير لتتجاوزه.** `acknowledged_warnings` لتحذير مفهوم سببه وباقٍ عن قصد، بسبب من ثماني كلمات على الأقل؛ والخطأ المانع لا يُقرّ به، ولا تبني بـ`--draft` للتسليم.
+6. **ضع `"$SKILL_DIR"` بين علامتي تنصيص في كل أمر،** مثل `python3 "$SKILL_DIR/scripts/inspect_workbook.py" "$SRC" --out "$RUN"`، لأن مسار التثبيت قد يحوي مسافة (مثل مجلد المستخدم على macOS أو Windows).
 
 ## تقريرك النهائي (هو ما يراه الطرف المستدعي، فاجعله قابلًا للتمرير كما هو)
 
 ```
-## الخلاصة
-<محتوى 09_message.md كما في قالب المهارة>
+## رسالة التسليم
+<محتوى 09_message.md كما هو، بقالب «رسالة التسليم» في المهارة: يبدأ بـ«الخلاصة»>
 
 ## المخرجات
 - الداشبورد: <المسار المطلق>/dashboard.html

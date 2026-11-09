@@ -18,9 +18,9 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
 | `07_validation.json` / `.md` | `validate_analysis.py` | Blocking errors + warnings (+ acknowledged warnings, totals reconciliation). Build refuses when blocking errors exist. Re-run after `export_workbook.py` and after writing `09_message.md` (or pass `--xlsx-out`) so the supporting workbook and the message are checked before delivery |
 | `analysis.json` | `build_dashboard.py` | Single bundle embedded in the dashboard (no PII) |
 | `dashboard.html` | `build_dashboard.py` | Self-contained, offline, RTL dashboard |
-| `08_dashboard_check.json` + `screens/` | `check_dashboard.mjs` | Browser test results (parity, filters, mobile, print, PII) and `warnings`; `screens/desktop.png` (full page), `desktop_01.png…` (1440×900 viewport crops), `details_open.png` (every details section open), `mobile.png`, `mobile_full.png`, `mobile_360.png`, `mobile_detail.png`, `print.pdf` |
+| `08_dashboard_check.json` + `screens/` | `check_dashboard.mjs` | Browser test results (parity, filters, mobile, print, PII) and `warnings`; `screens/desktop.png` (full page), `desktop_01.png…` (1440×900 viewport crops), `details_open.png` (every details section open), `mobile.png`, `mobile_full.png`, `mobile_360.png`, `mobile_detail.png`, `mobile_table.png` (≤ 600 px asset cards), `print.pdf` |
 | `version_comparison.json` | `compare_versions.py` | Only when a previous run really exists (§6 `version_comparison`) |
-| `supporting_workbook.xlsx` | `export_workbook.py` | Reviewable Excel (RTL, filters, gray = not available with the original text of a non-numeric cell, red = proven problem only). Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «المطابقة مع الإجماليات» (when 03 keeps total-row values)، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «متابعة التوصيات» (when 06 has `recommendation_followup`; status dropdown «لم يبدأ/قيد التنفيذ/منجز/متعثر», «منجز» without evidence flagged)، «مقارنة الإصدارات» (when 06 has `version_comparison`; detail from `version_comparison.json` if 06 holds a summary)، «الافتراضات والمصادر». Board wording: field and metric keys, issue types, gap scopes («portfolio»), evidence tokens («m:…») and check ids are shown by their Arabic labels; the keys appear only in code-styled «المرجع التقني» columns or rows (above the «الأصول» headers). «ملخص» lists the top gaps and the top actions as two separate tables (an action names the gaps it addresses), and «المطابقة مع الإجماليات» lists for each total the records of the sum it was compared with (a section total: its own section). Personal-data fields are dropped and block-level values masked; exit 2 and the file is deleted if the post-save scan still finds contact/IBAN data. `--out` sets another path; `--self-test` runs built-in cases |
+| `supporting_workbook.xlsx` | `export_workbook.py` | Reviewable Excel (RTL, filters, gray = not available with the original text of a non-numeric cell, red = proven problem only). Sheets: «ملخص»، «الأصول»، «الحسابات»، «المستبعدات»، «المطابقة مع الإجماليات» (when 03 keeps total-row values)، «مشكلات البيانات»، «الفجوات والتوصيات»، «الخطة التشغيلية»، «متابعة التوصيات» (when 06 has `recommendation_followup`; status dropdown «لم يبدأ/قيد التنفيذ/منجز/متعثر», «منجز» without evidence flagged)، «مقارنة الإصدارات» (when 06 has `version_comparison`; detail from `version_comparison.json` if 06 holds a summary)، «الافتراضات والمصادر»، «قوائم الاختيار» (the lists behind the plan's dropdowns). «الحسابات» recomputes every sum/ratio/diff/growth metric with live formulas over its included records (a literal 0 with the row «لا سجلات مشمولة…» when nothing is included), beside a row «القيمة المعروضة في الداشبورد» (numbers) and a row «التحقق» (=IF(…,"مطابق","فرق") per field and result); each «ملخص» KPI value is a live link to its recomputed cell when the two agree; every formula also stores its computed value, so a preview that does not recalculate shows numbers. A metric whose spec carries `review` reads «يحتاج تحقق — <reason>» as its status in «ملخص» and «الحسابات»; an unverified growth shows its change in riyals only (no % in any cell). «المطابقة مع الإجماليات» has «الفرق عن مجموع النطاق» (=D−E, live), «مجموع المقارنة» (the sum the total matched, or the comparison base on a mismatch), «أساس مجموع المقارنة» and «الفرق عن مجموع المقارنة» (=D−I, live), with a status text consistent with both differences. «الخطة التشغيلية» adds «المدة», «مؤشر النجاح» and «الاعتماد المطلوب», with list validation on «المرحلة» (strict), «المسؤول» (free text accepted) and «الحالة», and date validation on «تاريخ المتابعة»; the recommendations table has a «الحالة» dropdown. «الأصول» carries «عدد ملاحظات البيانات» and «ملاحظات البيانات» from the same list as the dashboard (03 issues on or naming the record, 06 `data_issues_extra`, 01 anomalies with its `record_ids`); recommendations appear in ascending priority with «الأولوية n» everywhere. Board wording: field and metric keys, issue types, gap scopes («portfolio»), evidence tokens («m:…») and check ids are shown by their Arabic labels; the keys appear only in code-styled «المرجع التقني» columns or rows (above the «الأصول» headers). «ملخص» lists the top gaps and the top actions as two separate tables (an action names the gaps it addresses), and «المطابقة مع الإجماليات» lists for each total the records of the sum it was compared with (a section total: its own section). Personal-data fields are dropped and block-level values masked; exit 2 and the file is deleted if the post-save scan still finds contact/IBAN data, or if a formula refers to its own cell (a circular reference). `--out` sets another path; `--self-test` runs built-in cases |
 | `09_message.md` | **Claude** | The short delivery message |
 
 ## 1. `01_workbook_map.json` (inspect_workbook.py)
@@ -49,9 +49,10 @@ All outputs of one run go to `outputs/portfolio-analysis/<file-stem>_<YYYYMMDD-H
   "anomalies": [{
     "id": "WB-001", "type": "formula_year_mismatch|cached_value_mismatch|total_mismatch|row_total_mismatch|hardcoded_total|excel_error|cached_missing|mixed_types|text_in_numeric|numeric_text|duplicate_name|shared_deed|serial_gap|pii_column|partial_period_header|garbled_header|filler_block|derived_from_total|count_mismatch|vat_identical|vat_inconsistent|hijri_date_text|zero_valuation|unlabeled_column|outside_table_rows|hidden_sheet|hidden_rows|hidden_columns|cross_sheet_name_match|mixed_calendar|formula_blank_inputs",
     "severity": "high|medium|low|info",
-    "where": "عقارات الجمعية !AA3",
+    "where": "سجل الأصول!N18",
     "detail": "Arabic explanation with numbers",
-    "evidence": {"formula": "...", "cached": 1100000, "recomputed": 823356}
+    "evidence": {"formula": "...", "cached": 2150000, "recomputed": 2388000},
+    "record_ids": ["REG-3"]                         // optional: records the anomaly concerns (build keeps them; C3 count)
   }],
   "pii_columns": [{"sheet": "...", "col": "AH", "header": "رقم التواصل", "reason": "header|pattern"}]
 }
@@ -114,9 +115,11 @@ Text fields: `{"v": "حي النموذج", "s": "value", "raw": "...", "ref": ".
   "source_file": "path/to/file.xlsx",
   "entity": {"name": null, "evidence": "اسم الجهة غير مذكور في الملف"},
   "currency": "SAR",
-  "data_period": {"label": "2025", "evidence": "عقارات الجمعية !A1"},
-  "study_date": {"value": "2025-12-02", "basis": "آخر تعديل للملف (خصائص المصنف)", "evidence": "file.properties.modified"},
-  "analysis_date": "2026-11-07",
+  "data_period": {"label": "2025", "evidence": "سجل الأصول!A1"},
+  "study_date": {"value": null, "basis": "لا يذكر الملف تاريخ إعداد؛ آخر تعديل للملف (خصائص المصنف)", "evidence": "file.properties.modified"},
+  // a date only the file properties give (last modified) is not the study date: build shows «غير مذكور في الملف» with
+  // «آخر تعديل للملف المصدر: <date>» as context (meta.study_date_stated = false, meta.file_modified)
+  "analysis_date": "2031-05-20",
   "valuation_dates": [{"year": "2024", "basis": "تقييم مسجل في الملف، الأساس غير موضح", "evidence": "..."}],
   "sheets": [{"sheet": "...", "role": "asset_register|activity_register|allocation|managed_properties|lookup|notes|other",
               "decision": "primary|supplementary|isolated|excluded", "period": "2025", "reliability": "high|medium|low",
@@ -277,11 +280,13 @@ More rules:
             "issues_by_severity": {...}}
 }
 ```
-`excluded_rows[].reason` is the `exclude_rows` reason, «صف إجمالي مكتشف آليًا: …» (`auto: true`) or «تُخطّي الصف لأن خانة …
+`excluded_rows[].reason` is the `exclude_rows` reason, «صف إجمالي مكتشف آليًا: …» (`auto: true`) or «تم تخطي الصف لأن خانة …
 (skip_if_blank) فارغة رغم وجود بيانات في: …»; only total rows carry `values`.
 Issue texts are board-facing (dashboard «سجل مشكلات البيانات», workbook «مشكلات البيانات»): `detail`/`impact`/`treatment`
 name fields by their `field_meta` label in «…» and metrics by Arabic names, never `rev.2025.excl_vat`, `gross_yield_*` or
-engine words (`zero_as_missing`, `status text`); counts agree with the noun («4 سجلات»). Instructions for the analyst (which
+engine words (`zero_as_missing`, `status text`); counts agree with the noun through `apa_common.ar_count`/`ar_n` («سجل
+واحد»، «سجلان»، «4 سجلات»، «15 سجلًا»، «105 صفوف»، «لا نصوص»; `case="gen"` after a preposition: «بين سجلين»), in
+normalize and in the inspect anomaly texts alike. Instructions for the analyst (which
 part of `02_mapping.json` to change: `derived_fields`, `records`, `dim_rules`, `pii` …) go to `dev_note`, which no output
 shows; the key stays in `field`. A field `<f>__original` (the stored value a documented `derived_fields` override replaced)
 has no `field_meta` entry: outputs label it «<label of f> كما ورد (قبل الاشتقاق)» and flag it «قيمة مخزنة معيبة — غير مستخدمة».
@@ -410,9 +415,18 @@ To trim periods: delete the period object (and its id from every `valid_periods`
   "valid_periods": ["2025"],         // optional: other periods give not_comparable with invalid_period_reason
   "invalid_period_reason": "Arabic",
   "empty_text": "Arabic",            // shown when nothing in the file qualifies (empty_cause scope); also in text_by_period
-  "empty_as_zero": true              // sum/count only: empty with cause scope -> value 0, status complete, note (count default true)
+  "empty_as_zero": true,             // sum/count only: empty with cause scope -> value 0, status complete, note (count default true)
+  "review": {"status": "needs_verification", "reason": "Arabic sentence, 6–25 words, no digits"}   // optional analyst flag
 }
 ```
+`review` (optional) marks a metric whose value needs verification before the board relies on it: an input disputed by
+another source in the file (a second figure for the same period's revenue in another statement), or a value that covers
+only part of the portfolio while it looks complete (100% coverage of a one-asset register). Both engines copy it unchanged
+into every result of the metric (`05_metrics.json` → `metrics[id].review`, and `APA.compute` in the dashboard), so it holds
+under every period and filter. The dashboard shows the amber chip «يحتاج تحقق» instead of the green «مكتمل…» chip with
+the reason as a caveat line (screen and print); the workbook shows «يحتاج تحقق — <reason>» as the metric's status.
+`status` ∈ `needs_verification` (schema); `validate_analysis.py` blocks (`metric_review`) an unknown status, a reason
+outside 6–25 words or with digits, and a 05 whose `review` differs from 04 (re-run `compute_metrics.py`).
 `--init-config` sets `valid_periods` on `gross_yield_investment`, `gross_yield_owned` and `gross_yield_income_producing` to the
 periods whose year is the valuation year or the year after (warning `yield_periods_limited` when that drops periods),
 `empty_as_zero` + `empty_text` «لا توجد أصول استثمارية بإيراد صفري مسجل» on `zero_rev_investment_value`, and `empty_text`
@@ -465,6 +479,7 @@ status `complete`, `note`; (4) the kind rules below.
  "comparability": {"status": "...", "reason": "..."}, "prev_period": "2024",   // growth only
  "n_unknown": 0,                                             // sum only
  "unresolved": "{EXP}",                                      // only when a placeholder resolved to null
+ "review": {"status": "needs_verification", "reason": "..."},  // only when the spec has one (copied unchanged)
  "scope_ids": ["REG-1"],                                     // only for not_computable with nothing included or excluded:
                                                              // the scope's records, counted and listed with the reason
  "resolved_fields": {"num": "rev.2025.excl_vat", "den": "val.2024.total"},
@@ -513,8 +528,9 @@ Parity cases: default; each period; for each filter dim up to `parity_max_values
 Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py`:
 - `assessment` has exactly 4 items, one per dimension. `criterion` null ⇒ descriptive judgment, no score.
 - Gap `evidence` entries are objects `{ref, kind}`; refs are `m:<metric_id>` (also `m:<id>.<field>`, `m:<breakdown id>`,
-  `m:trend`), `DQ-…` (03 issues), `WB-…` (01 anomalies), record ids, or a cell `Sheet!A1` (exact sheet name, incl. trailing
-  spaces; quoting allowed). Unresolved gap refs are **blocking**; elsewhere they are warnings.
+  `m:trend`), `f:<fact key>` (a fact of `facts.py`, `f:rec.<record_id>.<field_id>` included), `DQ-…` (03 issues), `WB-…`
+  (01 anomalies), record ids, or a cell `Sheet!A1` (exact sheet name, incl. trailing spaces; quoting allowed). Unresolved
+  gap refs are **blocking**; elsewhere they are warnings.
 - `ranking.urgency|feasibility|cost_level` ∈ high|medium|low. Plan items may carry `status`
   («لم يبدأ» | «قيد التنفيذ» | «منجز» | «متعثر»); `recommendation_followup` items need `rec_id` and `status` (same four
   values; `evidence` and `note` optional) — copy them from `compare_versions.py` output (its extra keys `title`, `target`,
@@ -533,7 +549,7 @@ Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py
   `{{m:trend.same_records.n}}`), `{{f:key}}` (a fact from `facts.compute_facts(run_dir)`; an unknown key is blocking,
   `fact_tokens`; an unknown metric is blocking, `metric_tokens`). Deeper tokens are malformed. The summary length is
   counted on rendered words (money 2, «غير قابل للاحتساب»/«غير قابل للمقارنة» 3, «بدء إيراد»/«غير متاح» 2, others 1).
-- **Facts** (`scripts/facts.py`; list a run's keys with `python3 scripts/facts.py --run-dir RUN`): numbers the board needs
+- **Facts** (`scripts/facts.py`; list a run's keys with `python3 "$SKILL_DIR/scripts/facts.py" --run-dir "$RUN"`): numbers the board needs
   that are not metrics. Keys: `records.total|in_scope|isolated|excluded|excluded_rows|isolated_assetlike`,
   `records.in_scope.<record_type>`, `sources.<source_id>.records|isolated`, `sheets.total|hidden`,
   `issues.total|high|medium|low`, `anomalies.total|high`, `wb.<WB-id>.<evidence_key>` (numeric evidence of a 01 anomaly,
@@ -543,12 +559,28 @@ Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py
   (records between the previous total row and row `<row>`) — to describe an isolated statement apart from the metrics (lines
   per section, its total, its largest line, its zero lines) without adding it to them. Use them
   instead of counting isolated records with a metric (that trips `isolated_in_metrics`).
+  `rec.<record_id>.<field_id>` is the known numeric value of one field of **any** record of 03 (in scope, isolated or
+  excluded), formatted like the other facts (revenue/expense/valuation fields as money): e.g.
+  `{{f:rec.STM-r7.rev.2025.recorded}}` states the figure another statement gives beside `{{m:property_revenue}}`. An
+  unknown record, an unknown field, or a value that is not a known number (blank, text, error, «غير متاح») is an
+  unresolvable token (`fact_tokens`, blocking) and an unresolved `f:` evidence ref. `facts.compute_facts` — the single
+  resolver of `build_dashboard.py` and `validate_analysis.py` — adds the `rec.*` keys that 06 cites (tokens and `f:`
+  evidence refs), so `analysis.json.facts` holds exactly those; `facts.py --run-dir` prints the `rec.*` pattern with
+  one example instead of every record and field. A record id with characters outside `[A-Za-z0-9_.-]` cannot be cited.
 - `acknowledged_warnings`: a **warning** whose check id is listed with a reason of ≥ 8 words becomes level `acknowledged`
   (not counted in `warning_count`, listed apart). Blocking checks can never be acknowledged; an unknown id, a blocking id or
   a short reason adds an `acknowledged_warnings` warning, and an id with no current warning adds an info entry.
 - When recommendations exist, `plan.d30/d60/d90` each have items, `top_actions` (and `top_gaps` when there are gaps) is
-  non-empty, and every top action appears in the plan (`plan_completeness`, blocking). Priorities should be unique and
-  consecutive (1…n) and consistent with the ranking (`recommendation_quality`, warning).
+  non-empty, and every top action appears in the plan (`plan_completeness`, blocking). Recommendation priorities are
+  unique positive integers and `top_actions` lists recommendation ids in **ascending priority**
+  (`top_actions_priority`, blocking), so «الأولوية n» is one number everywhere: the dashboard top-3 and full list, the
+  workbook «ملخص» and «الخطة التشغيلية», and the 09 message. Priorities should be consecutive (1…n), consistent with
+  the ranking, and the top actions should be the recommendations with the lowest numbers (`recommendation_quality`,
+  warning).
+- Board-facing narrative (summary, gaps, recommendations, plan, 09) names assets by their names, not record codes
+  (codes stay in evidence chips, tables and `scope`); a figure disputed by another source in the file is stated with
+  both figures as tokens (`{{m:…}}` beside `{{f:rec.…}}`, or the ratio and change each would give), never as an
+  approximate share («بنحو الثلث»).
 - Numeric scores («82 من 100»، «8/10»، «درجة 4») are blocking anywhere (`narrative_scores`); a criterion must cite a
   `sources[]` entry or resolvable evidence. A drastic action (sell, exit, replace, demolish, change of use, liquidate) needs a
   study/verification step first and a reason beyond yield (`drastic_without_study`).
@@ -570,15 +602,21 @@ check that cannot run (missing input) is an `info` entry with `skipped: true`, n
 check's level. `acknowledged_warnings` entries are added outside the registry (the `scenario_overlap_cross_type` hook still
 exists but no longer emits: every undeclared same-asset overlap is now blocking under `scenarios`).
 `reconciliation[]` (one per excluded total row and field with values):
-`{source_id, sheet, row, ref, field, recorded, sum_in_scope, n_in_scope_known, n_in_scope_unknown, difference,
-difference_basis, sum_all_records, matched_sum, status, status_ar}` with `difference` = recorded − the matched sum, else
-recorded − the in-scope sum, or − the sum of **all** the source's records when none is in scope or the match is on all
-records (`difference_basis: in_scope|all_records`; an isolated statement never shows «recorded − 0»), and `status ∈ match | match_section | match_all_records |
+`{source_id, sheet, row, ref, field, recorded, compared_sum, difference, difference_basis, matched_sum, sum_in_scope,
+n_in_scope_known, n_in_scope_unknown, sum_all_records, status, status_ar}` with `difference` = recorded −
+`compared_sum`, the sum named by `difference_basis` ∈ `in_scope | in_scope_section | all_records | all_records_section`:
+the in-scope records (or those of the total's own section for a section total), or **all** the source's records when
+none is in scope or the match is on all records (an isolated statement never shows «recorded − 0»). The difference is
+never taken against the matched sum, so a 0 never stands beside two different numbers: `matched_sum` (shown in its own
+column) is the sum that equals the recorded total when one does — e.g. `match_original` shows the in-scope sum, a
+non-zero difference and the pre-derivation sum that matches; `match_without_text_numbers` shows the difference made by
+numbers stored as text. The export sheet «المطابقة مع الإجماليات» follows the same definition. `status ∈ match | match_section | match_all_records |
 match_section_all_records | match_without_text_numbers | match_original | mismatch | recorded_unknown` (same wording as
 the export sheet «المطابقة مع الإجماليات»; `match_original`: the total equals the sum of `<field>__original`, the values
 before a documented `derived_fields` override); only `mismatch` raises the `totals_reconciliation` warning.
 Data-integrity checks (blocking): `total_like_in_scope`, `unit_double_count`, `duplicate_ids_in_scope`, `overlapping_rows`,
-`dims_vocabulary`, `sheet_scope`, `mapping_context`, `fact_tokens`, `pii_export_patterns`; (warning): `total_like_records`,
+`dims_vocabulary`, `sheet_scope`, `mapping_context`, `fact_tokens`, `pii_export_patterns`, `metric_review` (§5 `review`),
+`top_actions_priority` (§6); (warning): `total_like_records`,
 `unit_levels_mixed`, `duplicate_ids_kept`, `overlapping_rows_other`, `hidden_sheet_in_scope`, `totals_reconciliation`,
 `pii_review_patterns`, `message_numbers`, `export_growth_pct` (the supporting workbook shows a growth % whose comparability
 is not confirmed: a value cell or a «x.x%» text outside the review note; skipped while the workbook is older than 05/06), `totals_not_reconciled` (01 lists total rows after a source's `data_rows.to`
@@ -614,13 +652,18 @@ numbers, narrative list counts, 07/08 counts and shares × 100.
 
 ```jsonc
 {"contract_version": "1.0", "meta": {"entity", "entity_evidence", "data_period", "data_period_evidence", "analysis_date",
-          "study_date", "study_date_basis", "currency", "file_name", "sha256_short", "valuation", "valuation_dates",
-          "counts", "draft", "built_at", "generator"},
+          "study_date", "study_date_basis", "study_date_stated", "file_modified", "confidentiality", "currency",
+          "file_name", "sha256_short", "valuation", "valuation_dates", "counts", "draft", "built_at", "generator"},
  "vocab": {...}, "field_meta": {...}, "records": [... in_scope + isolated + excluded, PII-free ...], "excluded_rows": [...],
  "config": {...04...}, "metrics": {...05...}, "narrative": {...06 with {{m:..}} and {{f:..}} rendered...},
- "workbook_map_summary": {...}, "issues": [...03 issues + narrative extra...], "validation": {...07 summary...},
- "facts": {key: {"value", "unit", "label"}}}
+ "workbook_map_summary": {... anomalies[] keep record_ids ...}, "issues": [...03 issues + narrative extra...],
+ "validation": {...07 summary...}, "facts": {key: {"value", "unit", "label"}}}   // rec.* facts only when 06 cites them
 ```
+- `meta.study_date` is null and `study_date_stated` false when 02 `study_date` is only the file's last-modified date (its
+  evidence or basis names the file properties, or it equals the workbook's modified date without a cell reference);
+  `file_modified` then holds that date for the caption «آخر تعديل للملف المصدر».
+- `meta.confidentiality` defaults to «سري — للاستخدام الداخلي» (header badge and every printed page footer). Optional 04
+  `"dashboard": {"confidentiality": "<text>" | false}` (or 06 `x_confidentiality`) replaces or removes it.
 `build_dashboard.py` exits 2 while 07 has blocking errors (and 1 when 06/07 are missing) unless `--draft`; a draft shows a
 «مسودة» banner and fails the browser check `draft` unless `--allow-draft`. Every string is scrubbed: keys matching the
 shared personal-data key pattern are dropped and block-level values are masked.

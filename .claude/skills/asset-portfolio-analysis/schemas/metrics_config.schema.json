@@ -180,7 +180,8 @@
         "valid_periods": {"description": "Period ids for which the metric is defined; any other selected period gives status not_comparable with reason invalid_period_reason (revenue-to-valuation ratios: the valuation year and the year after)", "type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "invalid_period_reason": {"description": "Arabic reason used when the selected period is outside valid_periods", "type": ["string", "null"]},
         "kind_tag": {"enum": ["fact", "derived"]},
-        "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
+        "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}},
+        "review": {"$ref": "#/$defs/review"}
       },
       "allOf": [
         {"if": {"properties": {"kind": {"enum": ["sum", "concentration"]}}}, "then": {"required": ["field"]}},
@@ -189,6 +190,16 @@
         {"if": {"properties": {"kind": {"const": "coverage"}}}, "then": {"required": ["fields"]}},
         {"if": {"required": ["empty_as_zero"], "properties": {"empty_as_zero": {"const": true}}}, "then": {"properties": {"kind": {"enum": ["sum", "count"]}}}}
       ]
+    },
+    "review": {
+      "description": "Analyst flag on a metric whose input is disputed by another source in the file, or whose value looks complete while it covers only part of the portfolio. Copied unchanged into the metric's result in 05 (every period and filter); the dashboard shows «يحتاج تحقق» with the reason, the workbook «يحتاج تحقق — <reason>». validate_analysis.py (metric_review, blocking) also requires a reason of 6–25 words without digits.",
+      "type": "object",
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"enum": ["needs_verification"]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
     },
     "breakdown": {
       "type": "object",

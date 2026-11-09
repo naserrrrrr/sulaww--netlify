@@ -1,0 +1,18 @@
+{
+  "family": "IBM Plex Sans Arabic",
+  "license": "SIL Open Font License 1.1 (OFL.txt in this folder)",
+  "source": "npm @fontsource/ibm-plex-sans-arabic 5.3.0 (files/*.woff2; arabic and latin subsets, weights 400/600/700)",
+  "note": "build_dashboard.py embeds these files base64 in @font-face rules, so the dashboard and its printed PDF use one Arabic typeface on every device without a network request.",
+  "faces": [
+    {"file": "ibm-plex-sans-arabic-arabic-400-normal.woff2", "weight": 400, "subset": "arabic"},
+    {"file": "ibm-plex-sans-arabic-arabic-600-normal.woff2", "weight": 600, "subset": "arabic"},
+    {"file": "ibm-plex-sans-arabic-arabic-700-normal.woff2", "weight": 700, "subset": "arabic"},
+    {"file": "ibm-plex-sans-arabic-latin-400-normal.woff2", "weight": 400, "subset": "latin"},
+    {"file": "ibm-plex-sans-arabic-latin-600-normal.woff2", "weight": 600, "subset": "latin"},
+    {"file": "ibm-plex-sans-arabic-latin-700-normal.woff2", "weight": 700, "subset": "latin"}
+  ],
+  "unicode_ranges": {
+    "arabic": "U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC",
+    "latin": "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD"
+  }
+}

@@ -3,11 +3,11 @@
  * check_dashboard.mjs — headless-browser test of a built dashboard.html (data-contract.md §0, §8).
  *
  * Usage:
- *   node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000] [--allow-draft]
- *   node scripts/check_dashboard.mjs --self-test     (number parsing and shared PII patterns, no browser)
+ *   node "$SKILL_DIR/scripts/check_dashboard.mjs" --html "$RUN/dashboard.html" --out "$RUN" [--timeout 30000] [--allow-draft]
+ *   node "$SKILL_DIR/scripts/check_dashboard.mjs" --self-test   (number parsing and shared PII patterns, no browser)
  * Writes RUN/08_dashboard_check.json and RUN/screens/{desktop.png, desktop_01.png …, details_open.png and its
  * readable slices details_open_01.png … (≤ 1400 px each), mobile.png,
- * mobile_full.png, mobile_360.png, mobile_detail.png, print.pdf}.
+ * mobile_full.png, mobile_360.png, mobile_detail.png, mobile_table.png, print.pdf}.
  * Exit code: 0 = every check passed, 1 = a check failed (or the browser could not run), 2 = bad arguments.
  *
  * Checks (DOM contract shared with assets/dashboard_template.html):
@@ -22,7 +22,15 @@
  *   lines within the first 1440×900 screen), mobile_overflow (360 and 390 px, default view and with the
  *   details and an asset detail open), growth_no_pct (an unconfirmed growth never shows a %), no_raw_keys (no engine
  *   keys in visible text outside <code>), bidi_refs («!» between an Arabic sheet name and its cell), print (executive
- *   sections visible on paper, yield cards keep scope/basis/valuation date, at most 8 A4 pages), offline, console_errors.
+ *   sections visible on paper, yield cards keep scope/basis/valuation date, a metric under review keeps its «يحتاج تحقق»
+ *   chip and reason, KPI/gap/action cards and plan items cannot split across pages (break-inside: avoid and shorter
+ *   than a page), no forced page break, identity captions printed whole (no «…»), the confidentiality marking in the
+ *   header and the page footer, at most 8 A4 pages), mobile_table (≤ 600 px: asset rows as cards — value, revenue,
+ *   yield and data status inside the screen, no horizontal scroll, no tall header band), priority_order (top actions
+ *   in ascending priority, each numbered by its recommendation's priority), offline, console_errors.
+ *   cards also hold the C1 review flag: a metric whose 04 spec (or 05 result) carries review shows «يحتاج تحقق» and
+ *   its reason, never a green «مكتمل» chip, in every filter and period state; table_detail compares the asset-table
+ *   data-note chip with the detail panel's list (C3).
  * Playwright is loaded from the local project, NODE_PATH or the global npm root.
  */
 import fs from 'node:fs';
@@ -39,6 +47,9 @@ const MAX_TABLE_ROWS = 80;
 const MAX_CROPS = 14;
 const MIN_TAIL = 200;          // px: a shorter remainder joins the previous screenshot crop
 const MAX_PRINT_PAGES = 8;     // dashboard-spec §8: the executive print fits in 8 A4 pages
+// A4 content box of the template's @page (210 × 297 mm, margins 14/12/15/12 mm) in CSS px (96 per inch)
+const PRINT_CONTENT_W = Math.round((210 - 24) / 25.4 * 96);   // 703
+const PRINT_CONTENT_H = Math.round((297 - 29) / 25.4 * 96);   // 1013
 const DETAIL_SECTIONS = ['calculations', 'issues', 'exclusions', 'assumptions', 'sources', 'workbook', 'questions',
   'scenarios', 'versions', 'methodology', 'records'];
 // sections of the executive view that must be on paper (brief §11: the executive view prints)
@@ -53,7 +64,8 @@ const PII_PATTERNS_PATH = path.join(SKILL_DIR, 'assets', 'pii_patterns.json');
 // ---------------------------------------------------------------------------
 function usage(msg) {
   if (msg) console.error('خطأ: ' + msg);
-  console.error('الاستخدام: node scripts/check_dashboard.mjs --html RUN/dashboard.html --out RUN [--timeout 30000] [--allow-draft]');
+  // the script by its absolute, quoted path (the working directory is the user's project, not the skill folder)
+  console.error(`الاستخدام: node "${fileURLToPath(import.meta.url)}" --html "RUN/dashboard.html" --out "RUN" [--timeout 30000] [--allow-draft]`);
   process.exit(2);
 }
 
@@ -241,10 +253,15 @@ window.__apaCheck = (function () {
       if (!vals.length) out.push({ card: ci, cardId: card.getAttribute('data-metric-id'), missing: true });
       vals.forEach(function (el) {
         var holder = el.closest('[data-metric-id]') || card;
+        var sub = el.closest('.kpi-sub');
         out.push({
           card: ci, cardId: card.getAttribute('data-metric-id'), metricId: holder.getAttribute('data-metric-id'),
           dataValue: el.getAttribute('data-value'), dataStatus: el.getAttribute('data-status'),
-          text: (el.innerText || el.textContent || '').trim(), visible: visible(el), cardText: cardText
+          text: (el.innerText || el.textContent || '').trim(), visible: visible(el), cardText: cardText,
+          // C1: the review chip of this value (its sub-card in a grouped card) and any green «مكتمل» chip beside it
+          single: vals.length === 1,
+          reviewChip: !!(sub || card).querySelector('[data-role="review-chip"]'),
+          okChip: vals.length === 1 && !!card.querySelector('.kpi-status .tone-ok')
         });
       });
     });
@@ -318,12 +335,25 @@ window.__apaCheck = (function () {
     });
     return m;
   }
+  /** C1: the review flag of a metric — its 04 spec first (it holds under every filter), else its result or 05 entry. */
+  function reviewOf(id, r) {
+    var data = window.APA.data || {};
+    var spec = ((data.config && data.config.metrics) || []).filter(function (m) { return m && m.id === id; })[0];
+    var m05 = data.metrics && data.metrics.metrics ? data.metrics.metrics[id] : null;
+    var cands = [spec && spec.review, r && r.review, m05 && m05.review];
+    for (var i = 0; i < cands.length; i++) {
+      var x = cands[i];
+      if (x && typeof x === 'object' && x.status === 'needs_verification') return { reason: String(x.reason || '') };
+    }
+    return null;
+  }
   function cardMeta(all) {
     var m = {};
     Object.keys(all.metrics || {}).forEach(function (id) {
       var r = all.metrics[id];
       m[id] = { kind: r.kind, unit: r.unit, scope_text: r.scope_text || null, basis: r.basis || null, valuation_date: r.valuation_date || null,
-        comp: r.comparability ? r.comparability.status || null : null, abs_change: typeof r.abs_change === 'number' ? r.abs_change : null };
+        comp: r.comparability ? r.comparability.status || null : null, abs_change: typeof r.abs_change === 'number' ? r.abs_change : null,
+        review: reviewOf(id, r) };
     });
     return m;
   }
@@ -352,7 +382,7 @@ window.__apaCheck = (function () {
       document.querySelectorAll('[data-role="asset-detail"]').length]);
   }
   return { visible: visible, rows: rows, rowIds: rowIds, cards: cards, charts: charts, scopeText: scopeText,
-    snapshot: snapshot, signature: signature, table: table, compact: compact, tableCells: tableCells };
+    snapshot: snapshot, signature: signature, table: table, compact: compact, tableCells: tableCells, reviewOf: reviewOf };
 })();
 `;
 
@@ -421,6 +451,15 @@ function compareCards(snap) {
       for (const [k, label] of [['scope_text', 'النطاق'], ['basis', 'الأساس'], ['valuation_date', 'تاريخ التقييم']]) {
         if (meta[k] && !norm(c.cardText).includes(norm(meta[k]))) problems.push(`${id}: البطاقة لا تعرض ${label} المحسوب «${short(meta[k], 80)}»`);
       }
+    }
+    // C1: a metric whose spec carries review shows «يحتاج تحقق» and its reason, never the green «مكتمل» chip
+    if (meta && meta.review) {
+      const norm = (s) => String(s).replace(/\s+/g, ' ').trim();
+      if (!c.reviewChip) problems.push(`${id}: للمؤشر علامة تحقق (review) لكن البطاقة لا تعرض «يحتاج تحقق»`);
+      if (c.okChip) problems.push(`${id}: للمؤشر علامة تحقق (review) لكن البطاقة تعرض حالة «مكتمل» الخضراء`);
+      if (meta.review.reason && !norm(c.cardText).includes(norm(meta.review.reason))) problems.push(`${id}: سبب التحقق «${short(meta.review.reason, 60)}» غير ظاهر على البطاقة`);
+    } else if (c.single && c.reviewChip) {
+      problems.push(`${id}: البطاقة تعرض «يحتاج تحقق» والمؤشر بلا علامة تحقق (review) في الإعدادات`);
     }
   }
   return problems;
@@ -711,6 +750,27 @@ async function main() {
         { present: st.sections });
     });
 
+    // ---- C4: the top actions follow the recommendations' priority, each numbered by it ---------------------------
+    await section(['priority_order'], async () => {
+      const po = await page.evaluate(() => {
+        const prio = {};
+        (((window.APA.data.narrative || {}).recommendations) || []).forEach((r) => { if (r && r.id) prio[r.id] = r.priority; });
+        return Array.prototype.map.call(document.querySelectorAll('[data-role="top-action"]'), (el) => {
+          const rk = el.querySelector('.rank');
+          return { id: el.getAttribute('data-rec-id'), shown: rk ? (rk.textContent || '').trim() : null, prio: prio[el.getAttribute('data-rec-id')] };
+        });
+      });
+      const prob = [];
+      po.forEach((x, i) => {
+        if (typeof x.prio !== 'number') return;
+        if (x.shown !== String(x.prio)) prob.push(`الإجراء ${x.id}: الرقم المعروض «${x.shown}» وأولوية التوصية ${x.prio}`);
+        const prev = po[i - 1];
+        if (prev && typeof prev.prio === 'number' && prev.prio > x.prio) prob.push(`${prev.id} (الأولوية ${prev.prio}) قبل ${x.id} (الأولوية ${x.prio})`);
+      });
+      add('priority_order', prob.length === 0, prob.length ? 'أهم الإجراءات لا تتبع أولوية التوصيات: ' + prob.join('؛ ')
+        : (po.length ? `أهم الإجراءات (${po.length}) مرتبة تصاعديًا بأولوية التوصية، ورقم كل بطاقة هو «الأولوية n» نفسها` : 'لا توجد بطاقات إجراءات'));
+    });
+
     // ---- parity -----------------------------------------------------------------------------------
     await section(['parity'], async () => {
       const par = await page.evaluate(() => {
@@ -996,7 +1056,29 @@ async function main() {
           if (await detailVisible()) dProblems.push('لم تُغلق لوحة التفاصيل بعد فتحها بلوحة المفاتيح');
         }
       }
-      add('table_detail', dProblems.length === 0, dProblems.length ? dProblems.join('؛ ') : 'النقر وEnter يفتحان التفاصيل ويُعرض اسم السجل، وزر الإغلاق يخفيها');
+      // C3: the data-note chip of a row counts the same list as that record's detail panel (first 5 rows)
+      let compared = 0;
+      const rowsN = Math.min(5, await page.locator('table[data-role="asset-table"] tr[data-role="asset-row"]:visible').count());
+      for (let i = 0; i < rowsN; i++) {
+        const row = page.locator('table[data-role="asset-table"] tr[data-role="asset-row"]:visible').nth(i);
+        const rid = await row.getAttribute('data-record-id');
+        await row.click();
+        await waitStable(page);
+        const ic = await page.evaluate((id) => {
+          const tr = document.querySelector('table[data-role="asset-table"] tr[data-role="asset-row"][data-record-id="' + CSS.escape(id) + '"]');
+          const cell = tr && tr.querySelector('td[data-issues]');
+          const sec = document.querySelector('[data-role="asset-detail"] [data-role="record-issues"]');
+          return { chip: cell ? cell.getAttribute('data-issues') : null, panel: sec ? sec.getAttribute('data-count') : null };
+        }, rid);
+        if (ic.chip !== null && ic.panel !== null) {
+          compared++;
+          if (ic.chip !== ic.panel) dProblems.push(`${rid}: شارة «حالة البيانات» تعدّ ${ic.chip} ملاحظات ولوحة التفاصيل تسرد ${ic.panel}`);
+        }
+        await closeDetail();
+      }
+      add('table_detail', dProblems.length === 0, dProblems.length ? dProblems.join('؛ ')
+        : 'النقر وEnter يفتحان التفاصيل ويُعرض اسم السجل، وزر الإغلاق يخفيها' +
+          (compared ? `، وعدد ملاحظات البيانات في الجدول يطابق لوحة التفاصيل (${nAr(compared, 'صف واحد', 'صفان', 'صفوف', 'صفًا')})` : ''));
     });
 
     // ---- text checks with every <details> opened ----------------------------------------------------
@@ -1253,9 +1335,13 @@ async function main() {
     await section(['print'], async () => {
       const pp = await open(desktop, 'print');
       await pp.emulateMedia({ media: 'print' });
+      // lay the page out at the A4 content width (210 − 2×12 mm), as the printer does, so the measured heights are the
+      // printed ones; page.pdf below paginates at the same width
+      await pp.setViewportSize({ width: PRINT_CONTENT_W, height: PRINT_CONTENT_H });
       await pp.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
       await settle(pp);
-      const ph = await pp.evaluate((ids) => {
+      await pp.waitForTimeout(250);   // the debounced chart redraw after the resize
+      const ph = await pp.evaluate(([ids, pageH]) => {
         const els = Array.prototype.slice.call(document.querySelectorAll('[data-print="hide"]'));
         const shownOnPaper = (el) => {
           if (!el) return false;
@@ -1292,9 +1378,68 @@ async function main() {
               if (!/مشمول/.test(txt)) bad.push(`${id}: عدد المشمول والمستبعد غير ظاهر على الورق`);
             });
             return bad;
+          })(),
+          // C1 on paper: a metric under review keeps its «يحتاج تحقق» chip and reason
+          review: (() => {
+            const bad = [];
+            const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+            document.querySelectorAll('[data-role="kpi-card"]').forEach((card) => {
+              if (!shownOnPaper(card)) return;
+              card.querySelectorAll('[data-metric-id]').forEach((h) => {
+                const id = h.getAttribute('data-metric-id');
+                const rv = window.__apaCheck.reviewOf(id, null);
+                if (!rv) return;
+                const txt = norm(card.innerText);
+                if (!txt.includes('يحتاج تحقق')) bad.push(`${id}: «يحتاج تحقق» غير ظاهر على الورق`);
+                if (rv.reason && !txt.includes(norm(rv.reason))) bad.push(`${id}: سبب التحقق غير ظاهر على الورق`);
+              });
+            });
+            return [...new Set(bad)];
+          })(),
+          // cards and plan items never split across pages: break-inside avoid and shorter than one page
+          split: (() => {
+            const bad = [];
+            const sel = '[data-role="kpi-card"], [data-role="top-gap"], [data-role="top-action"], .plan-item';
+            let n = 0;
+            document.querySelectorAll(sel).forEach((el) => {
+              if (!shownOnPaper(el)) return;
+              n++;
+              const cs = getComputedStyle(el);
+              const avoid = /avoid/.test(cs.breakInside || '') || /avoid/.test(cs.pageBreakInside || '');
+              const hgt = el.getBoundingClientRect().height;
+              const name = (el.getAttribute('data-role') || el.className.split(' ')[0]) + ' ' +
+                (el.getAttribute('data-metric-id') || el.getAttribute('data-gap-id') || el.getAttribute('data-rec-id') || '');
+              if (!avoid) bad.push(`${name.trim()}: قد ينقسم بين صفحتين (break-inside: ${cs.breakInside})`);
+              else if (hgt > pageH) bad.push(`${name.trim()}: أطول من صفحة (${Math.round(hgt)} > ${pageH} بكسل) فينقسم حتمًا`);
+            });
+            return { n, bad };
+          })(),
+          // no forced page break in the executive view (a forced break left a page mostly empty)
+          forced: (() => {
+            const bad = [];
+            document.querySelectorAll('header *, main *, footer *').forEach((el) => {
+              if (bad.length >= 5) return;
+              const cs = getComputedStyle(el);
+              if (/^(page|left|right|recto|verso)$/.test(cs.breakBefore) || /^(page|left|right|recto|verso)$/.test(cs.breakAfter)) {
+                if (shownOnPaper(el)) bad.push((el.id ? '#' + el.id : el.tagName.toLowerCase() + '.' + String(el.className).split(' ')[0]) + ` (${cs.breakBefore}/${cs.breakAfter})`);
+              }
+            });
+            return bad;
+          })(),
+          // identity captions print whole: no caption cut with «…» on paper
+          captions: Array.prototype.filter.call(document.querySelectorAll('#meta-grid dd'), (dd) => shownOnPaper(dd) && /…/.test(dd.innerText || ''))
+            .map((dd) => String(dd.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60)),
+          // confidentiality marking: in the header and in the page footer of every printed page
+          conf: (() => {
+            const label = ((window.APA.data || {}).meta || {}).confidentiality;
+            if (!label) return { on: false };
+            const mark = document.querySelector('[data-role="confidentiality"]');
+            const st = document.getElementById('page-footer-style');
+            return { on: true, header: !!mark && shownOnPaper(mark) && (mark.textContent || '').includes(label),
+              footer: !!st && /@bottom-center/.test(st.textContent || '') && (st.textContent || '').includes(label) };
           })()
         };
-      }, PRINT_SECTIONS);
+      }, [PRINT_SECTIONS, PRINT_CONTENT_H]);
       const pdfPath = path.join(screensDir, 'print.pdf');
       if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
       await pp.pdf({ path: pdfPath, format: 'A4', printBackground: true });
@@ -1310,16 +1455,52 @@ async function main() {
       if (ph.cardsTotal && ph.cards < ph.cardsTotal) prob.push(`${nAr(ph.cardsTotal - ph.cards, 'بطاقة مؤشر واحدة', 'بطاقتا مؤشر', 'بطاقات مؤشرات', 'بطاقة مؤشر')} لا تظهر عند الطباعة`);
       if (!(size > 1000)) prob.push('ملف PDF للطباعة لم يُنشأ أو فارغ');
       if (ph.ratio.length) prob.push('بطاقة العائد على الورق: ' + ph.ratio.slice(0, 4).join('؛ '));
+      if (ph.review.length) prob.push('علامة التحقق على الورق: ' + ph.review.slice(0, 4).join('؛ '));
+      if (ph.split.bad.length) prob.push('بطاقات قد تنقسم بين صفحتين: ' + ph.split.bad.slice(0, 5).join('؛ '));
+      if (ph.forced.length) prob.push('فواصل صفحات إجبارية في العرض التنفيذي (تترك صفحة شبه فارغة): ' + ph.forced.join('، '));
+      if (ph.captions.length) prob.push('بيانات التعريف مقصوصة بـ«…» على الورق: ' + ph.captions.slice(0, 3).map((c) => '«' + c + '»').join('، '));
+      if (ph.conf.on && !ph.conf.header) prob.push('علامة السرية غير ظاهرة في ترويسة الورق [data-role=confidentiality]');
+      if (ph.conf.on && !ph.conf.footer) prob.push('علامة السرية غير معرّفة في تذييل الصفحات (@page @bottom-center)');
       if (pages && pages > MAX_PRINT_PAGES) prob.push(`الطباعة ${nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة')} A4 والحد ${MAX_PRINT_PAGES} (dashboard-spec §8)؛ اختصر نصوص العرض التنفيذي`);
       add('print', prob.length === 0, prob.length ? prob.join('؛ ')
         : `عناصر [data-print=hide] (${ph.n}) مخفية عند الطباعة، وأقسام العرض التنفيذي (${PRINT_SECTIONS.length}) وبطاقاته (${ph.cards}) ظاهرة، ونطاق بطاقات العائد وأساسها وتاريخ تقييمها على الورق، ` +
-          `وأُنشئ screens/print.pdf (A4، ${pages ? nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة') + '، ' : ''}${Math.round(size / 1024)} ك.ب)`, pages ? { pages } : undefined);
+          `و${nAr(ph.split.n, 'بطاقة واحدة', 'بطاقتان', 'بطاقات وبنود', 'بطاقة وبندًا')} لا تنقسم بين صفحتين، ولا فواصل إجبارية، وبيانات التعريف كاملة` +
+          (ph.conf.on ? '، وعلامة السرية في الترويسة وتذييل الصفحات' : '') +
+          `، وأُنشئ screens/print.pdf (A4، ${pages ? nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة') + '، ' : ''}${Math.round(size / 1024)} ك.ب)`,
+        { pages, split_checked: ph.split.n });
       await pp.close();
     });
     await desktop.close().catch(() => {});
 
     // ---- mobile: 360 and 390 px, default view and with the details + an asset detail open -------------------
-    await section(['mobile_overflow'], async () => {
+    await section(['mobile_overflow', 'mobile_table'], async () => {
+      // ≤ 600 px the asset rows are cards: value, revenue, yield and data status inside the screen, no sideways scroll
+      // inside the table frame, and no tall band of column headers (the board saw three columns and a 121 px header)
+      const measureTable = (mp) => mp.evaluate(() => {
+        const vw = Math.min(window.innerWidth, document.documentElement.clientWidth || Infinity,
+          (window.visualViewport && window.visualViewport.width) || Infinity);
+        const t = document.querySelector('table[data-role="asset-table"]');
+        if (!t) return { error: 'لا يوجد جدول أصول' };
+        const wrap = t.parentElement;
+        const thead = t.querySelector('thead');
+        const theadH = thead && getComputedStyle(thead).display !== 'none' ? thead.getBoundingClientRect().height : 0;
+        const row = t.querySelector('tr[data-role="asset-row"]');
+        const base = { vw: Math.round(vw), theadH: Math.round(theadH), wrapSW: wrap ? wrap.scrollWidth : null, wrapCW: wrap ? wrap.clientWidth : null };
+        if (!row) return Object.assign(base, { rows: 0 });
+        row.scrollIntoView({ block: 'start' });
+        const idx = {};
+        t.querySelectorAll('th[data-sort]').forEach((th) => { idx[th.getAttribute('data-sort')] = th.cellIndex; });
+        const cells = {};
+        ['value', 'revenue', 'yield', 'flags'].forEach((k) => {
+          const c = row.querySelector('td[data-col="' + k + '"]') || (idx[k] !== undefined ? row.cells[idx[k]] : null);
+          if (!c) { cells[k] = null; return; }
+          const r = c.getBoundingClientRect();
+          cells[k] = { left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width), h: Math.round(r.height) };
+        });
+        return Object.assign(base, { rows: 1, cells });
+      });
+      const tableResults = [];
+      const COL_AR = { value: 'القيمة', revenue: 'الإيراد', yield: 'العائد', flags: 'حالة البيانات' };
       const measure = (mp) => mp.evaluate(() => {
         // Mobile Chromium zooms out to fit over-wide content, which inflates innerWidth to the content
         // width; the layout/visual viewport keeps the device width, so take the smallest of the three.
@@ -1368,6 +1549,16 @@ async function main() {
             await mp.screenshot({ path: path.join(screensDir, `mobile_${w}.png`) });
             report.screenshots.push(`screens/mobile_${w}.png`);
           }
+          const tm = await measureTable(mp);
+          tableResults.push({ width: w, ...tm });
+          if (w === 390 && tm.rows) {
+            try {
+              await settle(mp);
+              await mp.screenshot({ path: path.join(screensDir, 'mobile_table.png') });
+              report.screenshots.push('screens/mobile_table.png');
+            } catch (e) { /* the measures above are the check */ }
+          }
+          await mp.evaluate(() => window.scrollTo(0, 0));
           // every <details> open and the first asset's detail panel open
           await mp.evaluate(() => { document.querySelectorAll('details').forEach((d) => { d.open = true; }); });
           const row = mp.locator('table[data-role="asset-table"] tr[data-role="asset-row"]').first();
@@ -1400,6 +1591,21 @@ async function main() {
       add('mobile_overflow', mProblems.length === 0, mProblems.length ? 'تمرير أفقي على الجوال: ' + mProblems.join('؛ ')
         : `لا تمرير أفقي على ${MOBILE_WIDTHS.join(' و')} بكسل في العرض الافتراضي ومع فتح كل التفاصيل وتفاصيل أصل؛ اللقطات: screens/mobile.png، screens/mobile_${MOBILE_WIDTHS[0]}.png، screens/mobile_detail.png`,
         results);
+      const tProblems = [];
+      for (const r of tableResults) {
+        if (r.error) { tProblems.push(`${r.width}px: ${r.error}`); continue; }
+        if (r.theadH > 60) tProblems.push(`${r.width}px: شريط عناوين الأعمدة بارتفاع ${r.theadH} بكسل`);
+        if (r.wrapSW !== null && r.wrapSW > r.wrapCW + 1) tProblems.push(`${r.width}px: الجدول يحتاج تمريرًا أفقيًا داخل إطاره (${r.wrapSW} > ${r.wrapCW})`);
+        for (const [k, c] of Object.entries(r.cells || {})) {
+          if (!c) tProblems.push(`${r.width}px: خانة «${COL_AR[k]}» غير موجودة في الصف`);
+          else if (!(c.w > 0 && c.h > 0)) tProblems.push(`${r.width}px: خانة «${COL_AR[k]}» غير ظاهرة`);
+          else if (c.left < -1 || c.right > r.vw + 1) tProblems.push(`${r.width}px: خانة «${COL_AR[k]}» خارج الشاشة (${c.left}..${c.right} من ${r.vw})`);
+        }
+      }
+      const withRows = tableResults.filter((r) => r.rows);
+      add('mobile_table', tProblems.length === 0, tProblems.length ? 'جدول الأصول على الجوال: ' + tProblems.join('؛ ')
+        : (withRows.length ? `على ${withRows.map((r) => r.width).join(' و')} بكسل تظهر القيمة والإيراد والعائد وحالة البيانات لأول أصل داخل الشاشة دون تمرير أفقي ولا شريط عناوين طويل؛ اللقطة: screens/mobile_table.png`
+          : 'لا توجد صفوف في جدول الأصول لفحصها على الجوال'), tableResults);
     });
 
     // ---- global -------------------------------------------------------------------------------------------
