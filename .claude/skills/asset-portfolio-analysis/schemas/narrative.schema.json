@@ -239,7 +239,8 @@
         "verification_needed": {"type": "array", "items": {"$ref": "#/$defs/text"}},
         "proposed_action": {"$ref": "#/$defs/text"},
         "severity": {"$ref": "#/$defs/severity"},
-        "is_proven_problem": {"type": "boolean"}
+        "is_proven_problem": {"type": "boolean"},
+        "scope_label": {"$ref": "#/$defs/text"}
       }
     },
     "recommendation": {
@@ -286,7 +287,9 @@
         "action": {"$ref": "#/$defs/text"},
         "deliverable": {"$ref": "#/$defs/text"},
         "owner_role": {"$ref": "#/$defs/text"},
-        "status": {"enum": ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]}
+        "status": {"enum": ["لم يبدأ", "قيد التنفيذ", "منجز", "متعثر"]},
+        "success_kpi": {"$ref": "#/$defs/text"},
+        "duration": {"$ref": "#/$defs/text"}
       }
     },
     "scenario_case": {

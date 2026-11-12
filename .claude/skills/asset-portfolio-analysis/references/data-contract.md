@@ -166,7 +166,7 @@ Text fields: `{"v": "حي النموذج", "s": "value", "raw": "...", "ref": ".
                        "asset_type": "عمارة", "location": "جنوب الرياض", "managed_for_others": false},
               "dims_evidence": {"use": "عقارات الجمعية !M3", "ownership": "عقارات الجمعية !J3 (شراء)"},
               "field_overrides": {"rev.2025.excl_vat": {"s": "zero_confirmed", "evidence": "..."}},
-              "notes": "..."},
+              "notes": "...", "flag": "تصنيف يحتاج تأكيدًا", "display_name": "اسم معروض مصحح"},  // flag/display_name optional
     "W-1": {"rollup": {"from": ["W-2", "W-3", "W-4"], "fields": ["rev.2024.recorded"],   // units carry the revenue,
                        "evidence": "الإيراد مدون على الوحدات H4:H6 لا على صف العمارة"}}   // the building only its valuation
   },
@@ -511,7 +511,11 @@ Parity cases: default; each period; for each filter dim up to `parity_max_values
                        "ranking": {"impact": "high|medium|low", "urgency": "...", "evidence_strength": "strong|moderate|weak",
                                    "feasibility": "...", "cost_level": "..."}, "priority": 1}],
   "top_gaps": ["G1", "G2", "G3"], "top_actions": ["R1", "R2", "R3"],
-  "plan": {"d30": [{"rec_id": "R1", "action": "...", "deliverable": "...", "owner_role": "..."}], "d60": [], "d90": []},
+  "plan": {"d30": [{"rec_id": "R1", "action": "...", "deliverable": "...", "owner_role": "...",
+                    "success_kpi": "مؤشر إنجاز البند نفسه (اختياري)", "duration": "موعد البند (اختياري، مثل «اليوم 30 من اعتماد الخطة»)"}],
+           "d60": [], "d90": []},
+  "x_headline": "سطر واحد بالرموز فوق الخلاصة (اختياري): أهم ثلاثة أرقام للمجلس",
+  "x_prerequisite": {"rec_id": "R4", "title": "قرار مسبق", "duration": "30 يومًا", "text": "..."},   // optional: shown above the top actions
   "scenarios": {"status": "not_prepared", "reason": "...", "required_inputs": ["..."]},
   "data_issues_extra": [{"id": "DQ-X1", "where": "...", "detail": "...", "impact": "...", "treatment": "..."}],
   "exclusions": [{"what": "...", "where": "...", "reason": "..."}],
@@ -541,6 +545,14 @@ Strict rules enforced by `schemas/narrative.schema.json` + `validate_analysis.py
   `matching`, `metric_deltas`; a hand summary may give `counts` + `examples[{category, ...}]` instead. When 06 holds only
   a summary, the export takes the detail from `RUN/version_comparison.json`; when 06 has no `recommendation_followup`,
   the dashboard shows the one inside `version_comparison`.
+- Gap `scope_label` (optional) is the board wording of `scope` on the gap cards (else a `group:` scope reads
+  «السجلات المصنفة «…» في «…» (n سجلات)»). Gap evidence objects may carry `note`, shown before the value on the chip
+  («إيراد 2024 (للمقارنة بعد التحقق)»).
+- Plan items may carry their own `success_kpi` and `duration`: the plan cards show «مؤشر الإنجاز» and «الموعد», and the
+  workbook writes them in «مؤشر النجاح» and «المدة» (else the phase window and the recommendation's indicator, labelled
+  as such); «تاريخ المتابعة» is proposed as the analysis date + the phase days.
+- `x_headline` (one line with tokens) and `x_prerequisite` (a decision that precedes the top actions: its `rec_id`, `title`,
+  `duration`, `text`) open the executive summary with the decision chips (BE-06/BE-02).
 - Recommendation `title` (optional, 1–60 chars) is the heading of the recommendation (else `target`) and of its
   top-action card (else `first_action`, then `target`); the follow-up table and sheet use it too.
 - Unknown top-level keys are rejected; deliberate extensions use the `x_` prefix.
@@ -664,6 +676,14 @@ numbers, narrative list counts, 07/08 counts and shares × 100.
   `file_modified` then holds that date for the caption «آخر تعديل للملف المصدر».
 - `meta.confidentiality` defaults to «سري — للاستخدام الداخلي» (header badge and every printed page footer). Optional 04
   `"dashboard": {"confidentiality": "<text>" | false}` (or 06 `x_confidentiality`) replaces or removes it.
+- Other optional 04 `dashboard` keys: `disclaimer` (one line in the page footer: what the page is, e.g. an analytical study
+  and not an official document), `publish: true` (same as `build_dashboard.py --publish`: the page for a shared link —
+  records outside the scope withheld and summarised per sheet in `analysis.withheld`, deed numbers of field_meta group
+  `deed` masked to their last 3 digits in every text, links and notes that quote a withheld line dropped or masked; the
+  supporting workbook keeps everything), `strip_metrics` (the three metric ids of the phone headline strip),
+  `concentration_metrics` (`{"value": id, "revenue": id}` for the concentration chart), `trend_metrics` (growth metric
+  ids listed, with their riyal change, in place of the trend bars while comparability is not confirmed), `charts_note`
+  (one line under the charts). 05 `inputs` paths are reduced to file names in every build.
 `build_dashboard.py` exits 2 while 07 has blocking errors (and 1 when 06/07 are missing) unless `--draft`; a draft shows a
 «مسودة» banner and fails the browser check `draft` unless `--allow-draft`. Every string is scrubbed: keys matching the
 shared personal-data key pattern are dropped and block-level values are masked.

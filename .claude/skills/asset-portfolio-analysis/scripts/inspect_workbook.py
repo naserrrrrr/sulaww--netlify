@@ -1281,7 +1281,10 @@ def profile_columns(sa: SheetAnalysis, fam, rows: list, header: dict) -> dict:
             "header": hdr,
             "years_in_header": list(dict.fromkeys(extract_years(hdr))) if hdr else [],
             "profile": profile,
-            "samples": ([REDACTED] if samples else []) if pii_reason else samples,
+            # links (map pins, file shares) are never copied into the map: the mapping drops such columns, and a sample
+            # would carry them into a file that may be shared (F17)
+            "samples": ([REDACTED] if samples else []) if pii_reason else
+            [("«رابط محجوب»" if re.search(r"(?i)\b(?:https?://|www\.)", str(x)) else x) for x in samples],
             "mixed_types": groups >= 2,
             "pii": bool(pii_reason),
             "hints": hints,
@@ -2976,6 +2979,22 @@ def inspect(src: str, out_dir: str) -> dict:
     return wm, sas
 
 
+LINK_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s\"'<>]+")
+LINK_MASK = "«رابط محجوب»"
+
+
+def mask_links(x):
+    """F17: cell values that are links (map pins, file shares) never reach the workbook map — not in column samples,
+    header candidates or anomaly examples: the mapping drops such columns, and the map may be read by others."""
+    if isinstance(x, str):
+        return LINK_RE.sub(LINK_MASK, x) if LINK_RE.search(x) else x
+    if isinstance(x, list):
+        return [mask_links(y) for y in x]
+    if isinstance(x, dict):
+        return {k: mask_links(v) for k, v in x.items()}
+    return x
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Inspect an Excel workbook (all sheets) -> 01_workbook_map.json/.md")
     ap.add_argument("xlsx", help="path to the workbook (.xlsx/.xlsm; .xls/.ods/.xlsb are converted from a copy)")
@@ -2984,6 +3003,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
     wm, _sas = inspect(args.xlsx, args.out)
+    wm = mask_links(wm)
     jpath = os.path.join(args.out, "01_workbook_map.json")
     mpath = os.path.join(args.out, "01_workbook_map.md")
     save_json(jpath, wm)

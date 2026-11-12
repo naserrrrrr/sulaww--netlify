@@ -1796,7 +1796,7 @@ def apply_dim_rules(records: list, rules: list) -> None:
                         d = d if isinstance(d, list) else ([d] if d is not None else ["unknown"])
                     dims[dim] = d
                     if text:
-                        r["dims_evidence"].setdefault(dim, f"{tv.get('ref')} («{text}» — غير مطابق؛ القيمة الافتراضية)")
+                        r["dims_evidence"].setdefault(dim, f"{tv.get('ref')} («{text}»؛ لم يحدد الملف هذا التصنيف)")
 
 
 def apply_overrides(records: list, by_id: dict, overrides: dict, issues: Issues, meta: dict) -> None:
@@ -1815,6 +1815,9 @@ def apply_overrides(records: list, by_id: dict, overrides: dict, issues: Issues,
                 r[k] = ov[k]
         if "notes" in ov:
             r["notes"] = ov["notes"]
+        for k in ("flag", "display_name"):   # board-facing caveat beside the name / cleaned display name
+            if ov.get(k):
+                r[k] = ov[k]
         for k, v in (ov.get("dims") or {}).items():
             r["dims"][k] = copy.deepcopy(v)
             (r.get("_oov") or {}).pop(k, None)

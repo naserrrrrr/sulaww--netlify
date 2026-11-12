@@ -317,6 +317,10 @@ if [[ -f "$TESTS_DIR/test_dashboard_board.py" ]]; then
   run_step "tests/test_dashboard_board.py (review flag, data notes, priority, one-asset charts, mobile cards, print, confidentiality, study date, font, hints)" 0 \
     "${PY[@]}" "$TESTS_DIR/test_dashboard_board.py" "${BB_ARGS[@]}" || true
 else skip "tests/test_dashboard_board.py (غير موجود)"; fi
+if [[ -f "$TESTS_DIR/test_publish_round.py" ]] && have_files "publish round" "$RUN/05_metrics.json" "$XLSX"; then
+  run_step "tests/test_publish_round.py (pii scan without <dimension>, shareable page, workbook audit, assumption kinds, links, reference regex)" 0 \
+    "${PY[@]}" "$TESTS_DIR/test_publish_round.py" --run "$RUN" --xlsx "$XLSX" --work "$BUILD/publish_round" || true
+fi
 if [[ -f "$TESTS_DIR/test_install.sh" ]]; then
   # install.sh into a scratch HOME (pip stubbed, no network); under 1 s
   run_step "tests/test_install.sh (install.sh in a scratch HOME, re-run from the installed copy)" 0 \

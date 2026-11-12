@@ -285,7 +285,8 @@ window.__apaCheck = (function () {
         return { key: key, dataValue: n.getAttribute('data-value'), text: (n.textContent || '').trim(),
           expected: typeof exp === 'number' ? exp : (exp === undefined ? 'missing' : null) };
       });
-      return { id: c.getAttribute('data-chart-id'), svg: !!c.querySelector('svg'),
+      // a table drawn in place of a chart (the trend while comparability is unverified) counts as the drawing
+      return { id: c.getAttribute('data-chart-id'), svg: !!c.querySelector('svg'), table: !!c.querySelector('[data-role="chart-table"]'),
         empty: !!empty, emptyText: empty ? (empty.textContent || '').trim() : null, numbers: nums };
     });
   }
@@ -468,10 +469,10 @@ function compareCards(snap) {
 function compareCharts(snap) {
   const problems = [];
   for (const ch of snap.charts) {
-    if (!ch.svg && !ch.empty) problems.push(`الرسم ${ch.id}: لا يحتوي <svg> ولا [data-role=chart-empty]`);
-    else if (!ch.svg && ch.empty && !ch.emptyText) problems.push(`الرسم ${ch.id}: حالة فارغة دون سبب مكتوب`);
+    if (!ch.svg && !ch.table && !ch.empty) problems.push(`الرسم ${ch.id}: لا يحتوي <svg> ولا جدولًا [data-role=chart-table] ولا [data-role=chart-empty]`);
+    else if (!ch.svg && !ch.table && ch.empty && !ch.emptyText) problems.push(`الرسم ${ch.id}: حالة فارغة دون سبب مكتوب`);
     // a drawn chart declares the numbers it prints, so they can be held against computeAll (template contract)
-    if (ch.svg && !(ch.numbers || []).length) problems.push(`الرسم ${ch.id}: لا يعلن أرقامه المعروضة [data-role=chart-number] للمقارنة بـcomputeAll`);
+    if ((ch.svg || ch.table) && !(ch.numbers || []).length) problems.push(`الرسم ${ch.id}: لا يعلن أرقامه المعروضة [data-role=chart-number] للمقارنة بـcomputeAll`);
     for (const n of ch.numbers || []) {
       if (n.expected === 'missing') { problems.push(`الرسم ${ch.id}: الرقم ${n.key} غير موجود في computeAll`); continue; }
       const dv = n.dataValue === '' || n.dataValue === null ? null : Number(n.dataValue);
@@ -1097,17 +1098,44 @@ async function main() {
           const box = await det.boundingBox();
           if (box && box.height > 0) {
             const top = box.y + (await page.evaluate(() => window.scrollY));
-            const nAll = Math.max(1, Math.ceil((box.height - MIN_TAIL) / 1400));
-            const n = Math.min(30, nAll);
-            for (let i = 0; i < n; i++) {
-              const y = top + i * 1400;
-              const hgt = (i === n - 1 && n === nAll) ? box.height - i * 1400 : Math.min(1400, box.height - i * 1400);
-              if (hgt <= 0) break;
-              const name = `details_open_${String(i + 1).padStart(2, '0')}.png`;
-              await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
-                clip: { x: Math.max(0, box.x), y, width: box.width, height: hgt } });
-              report.screenshots.push('screens/' + name);
+            // every part of the details is captured (no cap on the number of slices: a cap left the last sections —
+            // exclusions, sources, data requests, all records — unseen while the check passed)
+            const n = Math.max(1, Math.ceil((box.height - MIN_TAIL) / 1400));
+            for (const f of fs.readdirSync(screensDir)) if (/^details_open_\d+\.png$/.test(f)) fs.unlinkSync(path.join(screensDir, f));
+            let covered = 0;
+            // one viewport-sized capture per slice (scroll, then clip the viewport): a full-page capture per slice
+            // re-rendered the whole page each time and took minutes on a long study
+            const vp = page.viewportSize();
+            const tall = Math.max(...Array.from({ length: n }, (_, i) => (i === n - 1 ? box.height - i * 1400 : 1400)), 1);
+            await page.setViewportSize({ width: vp.width, height: Math.ceil(Math.min(Math.max(tall, 1400), 4000)) });
+            try {
+              // positions read again at the capture viewport (a taller window may move the section by a few pixels)
+              const b2 = (await det.boundingBox()) || box;
+              const top2 = b2.y + (await page.evaluate(() => window.scrollY));
+              for (let i = 0; i < n; i++) {
+                const y = top2 + i * 1400;
+                const hgt = i === n - 1 ? b2.height - i * 1400 : Math.min(1400, b2.height - i * 1400);
+                if (hgt <= 0) break;
+                const name = `details_open_${String(i + 1).padStart(2, '0')}.png`;
+                const sy = await page.evaluate((yy) => { window.scrollTo(0, yy); return window.scrollY; }, y);
+                if (y - sy + hgt > (page.viewportSize().height + 1)) {
+                  // a last slice taller than the viewport: fall back to a full-page clip
+                  await page.screenshot({ path: path.join(screensDir, name), fullPage: true,
+                    clip: { x: Math.max(0, box.x), y, width: box.width, height: hgt } });
+                } else {
+                  await page.screenshot({ path: path.join(screensDir, name),
+                    clip: { x: Math.max(0, box.x), y: y - sy, width: box.width, height: hgt } });
+                }
+                report.screenshots.push('screens/' + name);
+                covered = i * 1400 + hgt;
+              }
+            } finally {
+              await page.setViewportSize(vp);
             }
+            if (covered + 1 < box.height) {
+              report.warnings.push({ check: 'details_open', detail: `مقاطع التفاصيل المفتوحة تغطي ${Math.round(covered)} من ${Math.round(box.height)} بكسل فقط` });
+            }
+            report.details_capture = { height: Math.round(box.height), covered: Math.round(covered), slices: n };
           }
           await unstick.evaluate((el) => el.remove());
         }
@@ -1167,6 +1195,12 @@ async function main() {
       const probs = [];
       if (pii.selfTest.length) probs.push('أنماط pii_patterns.json لا تعمل في JS كما في Python: ' + pii.selfTest.slice(0, 5).join('؛ '));
       if (blockHits.length) probs.push('وُجدت بيانات شخصية (لا تُطبع القيم): ' + fmtTally(blockSum));
+      // local paths in the page source reveal the analyst's workspace on a shared page (build_dashboard keeps file names)
+      let htmlRaw = '';
+      try { htmlRaw = fs.readFileSync(args.html, 'utf8'); } catch (e) { /* the page loaded; the read is best effort */ }
+      htmlRaw = htmlRaw.replace(/data:[a-z0-9/+.-]+;base64,[A-Za-z0-9+/=]+/gi, '');  // embedded fonts: base64 may hold «/tmp/» by chance
+      const localPaths = (htmlRaw.match(/file:\/\/|\/home\/|\/tmp\/|\/Users\//g) || []).length;
+      if (localPaths) probs.push(`مصدر الصفحة يحوي ${localPaths} مسارًا محليًا (/home/ أو /tmp/ أو file://)`);
       if (reviewHits.length) {
         report.warnings.push({ check: 'privacy', detail: 'أرقام من 10 خانات تبدأ بـ1 أو 2 قد تكون أرقام هوية (أو صكوكًا) — راجعها: ' + fmtTally(reviewSum) });
       }
@@ -1390,7 +1424,7 @@ async function main() {
                 const rv = window.__apaCheck.reviewOf(id, null);
                 if (!rv) return;
                 const txt = norm(card.innerText);
-                if (!txt.includes('يحتاج تحقق')) bad.push(`${id}: «يحتاج تحقق» غير ظاهر على الورق`);
+                if (!/يحتاج (?:إلى )?تحقق/.test(txt)) bad.push(`${id}: «يحتاج إلى تحقق» غير ظاهر على الورق`);
                 if (rv.reason && !txt.includes(norm(rv.reason))) bad.push(`${id}: سبب التحقق غير ظاهر على الورق`);
               });
             });

@@ -2,7 +2,7 @@
 """build_dashboard.py — assemble RUN/analysis.json and the self-contained RUN/dashboard.html.
 
 Usage:
-    python3 "$SKILL_DIR/scripts/build_dashboard.py" --run-dir "$RUN" [--draft]
+    python3 "$SKILL_DIR/scripts/build_dashboard.py" --run-dir "$RUN" [--draft] [--publish]
     python3 "$SKILL_DIR/scripts/build_dashboard.py" --self-test   (token grammar, privacy scrub, meta, fonts, hints)
 
 Reads (data-contract.md §0):
@@ -37,6 +37,12 @@ Board-facing meta (analysis.json `meta`, read by the template):
 Facts: every {{f:key}} fact is embedded except the per-record values rec.<record_id>.<field_id> (C2), of which only
 those the narrative cites are embedded (the records are embedded anyway).
 Printed next-step hints name the scripts by absolute, quoted paths built from this script's own location.
+
+Shareable build (--publish, or 04 dashboard.publish: true) for a page that will be shared as a link:
+    records outside the study scope (isolated / excluded) are withheld from the page — the page lists one summary row
+    per source sheet (count, reason) and the supporting workbook keeps every row; data notes that touch withheld records
+    only are counted, not listed; title-deed numbers (field_meta group "deed") are masked to their last 3 digits in every
+    text of the page. Local file paths (05 inputs) are reduced to file names in every build.
 
 Privacy (defence in depth; normalize.py already drops PII columns): keys matching apa_common.PII_KEY_RE are dropped
 and block-level personal-data patterns of assets/pii_patterns.json are masked with apa_common.mask_pii in every string;
@@ -384,6 +390,184 @@ def clean_records(records: list, drop: set) -> list:
     return out
 
 
+def strip_local_paths(metrics_doc: dict) -> dict:
+    """05 `inputs` hold the absolute paths of 03/04 on the analyst's machine: the page keeps their file names only (a
+    shared page must not reveal the workspace layout)."""
+    out = copy.copy(metrics_doc or {})
+    inp = out.get("inputs")
+    if isinstance(inp, dict):
+        out["inputs"] = {k: (os.path.basename(v) if isinstance(v, str) and (os.sep in v or "/" in v) else v)
+                         for k, v in inp.items()}
+    return out
+
+
+ABS_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/]|file://)\S*$")
+
+
+def strip_abs_paths(x):
+    """Every string of the page that is an absolute local path (a run folder in a version comparison, an input file)
+    becomes its last component: the page names files, never the analyst's workspace."""
+    if isinstance(x, str):
+        if ABS_PATH_RE.match(x) and ("/" in x[1:] or "\\" in x):
+            return os.path.basename(x.rstrip("/\\")) or x
+        return x
+    if isinstance(x, list):
+        return [strip_abs_paths(y) for y in x]
+    if isinstance(x, dict):
+        return {k: strip_abs_paths(v) for k, v in x.items()}
+    return x
+
+
+LOCAL_PATH_RE = re.compile(r"(?:file://|/home/|/tmp/|/Users/|[A-Za-z]:\\Users\\)")
+
+
+def deed_fields(field_meta: dict) -> set:
+    """Fields holding a title-deed number: field_meta group "deed" (data-contract §3), or a text field whose id is
+    deed_no / ends with .deed_no."""
+    out = set()
+    for f, m in (field_meta or {}).items():
+        m = m or {}
+        if m.get("group") == "deed" or f == "deed_no" or f.endswith(".deed_no"):
+            out.add(f)
+    return out
+
+
+DEED_DIGITS_RE = re.compile(r"\d{5,}")
+
+
+def mask_deed(text: str) -> str:
+    """«1234567890» -> «•••890»: every run of 5+ digits keeps its last 3 digits only."""
+    return DEED_DIGITS_RE.sub(lambda m: "•••" + m.group(0)[-3:], str(text))
+
+
+def publish_view(analysis: dict, deed_f: set, mapping: dict = None) -> dict:
+    """The shareable page (--publish): withhold records outside the study scope and mask deed numbers.
+    Returns a summary of what was withheld (also stored in analysis["withheld"])."""
+    recs = analysis.get("records") or []
+    keep = [r for r in recs if isinstance(r, dict) and r.get("scope") == "in_scope"]
+    gone = [r for r in recs if isinstance(r, dict) and r.get("scope") != "in_scope"]
+    gone_ids = {r.get("id") for r in gone}
+    sheet_reason = {}
+    for sd in (mapping or {}).get("sheets") or []:
+        if isinstance(sd, dict) and sd.get("sheet") is not None:
+            sheet_reason[str(sd["sheet"]).strip()] = sd.get("reason")
+    groups = {}
+    for r in gone:
+        src = r.get("source") or {}
+        key = (str(src.get("sheet") or "").strip(), r.get("scope"))
+        g = groups.setdefault(key, {"sheet": key[0], "scope": key[1], "count": 0, "record_types": {}, "reasons": {}})
+        g["count"] += 1
+        rt = r.get("record_type") or "other"
+        g["record_types"][rt] = g["record_types"].get(rt, 0) + 1
+        why = str(r.get("scope_reason") or "").strip()
+        if why:
+            g["reasons"][why] = g["reasons"].get(why, 0) + 1
+    rows = []
+    for g in groups.values():
+        reasons = sorted(g["reasons"].items(), key=lambda kv: -kv[1])
+        rows.append({"sheet": g["sheet"], "scope": g["scope"], "count": g["count"], "record_types": g["record_types"],
+                     "reason": reasons[0][0] if reasons else (sheet_reason.get(g["sheet"]) or None)})
+    rows.sort(key=lambda x: (x["scope"] != "isolated", -x["count"], x["sheet"]))
+    issues = analysis.get("issues") or []
+    kept_issues, n_issues_gone = [], 0
+    for x in issues:
+        ids = [i for i in (x.get("record_ids") or []) if isinstance(i, str)] if isinstance(x, dict) else []
+        if ids and all(i in gone_ids for i in ids):
+            n_issues_gone += 1
+            continue
+        if ids and any(i in gone_ids for i in ids):
+            x = dict(x)
+            x["record_ids"] = [i for i in ids if i not in gone_ids]
+        kept_issues.append(x)
+    analysis["records"] = keep
+    analysis["issues"] = kept_issues
+    # the largest line of a withheld source («sources.<id>.<field>.max») is one row's amount: dropped unless the
+    # narrative cites it (sums and counts of the source stay: they are aggregates the scope decision needs)
+    gone_src = {(r.get("source") or {}).get("source_id") for r in gone} - {(r.get("source") or {}).get("source_id") for r in keep}
+    facts = analysis.get("facts")
+    if isinstance(facts, dict) and gone_src:
+        cited = json.dumps(analysis.get("narrative") or {}, ensure_ascii=False)
+        for k in list(facts):
+            m = re.match(r"^sources\.([^.]+)\..+\.(max|max_share)$", str(k))
+            if m and m.group(1) in gone_src and ("f:" + k) not in cited:
+                del facts[k]
+    wbs = analysis.get("workbook_map_summary")
+    n_links_gone = 0
+    if isinstance(wbs, dict) and isinstance(wbs.get("links"), list):
+        # a possible link to a withheld record or to a line of an isolated/excluded sheet quotes that line's name in its
+        # basis: kept in the supporting workbook only
+        iso_sheets = {str(d.get("sheet") or "").strip() for d in (mapping or {}).get("sheets") or []
+                      if isinstance(d, dict) and d.get("decision") in ("isolated", "excluded")}
+        iso_sheets |= {str((r.get("source") or {}).get("sheet") or "").strip() for r in gone}
+        iso_sheets.discard("")
+
+        def withheld_link(l):
+            if not isinstance(l, dict):
+                return False
+            other = str(l.get("other_ref") or "").split("!")[0].strip()
+            return l.get("record") in gone_ids or other in iso_sheets
+        n_links_gone = sum(1 for l in wbs["links"] if withheld_link(l))
+        wbs["links"] = [l for l in wbs["links"] if not withheld_link(l)]
+    # deed numbers: masked on the record and in every text that quotes one (an issue naming a shared deed)
+    deeds = set()
+    for r in keep:
+        for f in deed_f:
+            t = (r.get("fields") or {}).get(f)
+            if isinstance(t, dict):
+                for k in ("v", "raw"):
+                    v = t.get(k)
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        v = str(int(v)) if float(v).is_integer() else str(v)
+                        t[k] = v
+                    if isinstance(v, str) and DEED_DIGITS_RE.search(v):
+                        deeds.update(DEED_DIGITS_RE.findall(v))
+                        t[k] = mask_deed(v)
+    for r in gone:
+        for f in deed_f:
+            t = (r.get("fields") or {}).get(f)
+            if isinstance(t, dict):
+                for k in ("v", "raw"):
+                    v = t.get(k)
+                    if v is not None:
+                        deeds.update(DEED_DIGITS_RE.findall(str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)))
+    deeds = sorted(deeds, key=len, reverse=True)
+    # names of withheld lines quoted in other texts (a workbook note on a duplicated name, a name match between sheets):
+    # replaced, unless an in-scope record carries the same name
+    kept_names = {str(r.get("name") or "").strip() for r in keep} | {str(r.get("display_name") or "").strip() for r in keep}
+    hidden = sorted({str(r.get("name") or "").strip() for r in gone} - kept_names, key=len, reverse=True)
+    hidden = [x for x in hidden if len(x) >= 4 and not any(x in k for k in kept_names if k)]
+    n_names = 0
+
+    def walk(x):
+        nonlocal n_names
+        if isinstance(x, str):
+            for d in deeds:
+                if d in x:
+                    x = re.sub(r"(?<!\d)" + re.escape(d) + r"(?!\d)", "•••" + d[-3:], x)
+            for nm in hidden:
+                if nm in x:
+                    n_names += x.count(nm)
+                    x = x.replace(nm, "سطر معزول")
+            return x
+        if isinstance(x, list):
+            return [walk(y) for y in x]
+        if isinstance(x, dict):
+            return {k: walk(v) for k, v in x.items()}
+        return x
+    if deeds or hidden:
+        for key in list(analysis.keys()):
+            analysis[key] = walk(analysis[key])
+    summary = {"records": rows, "n_records": len(gone), "n_issues": n_issues_gone, "n_links": n_links_gone,
+               "n_deeds_masked": len(deeds), "n_names_masked": n_names,
+               "note": "نسخة للمشاركة: السجلات خارج نطاق الدراسة ملخصة هنا دون أسماء أو مبالغ، وأرقام الصكوك مقنّعة "
+                       "بآخر ثلاث خانات؛ التفصيل الكامل في المرفق الداعم (للمراجعة الداخلية، لا يُنشر)."}
+    analysis["withheld"] = summary
+    meta = analysis.get("meta")
+    if isinstance(meta, dict):
+        meta["publish"] = True
+    return summary
+
+
 # ---------------------------------------------------------------------------
 # Summaries
 # ---------------------------------------------------------------------------
@@ -604,6 +788,8 @@ def build_meta(mapping: dict, rec_doc: dict, config: dict, wb: dict, draft: bool
     out.update(study_date_meta(m, wb))
     out.update({
         "confidentiality": confidentiality_label(config, narrative),
+        # one line under the page and on paper: what the page is (e.g. an analytical study, not an official document)
+        "disclaimer": ((config.get("dashboard") or {}).get("disclaimer") or None) if isinstance(config.get("dashboard"), dict) else None,
         "currency": config.get("currency") or rec_doc.get("currency") or m.get("currency") or "SAR",
         "file_name": fname,
         "sha256_short": sha[:12] if sha else None,
@@ -694,6 +880,21 @@ def self_test() -> int:
     fx = {"records.isolated": {"value": 1, "unit": "count", "label": "x"},
           "rec.A-1.val.demo": {"value": 5, "unit": "SAR", "label": "y"}, "rec.A-2.val.demo": {"value": 6, "unit": "SAR", "label": "z"}}
     eq("rec facts cited only", sorted(facts_for_page(fx, {"t": "قيمة {{f:rec.A-1.val.demo}}"})), ["rec.A-1.val.demo", "records.isolated"])
+    # local paths reduced to file names; the shareable view withholds out-of-scope records and masks deeds (fictional)
+    eq("abs paths in any string", strip_abs_paths({"prev": {"run_dir": "/srv/x/run_a/"}, "t": "نص / عادي", "u": "/"}),
+       {"prev": {"run_dir": "run_a"}, "t": "نص / عادي", "u": "/"})
+    eq("paths stripped", strip_local_paths({"inputs": {"records": "/home/x/run/03_records.json", "source_sha256": "ab"}})["inputs"],
+       {"records": "03_records.json", "source_sha256": "ab"})
+    an = {"meta": {}, "records": [
+        {"id": "A-1", "scope": "in_scope", "source": {"sheet": "س"}, "fields": {"deed_no": {"v": 9876543210, "s": "value", "raw": "9876543210"}}},
+        {"id": "B-1", "scope": "isolated", "source": {"sheet": "مخفية"}, "record_type": "asset", "scope_reason": "لم يثبت",
+         "name": "عقار تجريبي", "fields": {"deed_no": {"v": "1112223334", "s": "value", "raw": "1112223334"}}}],
+        "issues": [{"id": "DQ-1", "record_ids": ["B-1"], "detail": "x"}, {"id": "DQ-2", "record_ids": ["A-1"], "detail": "صك 9876543210 مشترك"}]}
+    smy = publish_view(an, {"deed_no"})
+    eq("publish records", [r["id"] for r in an["records"]], ["A-1"])
+    eq("publish summary", (smy["records"][0]["sheet"], smy["records"][0]["count"], smy["n_issues"]), ("مخفية", 1, 1))
+    eq("publish deed masked", (an["records"][0]["fields"]["deed_no"]["raw"], an["issues"][0]["detail"]), ("•••210", "صك •••210 مشترك"))
+    eq("publish no names", "عقار تجريبي" in json.dumps(an, ensure_ascii=False), False)
     for f in fails:
         eprint("فشل: " + f)
     print(f"build_dashboard --self-test: {'ناجح' if not fails else 'فشل ' + str(len(fails))}")
@@ -708,6 +909,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="بناء analysis.json وdashboard.html من مجلد التشغيل")
     ap.add_argument("--run-dir", required=True, help="مجلد التشغيل (RUN)")
     ap.add_argument("--draft", action="store_true", help="بناء مسودة رغم الأخطاء المانعة أو غياب السرد/التحقق (تظهر لافتة «مسودة»)")
+    ap.add_argument("--publish", action="store_true",
+                    help="نسخة للمشاركة برابط: تُلخَّص السجلات خارج النطاق دون أسماء أو مبالغ وتُقنَّع أرقام الصكوك "
+                         "(يكافئ dashboard.publish: true في 04)")
     args = ap.parse_args(argv)
     run = args.run_dir
     if not os.path.isdir(run):
@@ -818,7 +1022,7 @@ def main(argv=None) -> int:
         "records": records,
         "excluded_rows": rec_doc.get("excluded_rows") or [],
         "config": config,
-        "metrics": metrics,
+        "metrics": strip_local_paths(metrics),
         "narrative": narrative_r,
         "workbook_map_summary": workbook_summary(wb, mapping),
         "issues": issues,
@@ -827,6 +1031,11 @@ def main(argv=None) -> int:
         # per-record values (rec.*) only when the narrative cites them
         "facts": facts_for_page(facts, narrative),
     }
+    publish = bool(args.publish or (isinstance(config.get("dashboard"), dict) and config["dashboard"].get("publish") is True))
+    withheld = publish_view(analysis, deed_fields(field_meta), mapping) if publish else None
+    if not publish and isinstance(analysis.get("meta"), dict):
+        analysis["meta"]["publish"] = False
+    analysis = strip_abs_paths(analysis)
     sc = Scrubber()
     analysis = sc.walk(analysis)
 
@@ -845,6 +1054,10 @@ def main(argv=None) -> int:
     out_html = os.path.join(run, "dashboard.html")
     with open(out_html, "w", encoding="utf-8") as fh:
         fh.write(html)
+    lp = LOCAL_PATH_RE.findall(data_js)
+    if lp:
+        eprint("تنبيه خصوصية: بيانات اللوحة تحوي " + n_ar(len(lp), "مسارًا محليًا واحدًا", "مسارين محليين", "مسارات محلية", "مسارًا محليًا")
+               + " (/home/ أو /tmp/ أو file://)؛ راجع مصدره قبل مشاركة اللوحة.")
 
     if tr.unknown:
         eprint("تنبيه: رموز {{m:...}} تشير إلى مؤشرات أو حقول غير موجودة في 05_metrics.json وعُرضت «غير متاح»: "
@@ -869,9 +1082,13 @@ def main(argv=None) -> int:
         eprint("تنبيه خصوصية: " + n_ar(sc.review_hits, "نص واحد يحوي", "نصّان يحويان", "نصوص تحوي", "نصًا يحوي")
                + " رقمًا من 10 خانات يبدأ بـ1 أو 2 (قد يكون رقم هوية أو صكًا)؛ لم يُحجب. راجعه، واحذفه من الربط أو السرد إن كان رقم هوية.")
     kb = lambda p: f"{os.path.getsize(p) / 1024:,.0f} ك.ب"  # noqa: E731
+    if withheld is not None:
+        print("  نسخة للمشاركة: حُجب " + n_ar(withheld["n_records"], "سجل واحد", "سجلان", "سجلات", "سجلًا")
+              + " خارج النطاق (ملخصة حسب الورقة) و" + n_ar(withheld["n_issues"], "ملاحظة بيانات واحدة", "ملاحظتا بيانات", "ملاحظات بيانات", "ملاحظة بيانات")
+              + " تخصها وحدها، وقُنّع " + n_ar(withheld["n_deeds_masked"], "رقم صك واحد", "رقما صك", "أرقام صكوك", "رقم صك") + ".")
     state = "مسودة لم تجتز التحقق الآلي" if draft else "نسخة نهائية"
     print(f"تم البناء — {state}: {out_json} ({kb(out_json)}) · {out_html} ({kb(out_html)})")
-    print(f"  السجلات: {len(records)} · المؤشرات: {len((metrics.get('metrics') or {}))} · رموز السرد المعالجة: {tr.count}")
+    print(f"  السجلات في الصفحة: {len(analysis.get('records') or [])} من {len(records)} · المؤشرات: {len((metrics.get('metrics') or {}))} · رموز السرد المعالجة: {tr.count}")
     print("  الخطوة التالية: " + script_hint("node", "check_dashboard.mjs", "--html", shell_path(out_html), "--out", shell_path(run)))
     return 0
 

@@ -1151,6 +1151,20 @@
               "minLength": 3
             }
           }
+        },
+        "flag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A short Arabic caveat shown beside the record's name on the dashboard (e.g. a classification that needs confirmation); evidence goes in notes."
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A cleaned display name (typos and spacing of the source name corrected); the source name stays in name and in the detail panel."
         }
       }
     },

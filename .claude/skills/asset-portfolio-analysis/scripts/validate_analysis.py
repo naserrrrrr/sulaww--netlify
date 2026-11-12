@@ -1359,8 +1359,12 @@ def c_pii_values(ctx: Ctx):
             ws = wb[real]
             ci = col_to_idx(col)
             hr = info.get("header_row") or 0
-            for r_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row or 1, min_col=ci, max_col=ci,
-                                                     values_only=True), start=1):
+            # A sheet saved without a <dimension> record reads max_row=None in read-only mode; bounding the scan by
+            # max_row then read row 1 only and reported «no values» (the check never ran). reset_dimensions() makes
+            # iter_rows read every stored row instead.
+            if hasattr(ws, "reset_dimensions"):
+                ws.reset_dimensions()
+            for r_idx, row in enumerate(ws.iter_rows(min_row=1, min_col=ci, max_col=ci, values_only=True), start=1):
                 if r_idx <= hr or not row:
                     continue
                 pats = _value_patterns(row[0], info.get("header"))
@@ -1374,7 +1378,7 @@ def c_pii_values(ctx: Ctx):
     finally:
         wb.close()
     if not n_values:
-        raise Skip("أعمدة البيانات الشخصية لا تحوي قيمًا قابلة للفحص")
+        raise Skip("أعمدة البيانات الشخصية لا تحوي قيمًا قابلة للفحص بعد مسح كل صفوفها")
     return out
 
 
@@ -2319,6 +2323,56 @@ def c_export_growth_pct(ctx: Ctx):
     return out
 
 
+def c_assumption_kinds(ctx: Ctx):
+    """Rule 1 (fact / derived / inference / assumption): «assumption» is a scenario input. While the scenarios are not
+    prepared, a statement typed «assumption» is an inference or a methodological choice mislabelled."""
+    ctx.need("narrative")
+    sc = as_dict(ctx.narrative.get("scenarios"))
+    if sc.get("status") != "not_prepared":
+        raise Skip("السيناريوهات معدّة؛ «افتراض سيناريو» مقبول")
+    out = []
+    for i, a in enumerate(as_list(ctx.narrative.get("assumptions"))):
+        if isinstance(a, dict) and a.get("kind") == "assumption":
+            out.append((f"البند {a.get('id') or i} مصنف «افتراض سيناريو» ولم تُعدّ سيناريوهات؛ صنّفه «استنتاج تحليلي» "
+                        "(inference) أو اذكره في المنهجية", f"06_narrative.json:assumptions[{i}]"))
+    return out
+
+
+def c_export_issue_treatment(ctx: Ctx):
+    """Brief §4: every data issue states its impact and treatment. In the supporting workbook's «مشكلات البيانات», a row
+    rated high or medium with an empty «الأثر» or «المعالجة» cell is reported."""
+    exp = g4b_export_cells(ctx)
+    if exp is None:
+        raise Skip(f"لا يوجد {EXPORT_NAME} في مجلد التشغيل ولم يُمرَّر --xlsx-out")
+    if exp["error"]:
+        raise Skip(exp["error"])
+    if exp["stale"]:
+        raise Skip("المرفق الداعم أقدم من 03/06 وسيُعاد تصديره؛ يُفحص بعد التصدير")
+    rows = defaultdict(dict)
+    head = {}
+    for sheet, coord, text, _is_number, _header in exp["cells"]:
+        if sheet != "مشكلات البيانات":
+            continue
+        m = re.match(r"([A-Z]+)(\d+)$", coord)
+        if not m:
+            continue
+        rows[int(m.group(2))][m.group(1)] = text
+        if text in ("الأهمية", "الأثر", "المعالجة", "المعرّف"):
+            head.setdefault(text, m.group(1))
+    if not all(k in head for k in ("الأهمية", "الأثر", "المعالجة")):
+        raise Skip("ورقة «مشكلات البيانات» غير موجودة أو بلا أعمدة الأثر والمعالجة")
+    out = []
+    for r, cells in sorted(rows.items()):
+        sev = str(cells.get(head["الأهمية"]) or "")
+        if not re.match(r"(مرتفع|متوسط)", sev):
+            continue
+        miss = [k for k in ("الأثر", "المعالجة") if not str(cells.get(head[k]) or "").strip()]
+        if miss:
+            out.append((f"مشكلة بأهمية «{sev}» بلا {' ولا '.join(miss)} في المرفق الداعم",
+                        f"مشكلات البيانات!{head.get('المعرّف', 'A')}{r} ({cells.get(head.get('المعرّف', 'A'), '')})"))
+    return out
+
+
 def c_pii_review_patterns(ctx: Ctx):
     """Review-level patterns (a 10-digit number starting with 1 or 2 may be a national id or a deed number) in every
     delivered output; one warning per output."""
@@ -2500,6 +2554,8 @@ G4B_TITLES = OrderedDict([
     ("message_numbers", "أرقام رسالة التسليم (09_message.md) مطابقة لـ05 أو للحقائق أو للملف"),
     ("totals_not_reconciled", "صفوف الإجمالي المدونة بعد نطاق البيانات محفوظة للمطابقة"),
     ("partial_ownership_full_amount", "الأصول المملوكة جزئيًا لا تدخل بمبلغها الكامل دون حصة أو افتراض موثق"),
+    ("assumption_kinds", "«افتراض سيناريو» في الافتراضات فقط حين أُعدّت سيناريوهات"),
+    ("export_issue_treatment", "مشكلات البيانات المرتفعة والمتوسطة في المرفق الداعم لها أثر ومعالجة"),
     ("acknowledged_warnings", "صحة الإقرار بالتحذيرات في 06 (acknowledged_warnings)"),
     ("pii_text_patterns", "خلو السرد والسجلات والربط ورسالة التسليم من بيانات اتصال أو حسابات بنكية"),
     ("pii_html_patterns", "خلو الداشبورد وanalysis.json من بيانات اتصال أو حسابات بنكية"),
@@ -2527,6 +2583,8 @@ G4B_CHECKS = [
     ("totals_not_reconciled", "warning", c_totals_not_reconciled),
     ("partial_ownership_full_amount", "warning", c_partial_ownership_full_amount),
     ("export_growth_pct", "warning", c_export_growth_pct),
+    ("assumption_kinds", "warning", c_assumption_kinds),
+    ("export_issue_treatment", "warning", c_export_issue_treatment),
 ]
 
 
