@@ -484,6 +484,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   .chart-card { padding: 10px 12px; }
   .sub-h, .section-note { break-after: avoid; }
   .section-note { break-inside: avoid; }
+  .chart-grid > .section-note { break-after: auto; page-break-after: auto; }
+  .chart-card > figcaption { break-after: avoid; page-break-after: avoid; }
   /* the KPI heading and note stay with the first row of cards (no forced page: it left page 2 half empty) */
   #h-kpis, #kpi-note { break-after: avoid; page-break-after: avoid; }
   /* 30/60/90 plan: three stacked full-width blocks (three side-by-side columns split between pages and left the last
@@ -1205,6 +1207,11 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     return h('button', { type: 'button', class: 'btn-link', 'data-action': 'open-record', 'data-record-ref': id,
       title: asId ? recName(id) : null, onclick: function () { openDetail(id, null); } }, asId ? idc(id) : (label || recName(id)));
   }
+  /** Why a record is cited by a gap whose scope is a group: the group in board words (asset panel). */
+  function groupScopeText(scope) {
+    var g = groupScope(scope);
+    return g ? 'ضمن نطاق الفجوة: «' + dimValueLabel(g.dim, g.value) + '» في «' + dimLabel(g.dim) + '»' : 'ضمن نطاق الفجوة';
+  }
   function scopeNodes(scope) {
     var s = str(scope).trim();
     if (!s) return 'غير محدد';
@@ -1585,7 +1592,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function resultTone(r) { return growthRiyalOnly(r) && typeof r.value === 'number' ? 'warn' : metricStatus(r && r.status).tone; }
   // C1 metric review flag: a metric spec of 04 may carry review {status: "needs_verification", reason} (copied into its
   // 05 result). It belongs to the spec, so it holds under every period and filter: the card shows the amber
-  // «يحتاج تحقق» chip in place of the green «مكتمل…» one, with the reason as one caveat line (screen and paper).
+  // «يحتاج إلى تحقق» chip in place of the green «مكتمل…» one, with the reason as one caveat line (screen and paper).
   var SPEC_BY_ID = {};
   list(CFG.metrics).forEach(function (m) { if (m && m.id) SPEC_BY_ID[m.id] = m; });
   var REVIEW_AR = 'يحتاج إلى تحقق';
@@ -2005,6 +2012,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     add(fig._body, h('p', { class: 'chart-note' }, 'المجموع المعروف: ', chartNum(typeof r.total === 'number' ? fmtMoney(r.total) : '—', 'breakdowns.' + spec.id + '.total', r.total),
       ' · سجلات معروفة ' + (r.n_known || 0) + (r.n_unknown ? ' · ' + nRec(r.n_unknown) + ' بقيمة غير معروفة لا تُحسب صفرًا' : '')));
     if (r.overlap) add(fig._body, h('p', { class: 'chart-note' }, 'قد تتداخل الفئات: السجل الواحد قد يظهر في أكثر من فئة، فلا تُجمع الحصص.'));
+    if (str(spec.note).trim()) add(fig._body, h('p', { class: 'chart-note', 'data-role': 'chart-footnote' }, humanize(str(spec.note).trim())));
     add(fig._body, dataTable([
       { label: dimLabel(spec.by), cell: function (x) { return x.label; } },
       { label: 'القيمة', num: true, cell: function (x, i) { return typeof x.value === 'number' ? chartNum(fmtMoney(x.value), 'breakdowns.' + spec.id + '.rows.' + i + '.value', x.value) : 'غير متاح'; } },
@@ -2699,9 +2707,19 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     var fsec = h('div', { class: 'detail-sec' }, h('h4', null, 'الحقول وحالتها ومرجعها'));
     var t = h('table', { class: 'data-table mini-table' }, h('thead', null, h('tr', null, h('th', null, 'الحقل'), h('th', null, 'القيمة'), h('th', null, 'الحالة'), h('th', null, 'الخلية'))));
     var tb = h('tbody');
+    var fieldNotes = {};
+    recIssues(rec).forEach(function (x) {
+      if (!x || typeof x.field !== 'string' || !x.field) return;
+      (fieldNotes[x.field] = fieldNotes[x.field] || []).push(x);
+    });
     fields.forEach(function (f) {
       var tvv = rec.fields[f];
-      add(tb, h('tr', null, h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, humanize(tvv.note)) : null),
+      var fNotes = fieldNotes[f] || [];
+      add(tb, h('tr', fNotes.length ? { 'data-field-issue': fNotes.map(function (x) { return str(x.id); }).join(' ') } : null,
+        h('td', null, fieldLabel(f), tvv && tvv.note ? h('span', { class: 'rid' }, humanize(tvv.note)) : null,
+          fNotes.map(function (x) {
+            return h('span', { class: 'flag', 'data-role': 'field-issue' }, x.field_note ? str(x.field_note) : 'عليه ملاحظة بيانات', ' — ', idc(x.id));
+          })),
         h('td', null, fmtFieldValue(isOriginalKey(f) ? f.slice(0, -ORIGINAL_SUFFIX.length) : f, tvv)),
         h('td', null, isOriginalKey(f) ? h('span', { class: 'flag' }, 'قيمة مخزنة معيبة — غير مستخدمة') : (tvv ? statusAr(tvv.s) : '—')),
         h('td', null, tvv && tvv.ref ? refc(tvv.ref) : '—')));
@@ -2724,9 +2742,9 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!cs.length) add(csec, h('p', { class: 'small muted' }, 'لا تستشهد به فجوة أو توصية.'));
     cs.forEach(function (c) {
       var it = c.item;
-      var how = c.how === 'group' ? ' (عبر نطاق مجموعة)' : (c.how === 'via_gap' ? ' (عبر فجوة مرتبطة)' : '');
+      var how = c.how === 'group' ? ' — ' + groupScopeText(it.scope) : (c.how === 'via_gap' ? ' (عبر فجوة مرتبطة)' : '');
       if (c.type === 'gap') {
-        add(csec, h('div', { class: 'cite' }, h('b', null, 'فجوة ', idc(it.id), ': ' + str(it.title)), how, ' ', it.is_proven_problem ? pill('مشكلة مثبتة', 'red') : pill('يحتاج تحقق', 'neutral'),
+        add(csec, h('div', { class: 'cite', 'data-role': 'panel-gap', 'data-how': str(c.how) }, h('b', null, 'فجوة ', idc(it.id), ': ' + str(it.title)), how, ' ', provenBadge(it),
           it.impact ? h('p', { class: 'small' }, 'الأثر: ' + str(it.impact && it.impact.text !== undefined ? it.impact.text : it.impact)) : null,
           h('div', { class: 'ev' }, evidenceChips(it.evidence))));
       } else {
@@ -2759,6 +2777,8 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
   function buildDetailsShell() {
     var box = clear($('#details-list'));
     SECTIONS.forEach(function (s) {
+      // the shareable build (meta.publish) embeds only the in-scope records; the isolated lines are summarised per sheet
+      if (s[0] === 'records' && META.publish) s = [s[0], s[1], 'ضمن نطاق الدراسة (السطور المعزولة ملخصة في «المستبعدات والبيانات المعزولة»)'];
       var cnt = h('span', { class: 'cnt' });
       var d = h('details', { class: 'dsec', 'data-role': 'details-section', 'data-section': s[0], id: 'd-' + s[0] },
         h('summary', null, h('span', null, s[1]), cnt, s[2] ? h('span', { class: 'hint' }, s[2]) : null),
@@ -2824,10 +2844,13 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (last < s.length) out.push(s.slice(last));
     return out;
   }
-  /** «2026-11-07T20:54:42» → «2026-11-07 20:54». */
+  var MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  /** «2031-11-12T08:49:10» → «12 نوفمبر 2031، الساعة 08:49» (a date alone → «12 نوفمبر 2031»): no ISO run whose parts
+   *  an RTL paragraph would reorder. */
   function fmtStamp(x) {
-    var m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(str(x));
-    return m ? m[1] + ' ' + m[2] : str(x);
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(str(x));
+    if (!m || +m[2] < 1 || +m[2] > 12) return str(x);
+    return (+m[3]) + ' ' + MONTHS_AR[+m[2] - 1] + ' ' + m[1] + (m[4] ? '، الساعة ' + m[4] : '');
   }
   function renderMethodology() {
     var b = clear(SEC.methodology.body);
@@ -2863,7 +2886,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
     if (!vs.available) add(b, h('p', { class: 'small' }, 'لا توجد نتيجة تحقق مرفقة؛ هذه مسودة.'));
     else {
       add(b, h('p', { class: 'small' }, 'الأخطاء المانعة: ' + (vs.blocking_count || 0) + ' · التنبيهات: ' + (vs.warning_count || 0) +
-        (vs.acknowledged_count ? ' · تنبيهات معلَّلة في السرد: ' + vs.acknowledged_count : '') + (vs.checked_at ? ' · ' + fmtStamp(vs.checked_at) : '')));
+        (vs.acknowledged_count ? ' · تنبيهات معلَّلة في السرد: ' + vs.acknowledged_count : '') + (vs.checked_at ? ' · في ' + fmtStamp(vs.checked_at) : '')));
       var msgs = list(vs.blocking).concat(list(vs.warnings), list(vs.acknowledged));
       if (msgs.length) add(b, h('ul', { class: 'small' }, list(vs.blocking).map(function (m) { return h('li', null, pill('مانع', 'red'), ' ', humanizeNodes(m)); })
         .concat(list(vs.warnings).map(function (m) { return h('li', null, pill('تنبيه', 'warn'), ' ', humanizeNodes(m)); }),
@@ -3432,11 +3455,12 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
 
   function renderFooter() {
     var f = clear($('#footer'));
-    var when = META.built_at ? str(META.built_at).slice(0, 10) : '';
+    var when = META.built_at ? fmtStamp(META.built_at) : '';
     if (META.confidentiality) add(f, h('p', { class: 'conf-line', 'data-role': 'confidentiality-footer' }, str(META.confidentiality)));
     if (META.disclaimer) add(f, h('p', { class: 'disclaimer', 'data-role': 'disclaimer' }, str(META.disclaimer)));
-    add(f, h('p', null, 'أُعدّت آليًا من ملف ', META.file_name ? ['«', bdi(META.file_name), '»'] : 'البيانات', when ? [' في ', h('bdi', { dir: 'ltr' }, when)] : null,
-      '. البيانات مضمّنة في الصفحة ولا تتصل بأي خادم، ولا تعرض بيانات اتصال أو أسماء أشخاص' + (META.publish ? '، وأرقام الصكوك فيها مقنّعة.' : '.')));
+    add(f, h('p', { 'data-role': 'footer-note' }, 'أُعدّت آليًا من ملف ', META.file_name ? ['«', bdi(META.file_name), '»'] : 'البيانات', when ? [' في ', h('span', { 'data-role': 'built-at' }, when)] : null,
+      '. البيانات مضمّنة في الصفحة ولا تتصل بأي خادم، ولا تعرض بيانات اتصال أو أسماء مشرفين' + (META.publish ? '، وأرقام الصكوك فيها مقنّعة' : '') +
+      '؛ وأسماء العقارات كما وردت في الملف وقد تتضمن أسماء واقفين.'));
   }
 
   // ---------------------------------------------------------------------------

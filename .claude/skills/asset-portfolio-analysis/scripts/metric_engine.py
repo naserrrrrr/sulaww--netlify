@@ -525,7 +525,7 @@ def _base_result(spec: dict, period: Optional[str]) -> dict:
     }
     res.update(_texts(spec, period))
     if isinstance(spec.get("review"), dict):
-        # analyst flag «يحتاج تحقق» (data-contract.md §5): copied unchanged under every filter and period
+        # analyst flag «يحتاج إلى تحقق» (data-contract.md §5): copied unchanged under every filter and period
         res["review"] = copy.deepcopy(spec["review"])
     return res
 

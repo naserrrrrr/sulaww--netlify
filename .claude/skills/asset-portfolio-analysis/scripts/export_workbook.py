@@ -21,7 +21,7 @@ holds its own cell (a circular reference) deletes the file and exits 2.
 Board wording: engine keys (fields, metrics, issue types, check ids, gap scopes, evidence tokens) are shown by their
 Arabic labels; the keys themselves only in code-styled «المرجع التقني» columns/rows; no working-file names or step
 numbers; record codes in sentences read as the record's name; a growth whose comparability is not confirmed is shown
-in riyals only (no percentage anywhere); a metric flagged for verification (05 «review», C1) reads «يحتاج تحقق — …»;
+in riyals only (no percentage anywhere); a metric flagged for verification (05 «review», C1) reads «يحتاج إلى تحقق — …»;
 the notes of a record in «الأصول» are its 03 issues plus the analyst's notes (C3); «الأولوية n» is the recommendation's
 priority everywhere (C4).
 
@@ -46,8 +46,8 @@ import re  # noqa: E402
 from collections import OrderedDict, defaultdict  # noqa: E402
 
 from apa_common import (  # noqa: E402
-    KNOWN_STATUSES, PII_KEY_RE, REDACTED, clean_text, is_pii_header, issue_type_ar, load_json, load_vocab, mask_pii,
-    pii_value_hits, study_date_meta, study_date_text,
+    KNOWN_STATUSES, PII_KEY_RE, REDACTED, ar_stamp, clean_text, is_pii_header, issue_type_ar, load_json, load_vocab,
+    mask_pii, pii_value_hits, study_date_meta, study_date_text,
 )
 
 try:
@@ -645,7 +645,7 @@ def fmt_value_text(v, unit):
     if unit in ("count", "asset"):
         return f"{v:,.0f}"
     if unit == "SAR":
-        return f"{v:,.0f} ريال"
+        return f"{v:,.0f} ر.س"   # the dashboard's suffix: one currency label in every text (V1-7)
     return f"{v:,.2f}" if not float(v).is_integer() else f"{v:,.0f}"
 
 
@@ -1055,7 +1055,7 @@ class Export:
         n_ack = v.get("acknowledged_count") if is_num(v.get("acknowledged_count")) else len(acks)
         ack_txt = (f" · تنبيهات معلَّلة {n_ack}" + (": " + "؛ ".join(f"«{k}» ×{n}" if n > 1 else f"«{k}»" for k, n in ids.items()) if ids else "")
                    if n_ack else "")
-        when = str(v.get("generated_at") or v.get("checked_at") or "")[:16].replace("T", " ")
+        when = ar_stamp(v.get("generated_at") or v.get("checked_at"))
         # a validation that already read this attachment (--xlsx-out) is the final one: the export is then re-run only
         # to write its result here (SKILL.md step 13), and a last validation confirms the counts
         final = bool((v.get("inputs") or {}).get("xlsx_out")) if isinstance(v.get("inputs"), dict) else False
@@ -1090,7 +1090,7 @@ class Export:
              f": ضمن النطاق {by_scope.get('in_scope', 0)}، معزول {by_scope.get('isolated', 0)}، "
              f"مستبعد {by_scope.get('excluded', 0)}"),
             ("التحقق الآلي", self._validation_line(v)),
-            ("دليل الألوان", "الرمادي = غير متاح (لا يُجمع صفرًا) · الأحمر = مشكلة مثبتة فقط · الأصفر = جزئي أو يحتاج تحقق · "
+            ("دليل الألوان", "الرمادي = غير متاح (لا يُجمع صفرًا) · الأحمر = مشكلة مثبتة فقط · الأصفر = جزئي أو يحتاج إلى تحقق · "
                              "الأخضر = مكتمل للنطاق"),
         ]
         sh.table("tblContext", ["البند", "القيمة"], [[C(k, bold=True), x] for k, x in rows], filters=False)
@@ -2665,7 +2665,11 @@ def self_test() -> int:
                   bool(yv) and abs(yv[1] - 100000 / 900000 * 100) < 1e-9
                   and next(c for c in ws[[i for i, r in enumerate(rows_of(ws), 1) if r[0] == "نسبة الإيراد إلى التقييم"][0]]
                            if c.column == 2).number_format == FMT_PCT_UNIT, yv)
-            check("C1: a reviewed metric shows «يحتاج تحقق — <reason>» in «ملخص» and «الحسابات»",
+            check("V1-7: amounts in workbook texts carry the dashboard suffix «ر.س», never «… ريال»",
+                  fmt_value_text(150000, "SAR") == "150,000 ر.س"
+                  and not any(isinstance(c.value, str) and re.search(r"\d ريال", c.value)
+                              for w in wb.worksheets for r in w.iter_rows() for c in r), fmt_value_text(150000, "SAR"))
+            check("C1: a reviewed metric shows «يحتاج إلى تحقق — <reason>» in «ملخص» and «الحسابات»",
                   bool(pr) and str(pr[3]).startswith(REVIEW_AR + " — رقم بديل")
                   and any(r[0] == "property_revenue" and str(r[5]).startswith(REVIEW_AR + " — ") for r in calc), pr)
             row = srow.get("تغير الإيراد")
@@ -2681,9 +2685,11 @@ def self_test() -> int:
                   "عمارة النخيل التجريبية" in str(next((r[0] for r in rows_of(ws) if str(r[0] or "").startswith("خلاصة")), ""))
                   and "نتائج المؤشرات" in blob, "")
             vline = srow.get("التحقق الآلي", [None, ""])[1]
-            check("BP-11 validation row lists the acknowledged warnings by their Arabic titles and the validation time",
+            check("BP-11 validation row lists the acknowledged warnings by their Arabic titles and the validation time "
+                  "(one Arabic date-time, no ISO run an RTL line reorders)",
                   "تنبيهات معلَّلة 2" in str(vline) and "الأخطاء المانعة" in str(vline) and "«قابلية مقارنة الفترات»" in str(vline)
-                  and "growth_comparability" not in str(vline) and "2026-01-02 10:20" in str(vline), vline)
+                  and "growth_comparability" not in str(vline) and "2 يناير 2026، الساعة 10:20" in str(vline)
+                  and "2026-01-02" not in str(vline), vline)
             sd = str(srow.get("تاريخ إعداد الدراسة", [None, ""])[1])
             check("board#17: a last-modified date reads «غير مذكور في الملف — آخر تعديل للملف المصدر: …»",
                   sd == "غير مذكور في الملف — آخر تعديل للملف المصدر: 2031-03-14", sd)

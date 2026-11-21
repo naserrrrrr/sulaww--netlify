@@ -141,11 +141,23 @@ def word_count_ar(text: str) -> int:
     return len([w for w in re.split(r"\s+", clean_text(text)) if re.search(r"[\w؀-ۿ]", w)])
 
 
+MONTHS_AR = ("يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر")
+
+
+def ar_stamp(x) -> str:
+    """«2031-11-12T08:49:10» → «12 نوفمبر 2031، الساعة 08:49» (a date alone → «12 نوفمبر 2031»; anything else → "").
+    The dashboard's fmtStamp writes the same: no ISO run whose date and time an RTL line would reorder."""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?", str(x or ""))
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return ""
+    return f"{int(m.group(3))} {MONTHS_AR[int(m.group(2)) - 1]} {m.group(1)}" + (f"، الساعة {m.group(4)}" if m.group(4) else "")
+
+
 # ---------------------------------------------------------------------------
 # Metric review flag (04 metrics[].review -> 05 metrics[id].review; data-contract.md §5)
 # ---------------------------------------------------------------------------
 REVIEW_STATUSES = ("needs_verification",)
-REVIEW_LABEL_AR = "يحتاج تحقق"
+REVIEW_LABEL_AR = "يحتاج إلى تحقق"
 REVIEW_MIN_WORDS, REVIEW_MAX_WORDS = 6, 25
 _ANY_DIGIT_RE = re.compile(r"[0-9٠-٩۰-۹]")
 

@@ -22,13 +22,14 @@
  *   lines within the first 1440×900 screen), mobile_overflow (360 and 390 px, default view and with the
  *   details and an asset detail open), growth_no_pct (an unconfirmed growth never shows a %), no_raw_keys (no engine
  *   keys in visible text outside <code>), bidi_refs («!» between an Arabic sheet name and its cell), print (executive
- *   sections visible on paper, yield cards keep scope/basis/valuation date, a metric under review keeps its «يحتاج تحقق»
- *   chip and reason, KPI/gap/action cards and plan items cannot split across pages (break-inside: avoid and shorter
- *   than a page), no forced page break, identity captions printed whole (no «…»), the confidentiality marking in the
+ *   sections visible on paper, yield cards keep scope/basis/valuation date, a metric under review keeps its «يحتاج إلى تحقق»
+ *   chip and reason, KPI/gap/action/chart cards and plan items cannot split across pages (break-inside: avoid and
+ *   shorter than a page), a chart's heading stays with its chart (its caption avoids a break after it and the element
+ *   printed before the card does not), no forced page break, identity captions printed whole (no «…»), the confidentiality marking in the
  *   header and the page footer, at most 8 A4 pages), mobile_table (≤ 600 px: asset rows as cards — value, revenue,
  *   yield and data status inside the screen, no horizontal scroll, no tall header band), priority_order (top actions
  *   in ascending priority, each numbered by its recommendation's priority), offline, console_errors.
- *   cards also hold the C1 review flag: a metric whose 04 spec (or 05 result) carries review shows «يحتاج تحقق» and
+ *   cards also hold the C1 review flag: a metric whose 04 spec (or 05 result) carries review shows «يحتاج إلى تحقق» and
  *   its reason, never a green «مكتمل» chip, in every filter and period state; table_detail compares the asset-table
  *   data-note chip with the detail panel's list (C3).
  * Playwright is loaded from the local project, NODE_PATH or the global npm root.
@@ -453,14 +454,14 @@ function compareCards(snap) {
         if (meta[k] && !norm(c.cardText).includes(norm(meta[k]))) problems.push(`${id}: البطاقة لا تعرض ${label} المحسوب «${short(meta[k], 80)}»`);
       }
     }
-    // C1: a metric whose spec carries review shows «يحتاج تحقق» and its reason, never the green «مكتمل» chip
+    // C1: a metric whose spec carries review shows «يحتاج إلى تحقق» and its reason, never the green «مكتمل» chip
     if (meta && meta.review) {
       const norm = (s) => String(s).replace(/\s+/g, ' ').trim();
-      if (!c.reviewChip) problems.push(`${id}: للمؤشر علامة تحقق (review) لكن البطاقة لا تعرض «يحتاج تحقق»`);
+      if (!c.reviewChip) problems.push(`${id}: للمؤشر علامة تحقق (review) لكن البطاقة لا تعرض «يحتاج إلى تحقق»`);
       if (c.okChip) problems.push(`${id}: للمؤشر علامة تحقق (review) لكن البطاقة تعرض حالة «مكتمل» الخضراء`);
       if (meta.review.reason && !norm(c.cardText).includes(norm(meta.review.reason))) problems.push(`${id}: سبب التحقق «${short(meta.review.reason, 60)}» غير ظاهر على البطاقة`);
     } else if (c.single && c.reviewChip) {
-      problems.push(`${id}: البطاقة تعرض «يحتاج تحقق» والمؤشر بلا علامة تحقق (review) في الإعدادات`);
+      problems.push(`${id}: البطاقة تعرض «يحتاج إلى تحقق» والمؤشر بلا علامة تحقق (review) في الإعدادات`);
     }
   }
   return problems;
@@ -1413,7 +1414,7 @@ async function main() {
             });
             return bad;
           })(),
-          // C1 on paper: a metric under review keeps its «يحتاج تحقق» chip and reason
+          // C1 on paper: a metric under review keeps its «يحتاج إلى تحقق» chip and reason
           review: (() => {
             const bad = [];
             const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
@@ -1433,7 +1434,7 @@ async function main() {
           // cards and plan items never split across pages: break-inside avoid and shorter than one page
           split: (() => {
             const bad = [];
-            const sel = '[data-role="kpi-card"], [data-role="top-gap"], [data-role="top-action"], .plan-item';
+            const sel = '[data-role="kpi-card"], [data-role="top-gap"], [data-role="top-action"], .plan-item, #chart-grid > [data-role="chart"]';
             let n = 0;
             document.querySelectorAll(sel).forEach((el) => {
               if (!shownOnPaper(el)) return;
@@ -1442,11 +1443,35 @@ async function main() {
               const avoid = /avoid/.test(cs.breakInside || '') || /avoid/.test(cs.pageBreakInside || '');
               const hgt = el.getBoundingClientRect().height;
               const name = (el.getAttribute('data-role') || el.className.split(' ')[0]) + ' ' +
-                (el.getAttribute('data-metric-id') || el.getAttribute('data-gap-id') || el.getAttribute('data-rec-id') || '');
+                (el.getAttribute('data-metric-id') || el.getAttribute('data-gap-id') || el.getAttribute('data-rec-id') || el.getAttribute('data-chart-id') || '');
               if (!avoid) bad.push(`${name.trim()}: قد ينقسم بين صفحتين (break-inside: ${cs.breakInside})`);
               else if (hgt > pageH) bad.push(`${name.trim()}: أطول من صفحة (${Math.round(hgt)} > ${pageH} بكسل) فينقسم حتمًا`);
             });
             return { n, bad };
+          })(),
+          // a chart card's heading stays with its chart (V1-6): the caption avoids a break after it, and the element printed
+          // just before the card (CSS order, then DOM order) does not avoid a break after it — with both the card's
+          // «break-inside: avoid» and that «break-after: avoid», the printer broke inside the card and left its heading
+          // alone at the foot of a page
+          chartHeads: (() => {
+            const bad = [];
+            const grid = document.getElementById('chart-grid');
+            if (!grid) return bad;
+            const kids = Array.prototype.filter.call(grid.children, shownOnPaper).map((el, i) => ({ el, i, o: parseInt(getComputedStyle(el).order, 10) || 0 }))
+              .sort((a, b) => (a.o - b.o) || (a.i - b.i)).map((x) => x.el);
+            kids.forEach((el, k) => {
+              if (el.getAttribute('data-role') !== 'chart') return;
+              const id = el.getAttribute('data-chart-id') || '?';
+              const cap = el.querySelector(':scope > figcaption');
+              if (cap && !/avoid/.test(getComputedStyle(cap).breakAfter || '') && !/avoid/.test(getComputedStyle(cap).pageBreakAfter || '')) {
+                bad.push(`${id}: عنوان الرسم بلا break-after: avoid فقد يبقى وحده أسفل الصفحة`);
+              }
+              const prev = kids[k - 1];
+              if (prev && /avoid/.test(getComputedStyle(prev).breakAfter || '')) {
+                bad.push(`${id}: العنصر المطبوع قبله (${prev.getAttribute('data-chart-id') || prev.getAttribute('data-role') || prev.className.split(' ')[0]}) يمنع الفاصل بعده، فينكسر الرسم ويبقى عنوانه وحده أسفل الصفحة`);
+              }
+            });
+            return bad;
           })(),
           // no forced page break in the executive view (a forced break left a page mostly empty)
           forced: (() => {
@@ -1491,6 +1516,7 @@ async function main() {
       if (ph.ratio.length) prob.push('بطاقة العائد على الورق: ' + ph.ratio.slice(0, 4).join('؛ '));
       if (ph.review.length) prob.push('علامة التحقق على الورق: ' + ph.review.slice(0, 4).join('؛ '));
       if (ph.split.bad.length) prob.push('بطاقات قد تنقسم بين صفحتين: ' + ph.split.bad.slice(0, 5).join('؛ '));
+      if (ph.chartHeads.length) prob.push('عناوين الرسوم على الورق: ' + ph.chartHeads.slice(0, 4).join('؛ '));
       if (ph.forced.length) prob.push('فواصل صفحات إجبارية في العرض التنفيذي (تترك صفحة شبه فارغة): ' + ph.forced.join('، '));
       if (ph.captions.length) prob.push('بيانات التعريف مقصوصة بـ«…» على الورق: ' + ph.captions.slice(0, 3).map((c) => '«' + c + '»').join('، '));
       if (ph.conf.on && !ph.conf.header) prob.push('علامة السرية غير ظاهرة في ترويسة الورق [data-role=confidentiality]');
@@ -1498,7 +1524,7 @@ async function main() {
       if (pages && pages > MAX_PRINT_PAGES) prob.push(`الطباعة ${nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة')} A4 والحد ${MAX_PRINT_PAGES} (dashboard-spec §8)؛ اختصر نصوص العرض التنفيذي`);
       add('print', prob.length === 0, prob.length ? prob.join('؛ ')
         : `عناصر [data-print=hide] (${ph.n}) مخفية عند الطباعة، وأقسام العرض التنفيذي (${PRINT_SECTIONS.length}) وبطاقاته (${ph.cards}) ظاهرة، ونطاق بطاقات العائد وأساسها وتاريخ تقييمها على الورق، ` +
-          `و${nAr(ph.split.n, 'بطاقة واحدة', 'بطاقتان', 'بطاقات وبنود', 'بطاقة وبندًا')} لا تنقسم بين صفحتين، ولا فواصل إجبارية، وبيانات التعريف كاملة` +
+          `و${nAr(ph.split.n, 'بطاقة واحدة', 'بطاقتان', 'بطاقات وبنود', 'بطاقة وبندًا')} لا تنقسم بين صفحتين، وعنوان كل رسم مع رسمه، ولا فواصل إجبارية، وبيانات التعريف كاملة` +
           (ph.conf.on ? '، وعلامة السرية في الترويسة وتذييل الصفحات' : '') +
           `، وأُنشئ screens/print.pdf (A4، ${pages ? nAr(pages, 'صفحة واحدة', 'صفحتان', 'صفحات', 'صفحة') + '، ' : ''}${Math.round(size / 1024)} ك.ب)`,
         { pages, split_checked: ph.split.n });

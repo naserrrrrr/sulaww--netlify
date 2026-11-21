@@ -16,6 +16,9 @@
 (P5) inspect_workbook never copies a link into the column samples of 01.
 (P6) the page's cell-reference test is linear: a long list of references that does not match («…، … (+5)») is
      rejected at once (one regular expression over the whole list backtracked exponentially and froze the page).
+(P7) the shareable page (--publish; browser, skipped with APA_SKIP_BROWSER=1): «جميع السجلات» says it lists the
+     records within the study scope (the isolated lines are summarised elsewhere), and a breakdown's 04 «note» prints
+     under its chart.
 Exit 0 = all pass, 1 = a failure.
 """
 import argparse
@@ -240,6 +243,58 @@ def p6_ref_regex(work):
           and res.get("match") is True and res.get("ms", 9999) < 1000, res)
 
 
+PUBLISH_PROBE = r"""
+import { createRequire } from 'module';
+import { execSync } from 'child_process';
+import path from 'path';
+let pw = null;
+for (const root of [process.cwd() + '/x.js', path.join(execSync('npm root -g', {encoding: 'utf8'}).trim(), 'x.js')]) {
+  try { pw = createRequire(root)('playwright'); break; } catch (e) { /* next */ }
+}
+if (!pw) { console.log(JSON.stringify({error: 'playwright'})); process.exit(0); }
+const b = await pw.chromium.launch();
+const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+const errors = [];
+p.on('pageerror', (e) => errors.push(String(e)));
+await p.goto('file://' + process.argv[2]);
+await p.waitForFunction(() => !!window.APA_UI);
+await p.waitForTimeout(300);
+const out = await p.evaluate(() => ({
+  hint: ((document.querySelector('#d-records summary .hint') || {}).textContent || ''),
+  notes: Array.from(document.querySelectorAll('[data-role="chart-footnote"]')).map((x) => x.textContent),
+}));
+out.errors = errors;
+console.log(JSON.stringify(out));
+await b.close();
+"""
+NOTE = "سجلان تجريبيان نوعهما في الملف يخالف اسميهما؛ أُبقيا كما وردا"
+
+
+def p7_publish_page(run_dir, work):
+    if os.environ.get("APA_SKIP_BROWSER") == "1" or not shutil.which("node"):
+        print("  SKIP  P7 (APA_SKIP_BROWSER=1 أو node غير مثبت)")
+        return
+    d = os.path.join(work, "p7")
+    copy_run(run_dir, d)
+    cfg = json.load(open(os.path.join(d, "04_metrics_config.json"), encoding="utf-8"))
+    for b in cfg.get("breakdowns") or []:
+        b["note"] = NOTE
+    json.dump(cfg, open(os.path.join(d, "04_metrics_config.json"), "w", encoding="utf-8"), ensure_ascii=False)
+    rc, out = run(PY + [os.path.join(S, "build_dashboard.py"), "--run-dir", d, "--publish"])
+    check("P7 build --publish with a breakdown note", rc == 0, out[-300:])
+    probe = os.path.join(work, "publish_probe.mjs")
+    open(probe, "w", encoding="utf-8").write(PUBLISH_PROBE)
+    p = subprocess.run(["node", probe, os.path.join(d, "dashboard.html")], capture_output=True, text=True, timeout=120)
+    try:
+        res = json.loads(p.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        res = {"error": (p.stdout + p.stderr)[-300:]}
+    check("P7 «جميع السجلات» on the shareable page: within the study scope, isolated lines summarised elsewhere",
+          not res.get("error") and not res.get("errors")
+          and res.get("hint") == "ضمن نطاق الدراسة (السطور المعزولة ملخصة في «المستبعدات والبيانات المعزولة»)", res)
+    check("P7 the breakdown note prints under its chart", NOTE in (res.get("notes") or []), res)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
@@ -255,6 +310,7 @@ def main():
     p4_assumption_kind(a.run, a.work)
     p5_inspect_links(a.work)
     p6_ref_regex(a.work)
+    p7_publish_page(a.run, a.work)
     print(f"\nناجح: {len(PASSES)} · فاشل: {len(FAILS)}")
     return 1 if FAILS else 0
 

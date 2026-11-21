@@ -105,6 +105,11 @@ def test_facts_statement():
         tr = bd.TokenRenderer({}, {}, "SAR", {}, f)
         check("build renders a pct fact as a percentage", tr.render("{{f:sources.V.rev.2025.stmt.max_share}}") == "80.0%",
               tr.render("{{f:sources.V.rev.2025.stmt.max_share}}"))
+        # V1-7: a total row's money value renders as money (one currency suffix, as the sum it is compared with)
+        check("excluded total row of a money field: unit SAR, rendered «350 ر.س» like the sum «500 ر.س»",
+              (f.get("excluded.V.r7.rev.2025.stmt") or {}).get("unit") == "SAR"
+              and tr.render("{{f:excluded.V.r7.rev.2025.stmt}} / {{f:sources.V.rev.2025.stmt.sum}}") == "350 ر.س / 500 ر.س",
+              (f.get("excluded.V.r7.rev.2025.stmt"), tr.render("{{f:excluded.V.r7.rev.2025.stmt}}")))
 
 
 def test_issue_wording():

@@ -17,7 +17,8 @@ Keys are stable, ASCII, dot-separated:
     issues.total | issues.high | issues.medium | issues.low
     anomalies.total | anomalies.high
     wb.<WB-id>.<evidence_key>             numeric evidence of a 01 anomaly (e.g. wb.WB-004.recomputed)
-    excluded.<source_id>.r<row>.<field>   numeric values kept on excluded total rows (when normalize stores them)
+    excluded.<source_id>.r<row>.<field>   numeric values kept on excluded total rows (when normalize stores them);
+                                          a money field (revenue/expense/valuation) has unit SAR and renders as money
     sources.<source_id>.<field>.sum | .n_known | .n_zero | .max | .max_share
                                           a revenue/expense field over EVERY record of a source (isolated included):
                                           to describe an isolated statement apart from the metrics (max_share is the
@@ -262,7 +263,9 @@ def compute_facts(run_dir: str) -> "OrderedDict[str, dict]":
             if isinstance(vals, dict):
                 for f, v in vals.items():
                     vv = v.get("v") if isinstance(v, dict) else v
-                    put(f"excluded.{e.get('source_id')}.r{e.get('row')}.{f}", vv, "number",
+                    # a money field (revenue/expense/valuation) renders as money, like the sums it is compared with:
+                    # «1,000 ر.س», never a bare number the narrative has to suffix by hand
+                    put(f"excluded.{e.get('source_id')}.r{e.get('row')}.{f}", vv, _unit_of(f, meta),
                         f"القيمة المسجلة في صف الإجمالي المستبعد {e.get('sheet')}!{e.get('row')} للحقل {f}",
                         f"03_records.json:excluded_rows[{e.get('source_id')}:{e.get('row')}].values.{f}")
     issues = [i for i in (rec.get("issues") or []) if isinstance(i, dict)]

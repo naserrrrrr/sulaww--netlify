@@ -99,7 +99,9 @@
           "impact": {"$ref": "#/$defs/text"},
           "treatment": {"$ref": "#/$defs/text"},
           "severity": {"$ref": "#/$defs/severity"},
-          "record_ids": {"type": "array", "items": {"type": "string"}}
+          "record_ids": {"type": "array", "items": {"type": "string"}},
+          "field": {"description": "Field id of the named records that the note is about (e.g. area.land); the asset panel marks that field's row", "type": "string", "minLength": 1},
+          "field_note": {"description": "Short Arabic marker shown beside that field in the asset panel (e.g. «يتعارض مع الوصف»)", "type": "string", "minLength": 1}
         }
       }
     },

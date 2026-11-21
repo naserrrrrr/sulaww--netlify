@@ -9,7 +9,7 @@ Build (no browser):
     the Arabic web font is embedded base64 in @font-face; the printed next-step hint names check_dashboard.mjs by an
     absolute, quoted path; per-record facts (rec.*) are embedded only when the narrative cites them.
 Page (Playwright; skipped with --skip-browser or APA_SKIP_BROWSER=1):
-  - C1: a metric spec with review shows the amber «يحتاج تحقق» chip and its reason, never the green «مكتمل» chip,
+  - C1: a metric spec with review shows the amber «يحتاج إلى تحقق» chip and its reason, never the green «مكتمل» chip,
     under every period; the calculations log names it too.
   - C3: the asset-table data-note chip counts the same list as the detail panel (03 issues on the record, issues naming
     it, 06 data_issues_extra naming it, a 01 anomaly attached to it).
@@ -20,11 +20,16 @@ Page (Playwright; skipped with --skip-browser or APA_SKIP_BROWSER=1):
   - consecutive exclusions sharing one reason are grouped under one reason line; every row stays.
   - ≤ 600 px: asset rows are cards (value, revenue, yield and status inside the screen), no header band.
   - print: identity captions print whole (no «…»), confidentiality in the header and the page footer.
+  - asset panel: a data note naming a field (06 data_issues_extra field + field_note) marks that field's row; a gap
+    cited through a group scope reads «ضمن نطاق الفجوة: «…» في «…»» with the «يحتاج إلى تحقق» badge (no «عبر نطاق
+    مجموعة», no short «يحتاج تحقق»); the footer names what it withholds and keeps as written, with one Arabic
+    timestamp («1 مايو 2031، الساعة …»), as does the validation line of the methodology.
   - check_dashboard.mjs passes on the run (cards/review, print, mobile_table, priority_order, table_detail …).
 """
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +45,7 @@ FAILS, PASSES = [], []
 REVIEW_REASON = "إيراد السنة الأخيرة غير محسوم لوجود رقم بديل في بيان تجريبي آخر"
 SHARED_REASON = "ورقة تجريبية مخفية لم يتحقق انتماء بنودها إلى المحفظة فلا تدخل أي مؤشر"
 MODIFIED = "2031-03-14"
+FIELD_NOTE = "يتعارض مع وصف تجريبي"
 
 
 def check(name, cond, info=""):
@@ -124,13 +130,18 @@ def narrative():
         "contract_version": "1.0",
         "executive_summary": "خلاصة تجريبية قصيرة لأصل واحد ضمن النطاق.",
         "gaps": [{"id": "G1", "title": "فجوة تجريبية", "scope": "T-1", "severity": "medium", "is_proven_problem": False,
-                  "evidence": [{"ref": "m:recorded_value", "kind": "derived"}], "impact": {"text": "أثر تجريبي"}}],
+                  "evidence": [{"ref": "m:recorded_value", "kind": "derived"}], "impact": {"text": "أثر تجريبي"}},
+                 # cited in the asset panel through its group scope (the asset's use is investment)
+                 {"id": "G2", "title": "فجوة تجريبية لمجموعة", "scope": "group:use=investment", "severity": "low",
+                  "is_proven_problem": False, "evidence": [{"ref": "m:recorded_value", "kind": "derived"}],
+                  "impact": {"text": "أثر تجريبي للمجموعة"}}],
         # the narrative lists R1 (priority 2) before R2 (priority 1): the page must follow the priority (C4)
         "recommendations": [rec("R1", 2, "توصية تجريبية ثانية في الأولوية"), rec("R2", 1, "توصية تجريبية أولى في الأولوية")],
         "top_gaps": ["G1"], "top_actions": ["R1", "R2"],
         "plan": {"d30": [{"action": "بند خطة تجريبي", "owner_role": "مدير تجريبي", "rec_id": "R2"}],
                  "d60": [{"action": "بند خطة تجريبي ثان", "owner_role": "مدير تجريبي", "rec_id": "R1"}], "d90": []},
         "data_issues_extra": [{"id": "DQ-X9", "where": "سجل تجريبي!B3", "record_ids": ["T-1"],
+                               "field": "rev.2030.demo", "field_note": FIELD_NOTE,
                                "detail": "ملاحظة محلل تجريبية على السجل", "impact": "أثر", "treatment": "معالجة"}]}
 
 
@@ -196,6 +207,12 @@ Object.assign(out, await p.evaluate(() => {
 await p.click('tr[data-role="asset-row"]');
 await p.waitForTimeout(150);
 out.panel = await p.evaluate(() => { const s = document.querySelector('[data-role="record-issues"]'); return s ? [s.getAttribute('data-count'), s.innerText] : null; });
+out.panelMore = await p.evaluate(() => ({
+  fieldRows: Array.from(document.querySelectorAll('#detail-body tr[data-field-issue]')).map((r) => [r.getAttribute('data-field-issue'), r.cells[0].innerText.replace(/\s+/g, ' ')]),
+  gaps: Array.from(document.querySelectorAll('#detail-body [data-role="panel-gap"]')).map((g) => [g.getAttribute('data-how'), g.innerText.replace(/\s+/g, ' ')]),
+  footer: ((document.querySelector('[data-role="footer-note"]') || {}).innerText || '').replace(/\s+/g, ' '),
+  method: ((document.querySelector('#d-methodology') || {}).textContent || '').replace(/\s+/g, ' '),
+}));
 // print media at the A4 content width
 await p.emulateMedia({ media: 'print' });
 await p.setViewportSize({ width: 703, height: 1013 });
@@ -322,6 +339,23 @@ def main():
     metas = " | ".join(dom.get("meta") or [])
     check("study date reads «غير مذكور في الملف» with the last-modified date as context",
           "تاريخ إعداد الدراسة غير مذكور في الملف" in metas and f"آخر تعديل للملف المصدر: {MODIFIED}" in metas, metas)
+    pm = dom.get("panelMore") or {}
+    rows = pm.get("fieldRows") or []
+    check("panel: the field named by a data note is marked on its row («<field_note> — DQ-X9»)",
+          len(rows) == 1 and rows[0][0] == "DQ-X9" and f"{FIELD_NOTE} — DQ-X9" in rows[0][1] and "إيراد تجريبي 2030" in rows[0][1], rows)
+    gaps = dict(pm.get("gaps") or [])
+    gtxt = " | ".join(t for _h, t in pm.get("gaps") or [])
+    check("panel: a group-scoped gap reads its scope in board words with the «يحتاج إلى تحقق» badge",
+          "ضمن نطاق الفجوة: «استثماري» في «الاستخدام»" in gaps.get("group", "") and "يحتاج إلى تحقق" in gaps.get("group", "")
+          and "يحتاج إلى تحقق" in gaps.get("direct", "") and "عبر نطاق مجموعة" not in gtxt
+          and not re.search(r"يحتاج تحقق(?!ًا)", gtxt), pm.get("gaps"))
+    foot = pm.get("footer") or ""
+    stamp = r"\d{1,2} (?:يناير|فبراير|مارس|أبريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر) \d{4}، الساعة \d{2}:\d{2}"
+    check("footer: no contact data or supervisor names; property names as written may hold founders' names; Arabic timestamp",
+          "أسماء مشرفين" in foot and "وأسماء العقارات كما وردت في الملف وقد تتضمن أسماء واقفين" in foot
+          and "أسماء أشخاص" not in foot and re.search(stamp, foot) and not re.search(r"\d{4}-\d{2}-\d{2}", foot), foot)
+    check("methodology: validation time in the same Arabic form («في 1 مايو 2031، الساعة 10:00»)",
+          "في 1 مايو 2031، الساعة 10:00" in (pm.get("method") or ""), (pm.get("method") or "")[-300:])
     pr = dom.get("print") or {}
     check("print: identity captions whole (no «…»)", pr.get("captions") and not any("…" in c for c in pr["captions"]), pr.get("captions"))
     check("print: no placeholder panel on paper, the sentence and trend print", pr.get("shownCharts") == ["asset-panels", "revenue-trend"], pr.get("shownCharts"))
@@ -340,6 +374,21 @@ def main():
     check("new checks ran: mobile_table, priority_order", {"mobile_table", "priority_order"} <= set(names), sorted(names))
     pages = ((names.get("print") or {}).get("data") or {}).get("pages")
     check("print within 8 A4 pages", isinstance(pages, int) and pages <= 8, pages)
+    # V1-6: an element printed just before a chart that avoids a break after it strands the chart's heading at the foot
+    # of a page; the print check reports it (the same page with one such rule injected)
+    neg = os.path.join(work, "print_neg")
+    shutil.rmtree(neg, ignore_errors=True)
+    os.makedirs(neg)
+    bad_css = ('<style>@media print { #chart-grid > [data-chart-id="asset-panels"] '
+               '{ break-after: avoid !important; page-break-after: avoid !important; } }</style></head>')
+    with open(os.path.join(neg, "dashboard.html"), "w", encoding="utf-8") as fh:
+        fh.write(html.replace("</head>", bad_css, 1))
+    rc, log = run(["node", os.path.join(S, "check_dashboard.mjs"), "--html", os.path.join(neg, "dashboard.html"), "--out", neg])
+    nrep = load(os.path.join(neg, "08_dashboard_check.json")) if os.path.isfile(os.path.join(neg, "08_dashboard_check.json")) else {}
+    npr = next((c for c in nrep.get("checks") or [] if c.get("name") == "print"), {})
+    check("print check: a «break-after: avoid» before a chart card is reported (the heading would be stranded)",
+          rc != 0 and npr.get("passed") is False and "عناوين الرسوم على الورق" in str(npr.get("detail") or npr.get("message") or npr)
+          and "revenue-trend" in str(npr), str(npr)[:600])
     return finish()
 
 

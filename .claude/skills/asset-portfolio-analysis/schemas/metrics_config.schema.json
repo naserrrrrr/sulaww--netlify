@@ -192,7 +192,7 @@
       ]
     },
     "review": {
-      "description": "Analyst flag on a metric whose input is disputed by another source in the file, or whose value looks complete while it covers only part of the portfolio. Copied unchanged into the metric's result in 05 (every period and filter); the dashboard shows «يحتاج تحقق» with the reason, the workbook «يحتاج تحقق — <reason>». validate_analysis.py (metric_review, blocking) also requires a reason of 6–25 words without digits.",
+      "description": "Analyst flag on a metric whose input is disputed by another source in the file, or whose value looks complete while it covers only part of the portfolio. Copied unchanged into the metric's result in 05 (every period and filter); the dashboard shows «يحتاج إلى تحقق» with the reason, the workbook «يحتاج إلى تحقق — <reason>». validate_analysis.py (metric_review, blocking) also requires a reason of 6–25 words without digits.",
       "type": "object",
       "required": ["status", "reason"],
       "properties": {
@@ -220,6 +220,7 @@
         "source_text": {"type": ["string", "null"]},
         "unavailable_reason": {"type": ["string", "null"]},
         "empty_text": {"type": ["string", "null"]},
+        "note": {"description": "Arabic footnote printed under the breakdown chart: a data caveat on its categories (e.g. records whose type conflicts with their name)", "type": ["string", "null"]},
         "text_by_period": {"type": "object", "additionalProperties": {"$ref": "#/$defs/texts"}}
       }
     }

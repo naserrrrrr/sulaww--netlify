@@ -119,7 +119,7 @@ CHECK_TITLES = OrderedDict([
     ("plan_links", "ارتباط بنود خطة 30/60/90 بتوصيات موجودة"),
     ("top_lists", "أهم ثلاث فجوات وثلاثة إجراءات موجودة"),
     ("top_actions_priority", "أولويات التوصيات فريدة وأهم الإجراءات مرتبة تصاعديًا بالأولوية"),
-    ("metric_review", "صحة علامة «يحتاج تحقق» على المؤشرات (review)"),
+    ("metric_review", "صحة علامة «يحتاج إلى تحقق» على المؤشرات (review)"),
     ("scenarios", "سلامة السيناريوهات (مصادر الافتراضات وعدم الازدواج)"),
     ("pii_text_patterns", "خلو السرد والسجلات من أرقام جوال أو بريد"),
     ("pii_keys", "خلو analysis.json من حقول بيانات شخصية"),
@@ -1097,7 +1097,7 @@ def c_metric_review(ctx: Ctx):
             continue
         want = m.get("review") if isinstance(m.get("review"), dict) else None
         if res.get("review") != want:
-            out.append((f"المؤشر {mid}: علامة «يحتاج تحقق» في 05 لا تطابق 04 (review)؛ أعد تشغيل compute_metrics.py",
+            out.append((f"المؤشر {mid}: علامة «يحتاج إلى تحقق» في 05 لا تطابق 04 (review)؛ أعد تشغيل compute_metrics.py",
                         f"05_metrics.json:{mid}.review"))
     return out
 

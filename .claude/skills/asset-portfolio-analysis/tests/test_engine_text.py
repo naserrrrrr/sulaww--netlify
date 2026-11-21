@@ -211,7 +211,7 @@ def demo_config(review=None):
 
 
 def test_review_flag():
-    print("[C1] علامة «يحتاج تحقق» على المؤشر")
+    print("[C1] علامة «يحتاج إلى تحقق» على المؤشر")
     recs = demo_records()
     schema = os.path.join(SKILL, "schemas", "metrics_config.schema.json")
     check("schema accepts a review object", not cm.schema_errors(demo_config(REVIEW), schema),

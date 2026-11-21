@@ -103,7 +103,7 @@ if have_script "$S/compute_metrics.py" "compute_metrics --init-config" && have_f
     --records "$RUN/03_records.json" --out "$RUN/04_metrics_config.json" || true
 fi
 if [[ -f "$RUN/04_metrics_config.json" ]]; then
-  # C1: the analyst's «يحتاج تحقق» flag on one metric (fictional reason) — carried into 05, the card and the workbook
+  # C1: the analyst's «يحتاج إلى تحقق» flag on one metric (fictional reason) — carried into 05, the card and the workbook
   "${PY[@]}" - "$RUN/04_metrics_config.json" <<'PYEOF'
 import json, sys
 c = json.load(open(sys.argv[1], encoding="utf-8"))
