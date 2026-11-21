@@ -3108,7 +3108,7 @@ footer.foot { color: var(--muted); font-size: 12.5px; padding: 24px 0 40px; bord
         { label: 'عدد السطور', num: true, cell: function (x) { return String(x.count); } },
         { label: 'السبب', cell: function (x) { return str(x.reason || '—'); } }
       ], list(wh.records), 'withheld-table'));
-      if (wh.n_issues) add(b, h('p', { class: 'small muted' }, nNoun(wh.n_issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات') + ' تخص هذه السطور وحدها في المرفق الداعم.'));
+      if (wh.n_issues) add(b, h('p', { class: 'small muted' }, 'وتخص هذه السطور وحدها ' + nNoun(wh.n_issues, 'ملاحظة بيانات واحدة', 'ملاحظتا بيانات', 'ملاحظات بيانات', 'ملاحظة بيانات') + ' موثقة في المرفق الداعم.'));
     }
     if (!out.length && !(wh && wh.n_records)) add(b, h('p', { class: 'muted' }, 'كل السجلات ضمن نطاق الدراسة.'));
     else if (out.length) add(b, groupedReasonTable(out));
